@@ -80,6 +80,7 @@ struct IlanVoiceApp: App {
                 NSApp.windows.first { $0.identifier?.rawValue == "main" }?.makeKeyAndOrderFront(nil)
             }
             Button("Play Next Unheard Reply") { model.session.playNextUnheard() }
+            SettingsLink { Text("Settings…") }
             Divider()
             Button("Quit") { NSApp.terminate(nil) }.keyboardShortcut("q")
         } label: {

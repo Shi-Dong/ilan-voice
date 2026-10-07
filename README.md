@@ -10,6 +10,8 @@ A native macOS voice assistant built on OpenAI's **GPT-Realtime** (`gpt-realtime
 
 Apple Silicon only. Requires macOS 14 or later.
 
+Conversations name themselves: after every reply, a small text model (GPT-6 Luna by default; change it under Settings → General → Title model) reads the 10 latest messages and picks a title of at most 30 characters. Renaming a conversation yourself turns this off for that conversation.
+
 ## Two ways to hear replies
 
 | Mode | What happens |
@@ -32,7 +34,7 @@ open "/Applications/Ilan Voice.app"
 
 On first launch:
 
-1. Open **Settings (⌘,) → General** and paste your OpenAI API key. It is stored in the macOS login Keychain.
+1. Open **Settings (⌘, or the gear button at the top right of the window) → General** and paste your OpenAI API key. It is stored in the macOS login Keychain.
 2. Allow microphone access when macOS asks.
 3. Click **Allow Accessibility** at the bottom of the window. Without it, the talk key only works while Ilan Voice is the active app. The app is signed ad hoc (no developer certificate), so after each rebuild you have to remove and re-add it under Privacy & Security → Accessibility.
 
@@ -68,7 +70,7 @@ Conversations/<id>/
 
 Both remote servers (Streamable HTTP) and local servers (stdio) are supported. Each tool is shown to the model as `<server>__<tool>`.
 
-Settings → General also covers the model, voice, reasoning effort, transcription model, talk key, and output mode.
+Settings → General also covers the model, the voice (accent: American or British; gender: female or male), reasoning effort, transcription model, talk key, and output mode.
 
 ## How it works
 

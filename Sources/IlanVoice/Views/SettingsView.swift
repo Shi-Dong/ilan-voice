@@ -36,13 +36,20 @@ private struct GeneralSettings: View {
                         .buttonStyle(.borderless)
                 }
                 TextField("Realtime model", text: $settings.model)
-                Picker("Voice", selection: $settings.voice) {
-                    ForEach(AppSettings.voices, id: \.self) { Text($0.capitalized).tag($0) }
+                Picker("Accent", selection: $settings.accent) {
+                    ForEach(Accent.allCases) { Text($0.label).tag($0) }
                 }
+                .pickerStyle(.segmented)
+                Picker("Voice", selection: $settings.voiceGender) {
+                    ForEach(VoiceGender.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
                 Picker("Reasoning effort", selection: $settings.reasoningEffort) {
                     ForEach(AppSettings.reasoningEfforts, id: \.self) { Text($0.capitalized).tag($0) }
                 }
                 TextField("Transcription model", text: $settings.transcriptionModel)
+                TextField("Title model", text: $settings.titleModel)
+                    .help("Names each conversation (30 characters max) from its 10 latest messages after every reply.")
             }
             Section("Talking") {
                 TalkTriggerRecorder(ptt: ptt)

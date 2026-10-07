@@ -117,6 +117,7 @@ final class VoiceSession: ObservableObject {
         var instructions = Paths.loadAgent()
         let now = DateFormatter.localizedString(from: Date(), dateStyle: .full, timeStyle: .short)
         instructions += "\n\n---\nCurrent local time: \(now).\n"
+        if let accent = settings.accent.instruction { instructions += accent + "\n" }
         if let conv = store.conversations.first(where: { $0.id == conversationID }) {
             let history = conv.messages.filter { $0.role != .tool && !$0.text.isEmpty }.suffix(40)
             if !history.isEmpty {
@@ -300,6 +301,7 @@ final class VoiceSession: ObservableObject {
                   item["type"] as? String == "message" else { return }
             saveReplyAudio(convID, itemID)
             store.updateMessage(convID, itemID) { $0.pending = false }
+            retitle(convID)
 
         case "response.done":
             responseActive = false
@@ -326,6 +328,24 @@ final class VoiceSession: ObservableObject {
 
         default:
             break
+        }
+    }
+
+    /// After each finished, transcribed reply, ask the title model for a fresh
+    /// name. Only the newest request per conversation may apply its result.
+    private var titleRequests: [UUID: Int] = [:]
+
+    private func retitle(_ convID: UUID) {
+        guard let conv = store.conversations.first(where: { $0.id == convID }), conv.titleLocked != true else { return }
+        let ticket = (titleRequests[convID] ?? 0) + 1
+        titleRequests[convID] = ticket
+        let messages = conv.messages
+        let key = settings.apiKey
+        let model = settings.titleModel
+        Task {
+            guard let title = await ConversationTitler.title(for: messages, apiKey: key, model: model),
+                  titleRequests[convID] == ticket else { return }
+            store.setAutoTitle(convID, title)
         }
     }
 
