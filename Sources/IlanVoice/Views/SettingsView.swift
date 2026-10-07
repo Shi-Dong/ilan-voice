@@ -5,7 +5,7 @@ struct SettingsView: View {
     @ObservedObject var updater: Updater
     @ObservedObject var ptt: PushToTalk
 
-    enum Tab: Hashable { case general, agent, mcp, shell, dictionary }
+    enum Tab: Hashable { case general, agent, mcp, shell, webSearch, dictionary }
 
     /// Settings always opens on General. The window is kept alive between
     /// openings, so the tab is reset whenever it appears and disappears;
@@ -18,6 +18,7 @@ struct SettingsView: View {
             AgentSettings().tabItem { Label("Agent", systemImage: "person.text.rectangle") }.tag(Tab.agent)
             MCPSettings(mcp: mcp).tabItem { Label("MCP Tools", systemImage: "wrench.and.screwdriver") }.tag(Tab.mcp)
             ShellSettings().tabItem { Label("Shell", systemImage: "terminal") }.tag(Tab.shell)
+            WebSearchSettings().tabItem { Label("Web Search", systemImage: "globe") }.tag(Tab.webSearch)
             DictionarySettings().tabItem { Label("Dictionary", systemImage: "character.book.closed") }.tag(Tab.dictionary)
         }
         .onAppear { tab = .general }
@@ -352,5 +353,48 @@ private struct DictionarySettings: View {
             }
         }
         .padding(20)
+    }
+}
+
+/// The built-in web_search tool: provider, key and model.
+private struct WebSearchSettings: View {
+    @ObservedObject var settings = AppSettings.shared
+    @Local private var reveal = false
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Let Ilan search the web", isOn: $settings.webSearchEnabled)
+                Text(status).font(.caption).foregroundStyle(settings.webSearchAvailable ? Theme.mint : Theme.orange)
+            }
+            Section("Provider") {
+                Picker("Search with", selection: $settings.webSearchProvider) {
+                    ForEach(WebSearchProvider.allCases) { Text($0.label).tag($0) }
+                }
+                HStack {
+                    if reveal {
+                        TextField("Gemini API key", text: $settings.geminiAPIKey)
+                    } else {
+                        SecureField("Gemini API key", text: $settings.geminiAPIKey)
+                    }
+                    Button { reveal.toggle() } label: { Image(systemName: reveal ? "eye.slash" : "eye") }
+                        .buttonStyle(.borderless)
+                }
+                TextField("Gemini model", text: $settings.geminiModel)
+                Link("Get a Gemini API key", destination: URL(string: "https://aistudio.google.com/apikey")!)
+                    .font(.caption)
+            }
+            .disabled(!settings.webSearchEnabled)
+            Section {
+                Text("When a question needs fresh or factual information, Ilan calls the web_search tool. Gemini answers it with Google Search and the answer, with its sources, appears in the transcript. The key is stored in your Keychain. Changes apply to the next conversation (or Reconnect).")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var status: String {
+        if !settings.webSearchEnabled { return "Off" }
+        return settings.webSearchAvailable ? "Ready: Ilan can search the web." : "Add a Gemini API key to turn web search on."
     }
 }
