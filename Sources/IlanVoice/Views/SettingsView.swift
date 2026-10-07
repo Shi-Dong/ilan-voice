@@ -68,7 +68,7 @@ private struct GeneralSettings: View {
                     Stepper("Timeout: \(settings.shellTimeout) s", value: $settings.shellTimeout, in: 5...600, step: 5)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text("Allowed commands (one prefix per line)")
+                            Text("Allowed commands (one per line: a prefix, or /regex/)")
                             Spacer()
                             Button("Reset to Read-only Defaults") { settings.shellAllowList = ShellTool.defaultAllowList }
                                 .buttonStyle(.link).font(.caption)
@@ -79,9 +79,14 @@ private struct GeneralSettings: View {
                             .scrollContentBackground(.hidden)
                             .padding(4)
                             .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+                        let invalid = ShellTool.invalidRegexEntries(settings.shellAllowListEntries)
+                        if !invalid.isEmpty {
+                            Label("Not a valid regex (ignored): \(invalid.joined(separator: "  "))", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption).foregroundStyle(Theme.orange)
+                        }
                     }
                 }
-                Text("Ilan never asks: commands on this list run straight away, anything else is refused and Ilan tells you what to add. Pipes, && and ; are fine when every part is allowed; writing to files (>), $( ), backticks and & are always refused. A prefix matches whole words, so \"ls\" does not allow \"lsof\". Output is sent to OpenAI as part of the conversation.")
+                Text("Ilan never asks: commands on this list run straight away, anything else is refused and Ilan tells you what to add. Pipes, && and ; are fine when every part is allowed; writing to files (>), $( ), backticks and & are always refused. A plain line is a prefix that matches whole words, so \"ls\" does not allow \"lsof\". A line wrapped in slashes is a regular expression that must match the whole command, e.g. /kubectl -n [a-z-]+ get .*/. The always-refused rules still apply to regex lines. Output is sent to OpenAI as part of the conversation.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Data") {

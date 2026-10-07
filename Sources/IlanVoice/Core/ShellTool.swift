@@ -64,6 +64,34 @@ enum ShellTool {
     private static let harmlessRedirects = ["2>&1", "1>&2", "&>/dev/null", "2>/dev/null", "1>/dev/null", ">/dev/null",
                                             "&> /dev/null", "2> /dev/null", "> /dev/null"]
 
+    /// An entry is either a command prefix (whole words: `git log` allows
+    /// `git log -3` but `ls` does not allow `lsof`) or, when wrapped in slashes,
+    /// a regular expression that must match the whole command part, e.g.
+    /// `/kubectl -n [a-z-]+ get .*/`.
+    static func matches(_ part: String, entry: String) -> Bool {
+        if let regex = regex(from: entry) {
+            return regex.firstMatch(in: part, range: NSRange(part.startIndex..., in: part)) != nil
+        }
+        return part == entry || part.hasPrefix(entry + " ")
+    }
+
+    static func isRegexEntry(_ entry: String) -> Bool {
+        entry.count >= 2 && entry.hasPrefix("/") && entry.hasSuffix("/")
+    }
+
+    /// The compiled pattern for a `/…/` entry, anchored to the whole part;
+    /// nil for prefix entries and for patterns that don't compile.
+    static func regex(from entry: String) -> NSRegularExpression? {
+        guard isRegexEntry(entry) else { return nil }
+        let pattern = String(entry.dropFirst().dropLast())
+        return try? NSRegularExpression(pattern: "^(?:\(pattern))$")
+    }
+
+    /// `/…/` entries that are not valid regular expressions (they match nothing).
+    static func invalidRegexEntries(_ allowList: [String]) -> [String] {
+        allowList.filter { isRegexEntry($0) && regex(from: $0) == nil }
+    }
+
     /// nil when every part of `command` is allowed; otherwise the reason it is refused.
     static func refusal(for command: String, allowList: [String]) -> String? {
         var cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -78,7 +106,7 @@ enum ShellTool {
         parts = parts.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         if parts.contains(where: { $0.contains("&") }) { return "it starts a background job (&)" }
         for part in parts {
-            guard allowList.contains(where: { part == $0 || part.hasPrefix($0 + " ") }) else {
+            guard allowList.contains(where: { matches(part, entry: $0) }) else {
                 return "`\(part.split(separator: " ").prefix(2).joined(separator: " "))` is not on the allow-list"
             }
             let words = Set(part.split(separator: " ").map(String.init))
