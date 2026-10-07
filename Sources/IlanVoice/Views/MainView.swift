@@ -168,7 +168,7 @@ struct ChatView: View {
     private var emptyState: some View {
         VStack(spacing: 14) {
             AppIcon(size: 88).shadow(color: Theme.mint.opacity(0.25), radius: 30)
-            Text("Hold \(settings.pushToTalkKey.shortLabel) and speak")
+            Text("Hold \(settings.talkTrigger.shortLabel) and speak")
                 .font(.system(size: 22, weight: .semibold, design: .rounded))
             Text("Let go to send. Ilan answers out loud\(settings.outputMode == .cached ? " — replies wait for you to press play" : "").")
                 .font(.system(size: 13)).foregroundStyle(Theme.textDim)
@@ -179,7 +179,7 @@ struct ChatView: View {
 
     private func footer(_ conv: Conversation?) -> some View {
         VStack(spacing: 8) {
-            if let err = session.errorMessage {
+            if let err = session.errorMessage, !(err == VoiceSession.missingKeyMessage && !settings.apiKey.isEmpty) {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.orange)
                     Text(err).font(.system(size: 12)).lineLimit(3)
@@ -192,7 +192,7 @@ struct ChatView: View {
             }
             if !ptt.trusted {
                 Button { ptt.requestAccessibility() } label: {
-                    Label("Allow Accessibility so \(settings.pushToTalkKey.shortLabel) works in every app", systemImage: "hand.raised.fill")
+                    Label("Allow Accessibility so \(settings.talkTrigger.shortLabel) works in every app", systemImage: "hand.raised.fill")
                         .font(.system(size: 11.5))
                 }
                 .buttonStyle(.plain).foregroundStyle(Theme.textDim)
@@ -226,8 +226,8 @@ struct ChatView: View {
     private var hint: String {
         switch session.phase {
         case .recording: "Listening — release to send"
-        case .speaking: "Hold \(settings.pushToTalkKey.shortLabel) to interrupt"
-        default: "Hold \(settings.pushToTalkKey.shortLabel) or the button to talk"
+        case .speaking: "Hold \(settings.talkTrigger.shortLabel) to interrupt"
+        default: "Hold \(settings.talkTrigger.shortLabel) or the button to talk"
         }
     }
 }

@@ -3,10 +3,11 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var mcp: MCPManager
     @ObservedObject var updater: Updater
+    @ObservedObject var ptt: PushToTalk
 
     var body: some View {
         TabView {
-            GeneralSettings(updater: updater).tabItem { Label("General", systemImage: "gearshape") }
+            GeneralSettings(updater: updater, ptt: ptt).tabItem { Label("General", systemImage: "gearshape") }
             AgentSettings().tabItem { Label("Agent", systemImage: "person.text.rectangle") }
             MCPSettings(mcp: mcp).tabItem { Label("MCP Tools", systemImage: "wrench.and.screwdriver") }
         }
@@ -18,6 +19,7 @@ struct SettingsView: View {
 
 private struct GeneralSettings: View {
     @ObservedObject var updater: Updater
+    @ObservedObject var ptt: PushToTalk
     @ObservedObject var settings = AppSettings.shared
     @Local private var reveal = false
 
@@ -43,18 +45,7 @@ private struct GeneralSettings: View {
                 TextField("Transcription model", text: $settings.transcriptionModel)
             }
             Section("Talking") {
-                Picker("Hold to talk", selection: $settings.pushToTalkKey) {
-                    Section("Keyboard") {
-                        ForEach(PushToTalkKey.allCases.filter { $0.mouseButton == nil }) { Text($0.label).tag($0) }
-                    }
-                    Section("Mouse") {
-                        ForEach(PushToTalkKey.allCases.filter { $0.mouseButton != nil }) { Text($0.label).tag($0) }
-                    }
-                }
-                if settings.pushToTalkKey.mouseButton != nil {
-                    Text("While Ilan Voice is running, this button only talks to Ilan and no longer does its usual job (e.g. Back in a browser). Left and right clicks are never used.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                TalkTriggerRecorder(ptt: ptt)
                 Picker("Replies", selection: $settings.outputMode) {
                     ForEach(OutputMode.allCases) { Text($0.label).tag($0) }
                 }
@@ -208,6 +199,46 @@ private struct UpdatesSection: View {
                 Button("Show Log") { NSWorkspace.shared.activateFileViewerSelecting([Updater.logFile]) }
                     .buttonStyle(.link).font(.caption)
             }
+        }
+    }
+}
+
+/// Click "Change", then press the key or mouse button you want to hold.
+private struct TalkTriggerRecorder: View {
+    @ObservedObject var ptt: PushToTalk
+    @ObservedObject var settings = AppSettings.shared
+
+    var body: some View {
+        LabeledContent("Hold to talk") {
+            HStack(spacing: 10) {
+                Text(ptt.isRecording ? "Press a key or mouse button…" : settings.talkTrigger.name)
+                    .font(.system(size: 12.5, weight: .semibold, design: ptt.isRecording ? .default : .rounded))
+                    .foregroundStyle(ptt.isRecording ? Theme.orange : .primary)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .frame(minWidth: 150)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.08)))
+                    .overlay(RoundedRectangle(cornerRadius: 7)
+                        .stroke(ptt.isRecording ? Theme.orange : Color.white.opacity(0.18), lineWidth: 1))
+                if ptt.isRecording {
+                    Button("Cancel") { ptt.cancelRecording() }
+                } else {
+                    Button("Change…") { ptt.beginRecording() }
+                }
+            }
+        }
+        .onDisappear { ptt.cancelRecording() }
+        Text(note)
+            .font(.caption).foregroundStyle(.secondary)
+    }
+
+    private var note: String {
+        if ptt.isRecording {
+            return "Press any key (a modifier like right ⌥ on its own works too) or a mouse button other than left/right. Esc cancels."
+        }
+        switch settings.talkTrigger.kind {
+        case .modifier: return "Hold it anywhere to talk, let go to send. Allow Accessibility so it works in every app."
+        case .key: return "While Ilan Voice runs, this key only talks to Ilan and no longer types. Keys you rarely use, like F13–F19, work best."
+        case .mouse: return "While Ilan Voice runs, this button only talks to Ilan and no longer does its usual job (e.g. Back in a browser)."
         }
     }
 }

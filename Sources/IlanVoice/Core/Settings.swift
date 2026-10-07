@@ -14,70 +14,6 @@ enum OutputMode: String, CaseIterable, Identifiable {
     var symbol: String { self == .realtime ? "speaker.wave.2.fill" : "tray.full.fill" }
 }
 
-/// What is held down to talk: a modifier key (these never type anything into
-/// the frontmost app) or an extra mouse button (the click is swallowed, so a
-/// side button does not also go "Back" in your browser).
-enum PushToTalkKey: String, CaseIterable, Identifiable {
-    case rightOption, rightCommand, rightControl, function
-    case middleMouse, mouseBack, mouseForward
-
-    var id: String { rawValue }
-
-    /// The CGEvent / NSEvent button number, for mouse buttons.
-    var mouseButton: Int? {
-        switch self {
-        case .middleMouse: 2
-        case .mouseBack: 3
-        case .mouseForward: 4
-        default: nil
-        }
-    }
-
-    var keyCode: UInt16? {
-        switch self {
-        case .rightOption: 61
-        case .rightCommand: 54
-        case .rightControl: 62
-        case .function: 63
-        default: nil
-        }
-    }
-
-    var flag: NSEvent.ModifierFlags {
-        switch self {
-        case .rightOption: .option
-        case .rightCommand: .command
-        case .rightControl: .control
-        case .function: .function
-        default: []
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .rightOption: "Right ⌥ Option"
-        case .rightCommand: "Right ⌘ Command"
-        case .rightControl: "Right ⌃ Control"
-        case .function: "fn / 🌐"
-        case .middleMouse: "Middle mouse button (wheel click)"
-        case .mouseBack: "Mouse side button: Back (button 4)"
-        case .mouseForward: "Mouse side button: Forward (button 5)"
-        }
-    }
-
-    var shortLabel: String {
-        switch self {
-        case .rightOption: "right ⌥"
-        case .rightCommand: "right ⌘"
-        case .rightControl: "right ⌃"
-        case .function: "fn"
-        case .middleMouse: "the middle mouse button"
-        case .mouseBack: "the mouse Back button"
-        case .mouseForward: "the mouse Forward button"
-        }
-    }
-}
-
 /// User preferences. Everything but the API key lives in UserDefaults; the
 /// key lives in the login Keychain.
 final class AppSettings: ObservableObject {
@@ -93,7 +29,7 @@ final class AppSettings: ObservableObject {
     @Published var transcriptionModel: String { didSet { defaults.set(transcriptionModel, forKey: "transcriptionModel") } }
     @Published var reasoningEffort: String { didSet { defaults.set(reasoningEffort, forKey: "reasoningEffort") } }
     @Published var outputMode: OutputMode { didSet { defaults.set(outputMode.rawValue, forKey: "outputMode") } }
-    @Published var pushToTalkKey: PushToTalkKey { didSet { defaults.set(pushToTalkKey.rawValue, forKey: "pushToTalkKey") } }
+    @Published var talkTrigger: TalkTrigger { didSet { defaults.set(try? JSONEncoder().encode(talkTrigger), forKey: "talkTrigger") } }
 
     private init() {
         apiKey = Keychain.load() ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
@@ -102,7 +38,8 @@ final class AppSettings: ObservableObject {
         transcriptionModel = defaults.string(forKey: "transcriptionModel") ?? "gpt-transcribe"
         reasoningEffort = defaults.string(forKey: "reasoningEffort") ?? "default"
         outputMode = OutputMode(rawValue: defaults.string(forKey: "outputMode") ?? "") ?? .realtime
-        pushToTalkKey = PushToTalkKey(rawValue: defaults.string(forKey: "pushToTalkKey") ?? "") ?? .rightOption
+        talkTrigger = defaults.data(forKey: "talkTrigger").flatMap { try? JSONDecoder().decode(TalkTrigger.self, from: $0) }
+            ?? TalkTrigger.migrating(defaults.string(forKey: "pushToTalkKey"))
     }
 
     /// Fields that only take effect on a fresh Realtime session.
