@@ -24,7 +24,32 @@ enum Accent: String, CaseIterable, Identifiable {
     var instruction: String? {
         switch self {
         case .american: nil
-        case .british: "Always speak English with a natural British (Southern English, RP) accent, and use British spelling and vocabulary."
+        // Structured the way OpenAI's Realtime prompting guide recommends for
+        // accent control: name the accent, the features to hold stable, the
+        // prosody, and that it must not change the response language.
+        case .british: """
+            # Accent (highest priority, applies to every word you say)
+
+            Speak English with a clear, natural British accent: modern Southern \
+            English Received Pronunciation, like a BBC Radio 4 presenter. Never \
+            use an American accent.
+
+            - Keep the accent stable from the first word to the last, in every \
+              reply, including short ones and tool-call preambles.
+            - Non-rhotic: do not pronounce an "r" after a vowel unless a vowel \
+              follows ("car" = "cah", "water" = "waw-tuh").
+            - Use the long "ah" in bath, can't, half, after, ask, dance.
+            - Pronounce "t" crisply between vowels ("better", "water"); never \
+              flap it into a "d".
+            - Use British vowels: "go" and "no" with a rounded, fronted "oh"; \
+              "hot" and "lot" with a short, rounded "o".
+            - British stress and words: "schedule" as "shed-yool", \
+              "advertisement" stressed on "ver", "tomato" as "to-mah-to"; say \
+              "flat", "lift", "queue", "mobile", "holiday", "rubbish".
+            - Measured, gently falling intonation; warm but understated. Do not \
+              exaggerate or caricature the accent.
+            - Do not change the response language because of the accent.
+            """
         }
     }
 }

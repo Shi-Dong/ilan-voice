@@ -114,10 +114,15 @@ final class VoiceSession: ObservableObject {
     }
 
     private func sessionConfig() -> [String: Any] {
-        var instructions = Paths.loadAgent()
+        // The accent goes first: buried after a long agent.md it was easy for
+        // the model to drift back to its default American delivery.
+        var instructions = settings.accent.instruction.map { $0 + "\n\n---\n\n" } ?? ""
+        instructions += Paths.loadAgent()
         let now = DateFormatter.localizedString(from: Date(), dateStyle: .full, timeStyle: .short)
         instructions += "\n\n---\nCurrent local time: \(now).\n"
-        if let accent = settings.accent.instruction { instructions += accent + "\n" }
+        if settings.accent == .british {
+            instructions += "Reminder: speak with the British (RP) accent described at the top, every time.\n"
+        }
         if let conv = store.conversations.first(where: { $0.id == conversationID }) {
             let history = conv.messages.filter { $0.role != .tool && !$0.text.isEmpty }.suffix(40)
             if !history.isEmpty {
