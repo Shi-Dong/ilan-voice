@@ -117,6 +117,7 @@ final class VoiceSession: ObservableObject {
         var instructions = Paths.loadAgent()
         let now = DateFormatter.localizedString(from: Date(), dateStyle: .full, timeStyle: .short)
         instructions += "\n\n---\nCurrent local time: \(now).\n"
+        if let accent = settings.accent.instruction { instructions += accent + "\n" }
         if let conv = store.conversations.first(where: { $0.id == conversationID }) {
             let history = conv.messages.filter { $0.role != .tool && !$0.text.isEmpty }.suffix(40)
             if !history.isEmpty {
