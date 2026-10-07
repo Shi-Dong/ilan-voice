@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import Foundation
 
 /// The Realtime API speaks 24 kHz, mono, 16-bit little-endian PCM both ways.
@@ -35,8 +36,14 @@ final class MicrophoneCapture {
         await AVCaptureDevice.requestAccess(for: .audio)
     }
 
-    func start() throws {
+    /// - Parameter device: the microphone to use; nil keeps the system default.
+    func start(device: AudioDeviceID? = nil) throws {
         let input = engine.inputNode
+        if let device, let unit = input.audioUnit {
+            var id = device
+            AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+                                 &id, UInt32(MemoryLayout<AudioDeviceID>.size))
+        }
         let inFormat = input.outputFormat(forBus: 0)
         guard inFormat.sampleRate > 0, let converter = AVAudioConverter(from: inFormat, to: outFormat) else {
             throw NSError(domain: "IlanVoice", code: 1, userInfo: [NSLocalizedDescriptionKey: "No usable microphone input."])

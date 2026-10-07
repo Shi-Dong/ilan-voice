@@ -175,7 +175,7 @@ final class VoiceSession: ObservableObject {
         recordStart = Date()
         commitWhenReady = false
         do {
-            try mic.start()
+            try mic.start(device: AudioDevices.resolve(settings.microphone))
             phase = .recording
             NSSound(named: "Tink")?.play()
         } catch {
