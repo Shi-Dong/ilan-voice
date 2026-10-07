@@ -14,19 +14,32 @@ enum OutputMode: String, CaseIterable, Identifiable {
     var symbol: String { self == .realtime ? "speaker.wave.2.fill" : "tray.full.fill" }
 }
 
-/// The key that is held down to talk. Only modifier keys are offered: they
-/// never type anything into the frontmost app while held.
+/// What is held down to talk: a modifier key (these never type anything into
+/// the frontmost app) or an extra mouse button (the click is swallowed, so a
+/// side button does not also go "Back" in your browser).
 enum PushToTalkKey: String, CaseIterable, Identifiable {
     case rightOption, rightCommand, rightControl, function
+    case middleMouse, mouseBack, mouseForward
 
     var id: String { rawValue }
 
-    var keyCode: UInt16 {
+    /// The CGEvent / NSEvent button number, for mouse buttons.
+    var mouseButton: Int? {
+        switch self {
+        case .middleMouse: 2
+        case .mouseBack: 3
+        case .mouseForward: 4
+        default: nil
+        }
+    }
+
+    var keyCode: UInt16? {
         switch self {
         case .rightOption: 61
         case .rightCommand: 54
         case .rightControl: 62
         case .function: 63
+        default: nil
         }
     }
 
@@ -36,6 +49,7 @@ enum PushToTalkKey: String, CaseIterable, Identifiable {
         case .rightCommand: .command
         case .rightControl: .control
         case .function: .function
+        default: []
         }
     }
 
@@ -45,6 +59,9 @@ enum PushToTalkKey: String, CaseIterable, Identifiable {
         case .rightCommand: "Right ⌘ Command"
         case .rightControl: "Right ⌃ Control"
         case .function: "fn / 🌐"
+        case .middleMouse: "Middle mouse button (wheel click)"
+        case .mouseBack: "Mouse side button: Back (button 4)"
+        case .mouseForward: "Mouse side button: Forward (button 5)"
         }
     }
 
@@ -54,6 +71,9 @@ enum PushToTalkKey: String, CaseIterable, Identifiable {
         case .rightCommand: "right ⌘"
         case .rightControl: "right ⌃"
         case .function: "fn"
+        case .middleMouse: "the middle mouse button"
+        case .mouseBack: "the mouse Back button"
+        case .mouseForward: "the mouse Forward button"
         }
     }
 }
