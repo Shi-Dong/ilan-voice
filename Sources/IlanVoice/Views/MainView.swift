@@ -84,7 +84,7 @@ struct Sidebar: View {
         .toolbar {
             ToolbarItem {
                 Button { store.newConversation() } label: { Image(systemName: "square.and.pencil") }
-                    .help("New conversation (⌘N)")
+                    .help("New conversation (⇧⌘O)")
             }
         }
     }
