@@ -38,6 +38,16 @@ final class AppSettings: ObservableObject {
     @Published var transcriptionModel: String { didSet { defaults.set(transcriptionModel, forKey: "transcriptionModel") } }
     /// Text model that names conversations after each reply.
     @Published var titleModel: String { didSet { defaults.set(titleModel, forKey: "titleModel") } }
+    /// The built-in run_shell tool. Off until the user turns it on.
+    @Published var shellEnabled: Bool { didSet { defaults.set(shellEnabled, forKey: "shellEnabled") } }
+    @Published var shellDirectory: String { didSet { defaults.set(shellDirectory, forKey: "shellDirectory") } }
+    @Published var shellTimeout: Int { didSet { defaults.set(shellTimeout, forKey: "shellTimeout") } }
+    /// One command prefix per line; only these commands may run.
+    @Published var shellAllowList: String { didSet { defaults.set(shellAllowList, forKey: "shellAllowList") } }
+
+    var shellAllowListEntries: [String] {
+        shellAllowList.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
     @Published var reasoningEffort: String { didSet { defaults.set(reasoningEffort, forKey: "reasoningEffort") } }
     @Published var outputMode: OutputMode { didSet { defaults.set(outputMode.rawValue, forKey: "outputMode") } }
     @Published var talkTrigger: TalkTrigger { didSet { defaults.set(try? JSONEncoder().encode(talkTrigger), forKey: "talkTrigger") } }
@@ -48,6 +58,10 @@ final class AppSettings: ObservableObject {
         voiceGender = VoiceGender(rawValue: defaults.string(forKey: "voiceGender") ?? "") ?? .female
         transcriptionModel = defaults.string(forKey: "transcriptionModel") ?? "gpt-transcribe"
         titleModel = defaults.string(forKey: "titleModel") ?? "gpt-6-luna"
+        shellEnabled = defaults.bool(forKey: "shellEnabled")
+        shellDirectory = defaults.string(forKey: "shellDirectory") ?? "~"
+        shellTimeout = defaults.object(forKey: "shellTimeout") as? Int ?? 60
+        shellAllowList = defaults.string(forKey: "shellAllowList") ?? ShellTool.defaultAllowList
         reasoningEffort = defaults.string(forKey: "reasoningEffort") ?? "default"
         outputMode = OutputMode(rawValue: defaults.string(forKey: "outputMode") ?? "") ?? .realtime
         talkTrigger = defaults.data(forKey: "talkTrigger").flatMap { try? JSONDecoder().decode(TalkTrigger.self, from: $0) }
@@ -56,7 +70,7 @@ final class AppSettings: ObservableObject {
 
     /// Fields that only take effect on a fresh Realtime session.
     var sessionFingerprint: String {
-        [apiKey, model, voice, transcriptionModel, reasoningEffort].joined(separator: "|")
+        [apiKey, model, voice, transcriptionModel, reasoningEffort, String(shellEnabled)].joined(separator: "|")
     }
 }
 
