@@ -7,11 +7,13 @@ final class AppModel: ObservableObject {
     let ptt = PushToTalk()
     let updater = Updater()
     lazy var session = VoiceSession(store: store, mcp: mcp)
+    private var hud: FloatingHUD?
 
     func start() {
         ptt.onPress = { [weak self] in self?.session.pressToTalk() }
         ptt.onRelease = { [weak self] in self?.session.releaseToTalk() }
         ptt.start()
+        hud = FloatingHUD(session: session)
         Task { await updater.check() }
         Task {
             await mcp.reload()
