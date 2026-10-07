@@ -14,8 +14,15 @@ final class AppModel: ObservableObject {
     /// "Thinking" until the server dropped the connection. This does not keep
     /// the Mac or its display awake.
     private var activity: NSObjectProtocol?
+    private var started = false
 
+    /// One-time startup. Called from the main window's `.task`, which runs
+    /// again every time the window is reopened; a second run would reconnect
+    /// (cutting off Ilan mid-sentence), add duplicate talk-key listeners and a
+    /// second floating pill, and reload every MCP server.
     func start() {
+        guard !started else { return }
+        started = true
         activity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
             reason: "Listening for the talk key and streaming voice to OpenAI")
