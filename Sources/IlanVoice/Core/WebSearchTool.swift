@@ -14,7 +14,7 @@ enum WebSearchProvider: String, CaseIterable, Identifiable {
 /// sources.
 enum WebSearchTool {
     static let functionName = "web_search"
-    static let defaultGeminiModel = "gemini-3.6-flash"
+    static let defaultGeminiModel = "gemini-3.8-flash"
     static let maxOutput = 12_000
 
     static var definition: [String: Any] {
