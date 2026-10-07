@@ -22,14 +22,14 @@ enum VoiceGender: String, CaseIterable, Identifiable {
 }
 
 /// User preferences. Everything but the API key lives in UserDefaults; the
-/// key lives in the login Keychain.
+/// key lives in a private file (see `APIKeyStore` below).
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
     static let reasoningEfforts = ["default", "minimal", "low", "medium", "high"]
 
     private let defaults = UserDefaults.standard
 
-    @Published var apiKey: String { didSet { Keychain.save(apiKey) } }
+    @Published var apiKey: String { didSet { APIKeyStore.save(apiKey) } }
     @Published var model: String { didSet { defaults.set(model, forKey: "model") } }
     @Published var voiceGender: VoiceGender { didSet { defaults.set(voiceGender.rawValue, forKey: "voiceGender") } }
 
@@ -55,7 +55,7 @@ final class AppSettings: ObservableObject {
     @Published var talkTrigger: TalkTrigger { didSet { defaults.set(try? JSONEncoder().encode(talkTrigger), forKey: "talkTrigger") } }
 
     private init() {
-        apiKey = Keychain.load() ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
+        apiKey = APIKeyStore.load() ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
         model = defaults.string(forKey: "model") ?? "gpt-realtime-2.1"
         voiceGender = VoiceGender(rawValue: defaults.string(forKey: "voiceGender") ?? "") ?? .female
         microphone = defaults.string(forKey: "microphone") ?? MicrophoneChoice.builtIn
@@ -77,18 +77,51 @@ final class AppSettings: ObservableObject {
     }
 }
 
-enum Keychain {
+/// Stores the OpenAI API key in `~/Library/Application Support/Ilan Voice/
+/// openai-api-key`, readable only by you (mode 0600), the same way `mcp.json`
+/// already holds MCP tokens.
+///
+/// It used to live in the login Keychain. Keychain items remember which build
+/// of an app created them, and Ilan Voice is rebuilt on your Mac at every
+/// update without an Apple developer certificate, so macOS treated each update
+/// as a stranger and asked for your password to unlock the key. Apps from the
+/// App Store or signed by a registered developer don't hit this.
+enum APIKeyStore {
+    private static var file: URL { Paths.root.appendingPathComponent("openai-api-key") }
     private static let service = "Ilan Voice"
     private static let account = "openai-api-key"
 
-    private static var query: [String: Any] {
+    static func load() -> String? {
+        if let text = try? String(contentsOf: file, encoding: .utf8) {
+            let key = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return key.isEmpty ? nil : key
+        }
+        // One-time move out of the Keychain (this may ask for the password a
+        // last time); afterwards the Keychain item is deleted.
+        guard let key = loadLegacy() else { return nil }
+        save(key)
+        deleteLegacy()
+        return key
+    }
+
+    static func save(_ value: String) {
+        guard !value.isEmpty else {
+            try? FileManager.default.removeItem(at: file)
+            return
+        }
+        FileManager.default.createFile(atPath: file.path, contents: Data(value.utf8),
+                                       attributes: [.posixPermissions: 0o600])
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
+
+    private static var legacyQuery: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,
          kSecAttrAccount as String: account]
     }
 
-    static func load() -> String? {
-        var q = query
+    private static func loadLegacy() -> String? {
+        var q = legacyQuery
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
@@ -97,11 +130,7 @@ enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    static func save(_ value: String) {
-        SecItemDelete(query as CFDictionary)
-        guard !value.isEmpty else { return }
-        var q = query
-        q[kSecValueData as String] = Data(value.utf8)
-        SecItemAdd(q as CFDictionary, nil)
+    private static func deleteLegacy() {
+        SecItemDelete(legacyQuery as CFDictionary)
     }
 }

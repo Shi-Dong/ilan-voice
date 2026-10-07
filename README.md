@@ -38,7 +38,7 @@ open "/Applications/Ilan Voice.app"
 
 On first launch:
 
-1. Open **Settings (⌘, or the Settings button at the bottom of the sidebar) → General** and paste your OpenAI API key. It is stored in the macOS login Keychain.
+1. Open **Settings (⌘, or the Settings button at the bottom of the sidebar) → General** and paste your OpenAI API key. It is stored in `~/Library/Application Support/Ilan Voice/openai-api-key`, readable only by your user account (not in the Keychain, which would ask for your password after every update).
 2. Allow microphone access when macOS asks.
 3. Click **Allow Accessibility** at the bottom of the window. Without it, the talk key only works while Ilan Voice is the active app. The first build creates a private self-signed certificate on your Mac (in `~/Library/Application Support/Ilan Voice/signing/`) and signs every later build with it, so macOS keeps the permission across rebuilds and updates. If you are upgrading from a build made before this, remove the old Ilan Voice entry under Privacy & Security → Accessibility and allow it once more.
 
