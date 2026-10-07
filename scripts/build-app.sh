@@ -51,7 +51,46 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - --identifier me.dongshi.ilan-voice "$APP"
+# Sign with a per-Mac self-signed certificate rather than ad hoc. macOS ties
+# the Accessibility and Microphone permissions to the signing identity; an ad
+# hoc signature changes on every build, so each update silently lost them.
+# The certificate lives in its own keychain (created on first build, no
+# password prompts) and never leaves this Mac.
+SIGN_DIR="$HOME/Library/Application Support/Ilan Voice/signing"
+KEYCHAIN="$SIGN_DIR/ilan-voice-signing.keychain-db"
+KEYCHAIN_PASS="ilan-voice-local"
+IDENTITY="Ilan Voice Local Signing"
+if [[ ! -f "$KEYCHAIN" ]]; then
+    mkdir -p "$SIGN_DIR"
+    TMP="$(mktemp -d)"
+    cat > "$TMP/cert.cnf" <<CNF
+[req]
+distinguished_name=dn
+x509_extensions=ext
+prompt=no
+[dn]
+CN=$IDENTITY
+[ext]
+basicConstraints=critical,CA:false
+keyUsage=critical,digitalSignature
+extendedKeyUsage=critical,codeSigning
+CNF
+    openssl req -x509 -newkey rsa:2048 -nodes -days 7300 -config "$TMP/cert.cnf" \
+        -keyout "$TMP/key.pem" -out "$TMP/cert.pem" 2>/dev/null
+    openssl pkcs12 -export -legacy -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
+        -out "$TMP/id.p12" -passout pass:ilan 2>/dev/null \
+        || openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
+            -out "$TMP/id.p12" -passout pass:ilan
+    security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+    security set-keychain-settings "$KEYCHAIN"   # never auto-lock
+    security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+    security import "$TMP/id.p12" -k "$KEYCHAIN" -P ilan -T /usr/bin/codesign >/dev/null
+    security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
+    rm -rf "$TMP"
+    echo "Created signing certificate \"$IDENTITY\" in $KEYCHAIN"
+fi
+security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+codesign --force --sign "$IDENTITY" --keychain "$KEYCHAIN" --identifier me.dongshi.ilan-voice "$APP"
 echo "Built $APP"
 
 if [[ "${1:-}" == "--install" ]]; then

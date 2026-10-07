@@ -187,57 +187,58 @@ struct ChatView: View {
         .padding(40)
     }
 
+    /// A slim bar under the conversation: notices on the left, and in the
+    /// bottom-right corner the hint, the "play new" button and a small talk button.
     private func footer(_ conv: Conversation?) -> some View {
-        VStack(spacing: 8) {
-            if let err = session.errorMessage, !(err == VoiceSession.missingKeyMessage && !settings.apiKey.isEmpty) {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.orange)
-                    Text(err).font(.system(size: 12)).lineLimit(3)
-                    Spacer()
-                    Button { session.errorMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
-                }
-                .padding(10)
-                .background(Theme.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-                .padding(.horizontal, 24)
-            }
-            if !ptt.trusted {
-                Button { ptt.requestAccessibility() } label: {
-                    Label("Allow Accessibility so \(settings.talkTrigger.shortLabel) works in every app", systemImage: "hand.raised.fill")
-                        .font(.system(size: 11.5))
-                }
-                .buttonStyle(.plain).foregroundStyle(Theme.textDim)
-            }
-            ZStack {
-                TalkOrb(session: session)
-                HStack {
-                    Spacer()
-                    if let unheard = conv?.unheardCount, unheard > 0 {
-                        Button { session.playNextUnheard() } label: {
-                            Label("Play \(unheard) new", systemImage: "play.circle.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .padding(.horizontal, 14).padding(.vertical, 8)
-                                .background(Theme.orange, in: Capsule())
-                                .foregroundStyle(Theme.ink)
-                        }
-                        .buttonStyle(.plain)
-                        .keyboardShortcut(.space, modifiers: [])
-                        .transition(.scale.combined(with: .opacity))
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                if let err = session.errorMessage, !(err == VoiceSession.missingKeyMessage && !settings.apiKey.isEmpty) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.orange)
+                        Text(err).font(.system(size: 12)).lineLimit(2)
+                        Button { session.errorMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
                     }
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(Theme.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
                 }
-                .padding(.horizontal, 28)
+                if !ptt.trusted {
+                    Button { ptt.requestAccessibility() } label: {
+                        Label("Allow Accessibility so \(settings.talkTrigger.shortLabel) works in every app", systemImage: "hand.raised.fill")
+                            .font(.system(size: 11.5))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(Theme.textDim)
+                }
             }
-            .animation(.spring(response: 0.3), value: conv?.unheardCount)
+            Spacer(minLength: 12)
             Text(hint)
                 .font(.system(size: 11)).foregroundStyle(Theme.textDim)
-                .padding(.bottom, 12)
+                .lineLimit(1)
+            if let unheard = conv?.unheardCount, unheard > 0 {
+                Button { session.playNextUnheard() } label: {
+                    Label("Play \(unheard) new", systemImage: "play.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 11).padding(.vertical, 6)
+                        .background(Theme.orange, in: Capsule())
+                        .foregroundStyle(Theme.ink)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.space, modifiers: [])
+                .transition(.scale.combined(with: .opacity))
+            }
+            // The orb is drawn at 150 pt; scaled down to a ~56 pt corner button.
+            TalkOrb(session: session)
+                .scaleEffect(0.4)
+                .frame(width: 60, height: 60)
         }
+        .animation(.spring(response: 0.3), value: conv?.unheardCount)
+        .padding(.leading, 20).padding(.trailing, 14).padding(.vertical, 8)
     }
 
     private var hint: String {
         switch session.phase {
         case .recording: "Listening — release to send"
         case .speaking: "Hold \(settings.talkTrigger.shortLabel) to interrupt"
-        default: "Hold \(settings.talkTrigger.shortLabel) or the button to talk"
+        default: "Hold \(settings.talkTrigger.shortLabel) to talk"
         }
     }
 }
