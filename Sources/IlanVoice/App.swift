@@ -8,8 +8,17 @@ final class AppModel: ObservableObject {
     let updater = Updater()
     lazy var session = VoiceSession(store: store, mcp: mcp)
     private var hud: FloatingHUD?
+    /// Opts out of App Nap. Ilan Voice spends most of its life in the
+    /// background waiting for the talk key; App Nap throttled its timers and
+    /// network callbacks there, so a message sent from another app sat on
+    /// "Thinking" until the server dropped the connection. This does not keep
+    /// the Mac or its display awake.
+    private var activity: NSObjectProtocol?
 
     func start() {
+        activity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+            reason: "Listening for the talk key and streaming voice to OpenAI")
         ptt.onPress = { [weak self] in self?.session.pressToTalk() }
         ptt.onRelease = { [weak self] in self?.session.releaseToTalk() }
         ptt.start()

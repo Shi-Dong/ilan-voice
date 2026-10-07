@@ -20,6 +20,24 @@ final class RealtimeClient: NSObject, URLSessionWebSocketDelegate {
         task?.maximumMessageSize = 64 * 1024 * 1024
         task?.resume()
         receive()
+        startKeepalive()
+    }
+
+    /// Pings every 15 s: keeps idle connections open through NAT and proxy
+    /// timeouts, and notices a dead connection before the next message is
+    /// sent into it.
+    private var keepalive: Timer?
+
+    private func startKeepalive() {
+        keepalive?.invalidate()
+        let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
+            guard let self, let task = self.task else { return }
+            task.sendPing { [weak self] error in
+                if let error { self?.finish(error.localizedDescription) }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        keepalive = timer
     }
 
     func send(_ event: [String: Any]) {
@@ -31,6 +49,8 @@ final class RealtimeClient: NSObject, URLSessionWebSocketDelegate {
     }
 
     func disconnect() {
+        keepalive?.invalidate()
+        keepalive = nil
         closed = true
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
@@ -60,6 +80,10 @@ final class RealtimeClient: NSObject, URLSessionWebSocketDelegate {
     private func finish(_ reason: String?) {
         guard !closed else { return }
         closed = true
+        DispatchQueue.main.async { [weak self] in
+            self?.keepalive?.invalidate()
+            self?.keepalive = nil
+        }
         DispatchQueue.main.async { self.onClose?(reason) }
     }
 
