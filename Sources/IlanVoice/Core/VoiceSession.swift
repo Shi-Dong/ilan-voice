@@ -44,6 +44,13 @@ final class VoiceSession: ObservableObject {
     private var recordStart = Date()
     private var commitWhenReady = false
     private var responseActive = false
+    private var currentResponseID: String?
+    /// Audio for this response is dropped: the user interrupted it.
+    private var mutedResponseID: String?
+    /// Bumped on every interrupt so a tool loop knows not to ask for a reply.
+    private var interruptGeneration = 0
+    private var speakingItemID: String?
+    private var speakingItemStartFrame: Int?
     private var replyAudio: [String: Data] = [:]
     private var pendingUserAudio: Data?
 
@@ -167,6 +174,9 @@ final class VoiceSession: ObservableObject {
     func pressToTalk() {
         guard phase != .recording else { return }
         errorMessage = nil
+        // Stop Ilan the instant the key goes down, even for a quick tap that
+        // never becomes a recording.
+        interrupt()
         Task {
             guard await MicrophoneCapture.requestPermission() else {
                 errorMessage = "Ilan Voice needs microphone access (System Settings → Privacy & Security → Microphone)."
@@ -176,11 +186,37 @@ final class VoiceSession: ObservableObject {
         }
     }
 
-    private func beginRecording() {
-        // Talking over a reply cuts it off, like a walkie-talkie.
-        speaker.stop()
+    /// Silences Ilan right away: stops the speaker and any replayed clip,
+    /// cancels the reply being generated, drops audio from it that is still on
+    /// its way, skips the follow-up to any running tool call, and tells the
+    /// server how much of the reply was actually heard.
+    func interrupt() {
+        let wasSpeaking = speaker.isPlaying || responseActive || phase == .speaking || phase == .working
         clips.stop()
-        if responseActive { client?.send(["type": "response.cancel"]) }
+        guard wasSpeaking else { return }
+        if let itemID = speakingItemID, let start = speakingItemStartFrame, client != nil {
+            let heardMs = max(0, (speaker.playedFrames - start) * 1000 / Int(PCM.sampleRate))
+            client?.send(["type": "conversation.item.truncate", "item_id": itemID,
+                          "content_index": 0, "audio_end_ms": heardMs])
+        }
+        speaker.stop()
+        if responseActive {
+            mutedResponseID = currentResponseID
+            client?.send(["type": "response.cancel"])
+            responseActive = false
+        }
+        interruptGeneration += 1
+        speakingItemID = nil
+        speakingItemStartFrame = nil
+        if let convID = conversationID {
+            for m in store.conversations.first(where: { $0.id == convID })?.messages ?? [] where m.pending && m.role == .assistant {
+                store.updateMessage(convID, m.id) { $0.pending = false }
+            }
+        }
+        if phase == .speaking || phase == .working || phase == .thinking { phase = sessionReady ? .ready : .offline }
+    }
+
+    private func beginRecording() {
         ensureSession()
         if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
         bufferedAudio.removeAll()
@@ -282,6 +318,7 @@ final class VoiceSession: ObservableObject {
 
         case "response.created":
             responseActive = true
+            currentResponseID = (event["response"] as? [String: Any])?["id"] as? String
 
         case "response.output_item.added":
             guard let item = event["item"] as? [String: Any], let itemID = item["id"] as? String,
@@ -299,7 +336,12 @@ final class VoiceSession: ObservableObject {
             guard let itemID = event["item_id"] as? String, let b64 = event["delta"] as? String,
                   let pcm = Data(base64Encoded: b64) else { return }
             replyAudio[itemID, default: Data()].append(pcm)
-            if settings.outputMode == .realtime {
+            let muted = mutedResponseID != nil && event["response_id"] as? String == mutedResponseID
+            if settings.outputMode == .realtime && !muted {
+                if speakingItemID != itemID {
+                    speakingItemID = itemID
+                    speakingItemStartFrame = speaker.enqueuedFrames
+                }
                 speaker.enqueue(pcm)
                 phase = .speaking
             }
@@ -317,8 +359,13 @@ final class VoiceSession: ObservableObject {
             retitle(convID)
 
         case "response.done":
-            responseActive = false
             let response = event["response"] as? [String: Any] ?? [:]
+            // The reply the user cut off: no tools, no state changes.
+            if let id = response["id"] as? String, id == mutedResponseID {
+                mutedResponseID = nil
+                return
+            }
+            responseActive = false
             let calls = (response["output"] as? [[String: Any]] ?? []).filter { $0["type"] as? String == "function_call" }
             speaker.flush()
             if !calls.isEmpty {
@@ -376,6 +423,7 @@ final class VoiceSession: ObservableObject {
 
     private func runTools(_ calls: [[String: Any]], _ convID: UUID) {
         phase = .working
+        let generation = interruptGeneration
         Task {
             await withTaskGroup(of: Void.self) { group in
                 for call in calls {
@@ -397,7 +445,7 @@ final class VoiceSession: ObservableObject {
                     }
                 }
             }
-            guard conversationID == convID, phase == .working else { return }
+            guard conversationID == convID, phase == .working, interruptGeneration == generation else { return }
             phase = .thinking
             client?.send(["type": "response.create"])
         }

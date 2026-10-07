@@ -92,6 +92,10 @@ final class StreamPlayer {
     private let node = AVAudioPlayerNode()
     private let format = AVAudioFormat(standardFormatWithSampleRate: PCM.sampleRate, channels: 1)!
     private var queued = 0
+    /// Running totals since the last `stop()`, in samples. Used to work out
+    /// how much of a reply was actually heard when it is interrupted.
+    private(set) var enqueuedFrames = 0
+    private(set) var playedFrames = 0
     private var held: [AVAudioPCMBuffer] = []
     private var heldFrames: AVAudioFrameCount = 0
     /// Main-thread callback once every queued chunk has been heard.
@@ -107,6 +111,7 @@ final class StreamPlayer {
 
     func enqueue(_ pcm: Data) {
         guard let buffer = makeBuffer(pcm) else { return }
+        enqueuedFrames += Int(buffer.frameLength)
         if node.isPlaying {
             schedule(buffer)
             return
@@ -131,6 +136,8 @@ final class StreamPlayer {
         held.removeAll()
         heldFrames = 0
         queued = 0
+        enqueuedFrames = 0
+        playedFrames = 0
         node.stop()
         engine.stop()
     }
@@ -149,10 +156,12 @@ final class StreamPlayer {
 
     private func schedule(_ buffer: AVAudioPCMBuffer) {
         queued += 1
+        let frames = Int(buffer.frameLength)
         node.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, self.queued > 0 else { return }
                 self.queued -= 1
+                self.playedFrames += frames
                 if self.queued == 0 {
                     // Ran dry: stop so the next chunks prebuffer again instead
                     // of trickling out one by one.
