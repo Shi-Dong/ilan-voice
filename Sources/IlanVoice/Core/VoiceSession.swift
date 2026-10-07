@@ -117,7 +117,6 @@ final class VoiceSession: ObservableObject {
         var instructions = Paths.loadAgent()
         let now = DateFormatter.localizedString(from: Date(), dateStyle: .full, timeStyle: .short)
         instructions += "\n\n---\nCurrent local time: \(now).\n"
-        if let accent = settings.accent.instruction { instructions += accent + "\n" }
         if let conv = store.conversations.first(where: { $0.id == conversationID }) {
             let history = conv.messages.filter { $0.role != .tool && !$0.text.isEmpty }.suffix(40)
             if !history.isEmpty {
@@ -294,6 +293,7 @@ final class VoiceSession: ObservableObject {
 
         case "response.output_audio.done":
             guard let itemID = event["item_id"] as? String else { return }
+            speaker.flush()
             saveReplyAudio(convID, itemID)
 
         case "response.output_item.done":
@@ -307,6 +307,7 @@ final class VoiceSession: ObservableObject {
             responseActive = false
             let response = event["response"] as? [String: Any] ?? [:]
             let calls = (response["output"] as? [[String: Any]] ?? []).filter { $0["type"] as? String == "function_call" }
+            speaker.flush()
             if !calls.isEmpty {
                 runTools(calls, convID)
             } else if !speaker.isPlaying {

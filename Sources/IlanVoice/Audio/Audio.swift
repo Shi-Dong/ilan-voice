@@ -72,49 +72,88 @@ final class MicrophoneCapture {
 }
 
 /// Plays PCM16 chunks as they stream in (real-time mode).
+///
+/// Chunks arrive over the network in uneven bursts. Starting playback on the
+/// very first chunk means the speaker soon runs dry and waits for the next
+/// burst, which chops up the first sentence. So each reply is held back until
+/// `prebufferSeconds` of audio is ready (or the reply ends), then played; once
+/// it is playing, later chunks queue behind it.
 final class StreamPlayer {
+    static let prebufferSeconds = 0.5
+
     private let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
     private let format = AVAudioFormat(standardFormatWithSampleRate: PCM.sampleRate, channels: 1)!
     private var queued = 0
+    private var held: [AVAudioPCMBuffer] = []
+    private var heldFrames: AVAudioFrameCount = 0
     /// Main-thread callback once every queued chunk has been heard.
     var onDrained: (() -> Void)?
 
     init() {
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: format)
+        engine.prepare()
     }
 
-    var isPlaying: Bool { queued > 0 }
+    var isPlaying: Bool { queued > 0 || !held.isEmpty }
 
     func enqueue(_ pcm: Data) {
+        guard let buffer = makeBuffer(pcm) else { return }
+        if node.isPlaying {
+            schedule(buffer)
+            return
+        }
+        held.append(buffer)
+        heldFrames += buffer.frameLength
+        if Double(heldFrames) >= Self.prebufferSeconds * PCM.sampleRate { flush() }
+    }
+
+    /// Starts playing whatever is held, even if it is under the threshold
+    /// (a short reply, or the end of one).
+    func flush() {
+        guard !held.isEmpty else { return }
+        if !engine.isRunning { try? engine.start() }
+        held.forEach(schedule)
+        held.removeAll()
+        heldFrames = 0
+        if !node.isPlaying { node.play() }
+    }
+
+    func stop() {
+        held.removeAll()
+        heldFrames = 0
+        queued = 0
+        node.stop()
+        engine.stop()
+    }
+
+    private func makeBuffer(_ pcm: Data) -> AVAudioPCMBuffer? {
         let frames = pcm.count / 2
-        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else { return }
+        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else { return nil }
         buffer.frameLength = AVAudioFrameCount(frames)
         let dst = buffer.floatChannelData![0]
         pcm.withUnsafeBytes { raw in
             let src = raw.bindMemory(to: Int16.self)
             for i in 0..<frames { dst[i] = Float(Int16(littleEndian: src[i])) / 32768 }
         }
-        if !engine.isRunning {
-            engine.prepare()
-            try? engine.start()
-        }
+        return buffer
+    }
+
+    private func schedule(_ buffer: AVAudioPCMBuffer) {
         queued += 1
         node.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, self.queued > 0 else { return }
                 self.queued -= 1
-                if self.queued == 0 { self.onDrained?() }
+                if self.queued == 0 {
+                    // Ran dry: stop so the next chunks prebuffer again instead
+                    // of trickling out one by one.
+                    self.node.stop()
+                    if self.held.isEmpty { self.onDrained?() }
+                }
             }
         }
-        if !node.isPlaying { node.play() }
-    }
-
-    func stop() {
-        queued = 0
-        node.stop()
-        engine.stop()
     }
 }
 
