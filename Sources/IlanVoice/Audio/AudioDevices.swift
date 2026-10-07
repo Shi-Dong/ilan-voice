@@ -41,13 +41,14 @@ enum AudioDevices {
         }
     }
 
-    /// The device to record from for a saved choice, or nil for "system default".
-    static func resolve(_ choice: String) -> AudioDeviceID? {
+    /// The UID of the device to record from for a saved choice, or nil for
+    /// "system default" (also used when the chosen device is gone).
+    static func resolveUID(_ choice: String) -> String? {
         let all = inputs()
         switch choice {
         case MicrophoneChoice.system: return nil
-        case MicrophoneChoice.builtIn: return all.first(where: \.isBuiltIn)?.id  // nil on Macs without one
-        default: return all.first(where: { $0.uid == choice })?.id
+        case MicrophoneChoice.builtIn: return all.first(where: \.isBuiltIn)?.uid  // nil on Macs without one
+        default: return all.first(where: { $0.uid == choice })?.uid
         }
     }
 

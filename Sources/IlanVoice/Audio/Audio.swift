@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreMedia
 import CoreAudio
 import Foundation
 
@@ -24,57 +25,88 @@ enum PCM {
     }
 }
 
-/// Microphone → 24 kHz mono PCM16 chunks. The engine only runs while the
-/// talk key is held, so the menu-bar mic indicator means "recording".
-final class MicrophoneCapture {
-    private let engine = AVAudioEngine()
-    private let outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: PCM.sampleRate, channels: 1, interleaved: true)!
-    /// Called on the audio thread with a PCM chunk and its loudness (0…1).
+/// Microphone → 24 kHz mono PCM16 chunks, from a chosen input device.
+///
+/// This uses AVCaptureSession rather than AVAudioEngine. On macOS an
+/// AVAudioEngine drives input and output through one audio unit, so pointing
+/// its input at an input-only device (like a MacBook's built-in microphone)
+/// broke recording entirely. A capture session picks an input device on its
+/// own and converts to the Realtime API's format for us. It only runs while
+/// the talk key is held, so the mic indicator means "recording".
+final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
+    private let session = AVCaptureSession()
+    private let output = AVCaptureAudioDataOutput()
+    private let queue = DispatchQueue(label: "ilan-voice.microphone")
+    private var input: AVCaptureDeviceInput?
+    private var inputUID: String?
+    /// Called on a background queue with a PCM chunk and its loudness (0…1).
     var onChunk: ((Data, Float) -> Void)?
 
     static func requestPermission() async -> Bool {
         await AVCaptureDevice.requestAccess(for: .audio)
     }
 
-    /// - Parameter device: the microphone to use; nil keeps the system default.
-    func start(device: AudioDeviceID? = nil) throws {
-        let input = engine.inputNode
-        if let device, let unit = input.audioUnit {
-            var id = device
-            AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
-                                 &id, UInt32(MemoryLayout<AudioDeviceID>.size))
+    /// - Parameter deviceUID: Core Audio UID of the microphone; nil uses the
+    ///   system default input.
+    func start(deviceUID: String?) throws {
+        guard let device = deviceUID.flatMap({ AVCaptureDevice(uniqueID: $0) }) ?? AVCaptureDevice.default(for: .audio) else {
+            throw NSError(domain: "IlanVoice", code: 1, userInfo: [NSLocalizedDescriptionKey: "No microphone found."])
         }
-        let inFormat = input.outputFormat(forBus: 0)
-        guard inFormat.sampleRate > 0, let converter = AVAudioConverter(from: inFormat, to: outFormat) else {
-            throw NSError(domain: "IlanVoice", code: 1, userInfo: [NSLocalizedDescriptionKey: "No usable microphone input."])
-        }
-        let ratio = PCM.sampleRate / inFormat.sampleRate
-        input.installTap(onBus: 0, bufferSize: 2048, format: inFormat) { [weak self] buffer, _ in
-            guard let self else { return }
-            let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 64)
-            guard let out = AVAudioPCMBuffer(pcmFormat: self.outFormat, frameCapacity: capacity) else { return }
-            var fed = false
-            var error: NSError?
-            converter.convert(to: out, error: &error) { _, status in
-                if fed { status.pointee = .noDataNow; return nil }
-                fed = true
-                status.pointee = .haveData
-                return buffer
+        session.beginConfiguration()
+        if inputUID != device.uniqueID {
+            if let input { session.removeInput(input) }
+            let newInput = try AVCaptureDeviceInput(device: device)
+            guard session.canAddInput(newInput) else {
+                session.commitConfiguration()
+                throw NSError(domain: "IlanVoice", code: 2, userInfo: [NSLocalizedDescriptionKey: "Can't record from \(device.localizedName)."])
             }
-            let n = Int(out.frameLength)
-            guard n > 0, let samples = out.int16ChannelData?[0] else { return }
-            var sum: Float = 0
-            for i in 0..<n { let s = Float(samples[i]) / 32768; sum += s * s }
-            let level = min(1, sqrt(sum / Float(n)) * 4)
-            self.onChunk?(Data(bytes: samples, count: n * 2), level)
+            session.addInput(newInput)
+            input = newInput
+            inputUID = device.uniqueID
         }
-        engine.prepare()
-        try engine.start()
+        if !session.outputs.contains(output) {
+            output.audioSettings = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: PCM.sampleRate,
+                AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false,
+            ]
+            output.setSampleBufferDelegate(self, queue: queue)
+            guard session.canAddOutput(output) else {
+                session.commitConfiguration()
+                throw NSError(domain: "IlanVoice", code: 3, userInfo: [NSLocalizedDescriptionKey: "Can't capture microphone audio."])
+            }
+            session.addOutput(output)
+        }
+        session.commitConfiguration()
+        // startRunning blocks for a moment; keep it off the main thread.
+        queue.async { [session] in session.startRunning() }
     }
 
     func stop() {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        queue.async { [session] in session.stopRunning() }
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard let block = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+        let length = CMBlockBufferGetDataLength(block)
+        guard length >= 2 else { return }
+        var data = Data(count: length)
+        let status = data.withUnsafeMutableBytes { raw in
+            CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: raw.baseAddress!)
+        }
+        guard status == kCMBlockBufferNoErr else { return }
+        let level: Float = data.withUnsafeBytes { raw in
+            let samples = raw.bindMemory(to: Int16.self)
+            guard !samples.isEmpty else { return 0 }
+            var sum: Float = 0
+            for s in samples { let v = Float(Int16(littleEndian: s)) / 32768; sum += v * v }
+            return min(1, sqrt(sum / Float(samples.count)) * 4)
+        }
+        onChunk?(data, level)
     }
 }
 
