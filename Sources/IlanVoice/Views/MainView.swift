@@ -5,6 +5,7 @@ struct MainView: View {
     @ObservedObject var session: VoiceSession
     @ObservedObject var ptt: PushToTalk
     @ObservedObject var mcp: MCPManager
+    @ObservedObject var updater: Updater
     @ObservedObject var settings = AppSettings.shared
 
     var body: some View {
@@ -12,7 +13,7 @@ struct MainView: View {
             Sidebar(store: store)
                 .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 320)
         } detail: {
-            ChatView(store: store, session: session, ptt: ptt, mcp: mcp)
+            ChatView(store: store, session: session, ptt: ptt, mcp: mcp, updater: updater)
         }
         .background(Theme.background)
         .preferredColorScheme(.dark)
@@ -80,7 +81,9 @@ struct ChatView: View {
     @ObservedObject var session: VoiceSession
     @ObservedObject var ptt: PushToTalk
     @ObservedObject var mcp: MCPManager
+    @ObservedObject var updater: Updater
     @ObservedObject var settings = AppSettings.shared
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let conv = store.selected
@@ -118,6 +121,17 @@ struct ChatView: View {
                 .font(.system(size: 11)).foregroundStyle(Theme.textDim)
             }
             Spacer()
+            if updater.updateAvailable {
+                Button { openSettings() } label: {
+                    Label("Update", systemImage: "arrow.down.circle.fill")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Theme.orange.opacity(0.18), in: Capsule())
+                        .foregroundStyle(Theme.orange)
+                }
+                .buttonStyle(.plain)
+                .help("A newer version is on GitHub. Open Settings to install it.")
+            }
             Picker("Output", selection: $settings.outputMode) {
                 ForEach(OutputMode.allCases) { mode in
                     Label(mode.label, systemImage: mode.symbol).tag(mode)

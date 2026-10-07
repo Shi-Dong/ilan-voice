@@ -2,10 +2,11 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var mcp: MCPManager
+    @ObservedObject var updater: Updater
 
     var body: some View {
         TabView {
-            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
+            GeneralSettings(updater: updater).tabItem { Label("General", systemImage: "gearshape") }
             AgentSettings().tabItem { Label("Agent", systemImage: "person.text.rectangle") }
             MCPSettings(mcp: mcp).tabItem { Label("MCP Tools", systemImage: "wrench.and.screwdriver") }
         }
@@ -16,6 +17,7 @@ struct SettingsView: View {
 }
 
 private struct GeneralSettings: View {
+    @ObservedObject var updater: Updater
     @ObservedObject var settings = AppSettings.shared
     @Local private var reveal = false
 
@@ -51,6 +53,7 @@ private struct GeneralSettings: View {
                 Text("Real-time plays a reply as it is generated. Cached saves it and waits for you to press play (or Space). Transcripts and audio are always saved.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            UpdatesSection(updater: updater)
             Section("Data") {
                 LabeledContent("Folder") {
                     Button("Open in Finder") { NSWorkspace.shared.open(Paths.root) }
@@ -147,5 +150,55 @@ private struct MCPSettings: View {
             }
         }
         .padding(20)
+    }
+}
+
+private struct UpdatesSection: View {
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        Section("Updates") {
+            LabeledContent("This version", value: updater.currentDescription)
+            HStack(alignment: .top, spacing: 8) {
+                status
+                Spacer()
+                if case .available = updater.state {
+                    Button("Install & Relaunch") { Task { await updater.install() } }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Check for Updates") { Task { await updater.check() } }
+                        .disabled(updater.isBusy)
+                }
+            }
+            Text("Updates build the newest version from GitHub on this Mac (needs Apple's Command Line Tools), then restart the app. After an update, macOS may ask you to re-allow Accessibility.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var status: some View {
+        switch updater.state {
+        case .idle:
+            Text("Not checked yet").foregroundStyle(.secondary)
+        case .checking:
+            HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Checking…") }
+        case .upToDate:
+            Label("Up to date", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.mint)
+        case .available(let commit, let summary, let date):
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Update available · \(commit.prefix(7))", systemImage: "arrow.down.circle.fill")
+                    .foregroundStyle(Theme.orange)
+                if !summary.isEmpty { Text(summary).font(.caption) }
+                if let date { Text(date, format: .dateTime.month().day().hour().minute()).font(.caption).foregroundStyle(.secondary) }
+            }
+        case .installing(let step):
+            HStack(spacing: 6) { ProgressView().controlSize(.small); Text(step) }
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 4) {
+                Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.orange)
+                    .textSelection(.enabled)
+                Button("Show Log") { NSWorkspace.shared.activateFileViewerSelecting([Updater.logFile]) }
+                    .buttonStyle(.link).font(.caption)
+            }
+        }
     }
 }
