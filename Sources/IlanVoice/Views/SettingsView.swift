@@ -44,7 +44,16 @@ private struct GeneralSettings: View {
             }
             Section("Talking") {
                 Picker("Hold to talk", selection: $settings.pushToTalkKey) {
-                    ForEach(PushToTalkKey.allCases) { Text($0.label).tag($0) }
+                    Section("Keyboard") {
+                        ForEach(PushToTalkKey.allCases.filter { $0.mouseButton == nil }) { Text($0.label).tag($0) }
+                    }
+                    Section("Mouse") {
+                        ForEach(PushToTalkKey.allCases.filter { $0.mouseButton != nil }) { Text($0.label).tag($0) }
+                    }
+                }
+                if settings.pushToTalkKey.mouseButton != nil {
+                    Text("While Ilan Voice is running, this button only talks to Ilan and no longer does its usual job (e.g. Back in a browser). Left and right clicks are never used.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Picker("Replies", selection: $settings.outputMode) {
                     ForEach(OutputMode.allCases) { Text($0.label).tag($0) }
