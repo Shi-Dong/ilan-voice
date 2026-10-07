@@ -5,7 +5,7 @@ struct SettingsView: View {
     @ObservedObject var updater: Updater
     @ObservedObject var ptt: PushToTalk
 
-    enum Tab: Hashable { case general, keys, agent, mcp, shell, webSearch, dictionary }
+    enum Tab: Hashable { case general, agent, mcp, shell, webSearch, dictionary }
 
     /// Settings always opens on General. The window is kept alive between
     /// openings, so the tab is reset whenever it appears and disappears;
@@ -19,7 +19,6 @@ struct SettingsView: View {
             MCPSettings(mcp: mcp).tabItem { Label("MCP Tools", systemImage: "wrench.and.screwdriver") }.tag(Tab.mcp)
             ShellSettings().tabItem { Label("Shell", systemImage: "terminal") }.tag(Tab.shell)
             WebSearchSettings().tabItem { Label("Web Search", systemImage: "globe") }.tag(Tab.webSearch)
-            APIKeySettings().tabItem { Label("API Keys", systemImage: "key") }.tag(Tab.keys)
             DictionarySettings().tabItem { Label("Dictionary", systemImage: "character.book.closed") }.tag(Tab.dictionary)
         }
         .onAppear { tab = .general }
@@ -357,84 +356,6 @@ private struct DictionarySettings: View {
     }
 }
 
-/// Every stored API key and secret. Features and `mcp.json` (as `${NAME}`)
-/// look them up by name.
-private struct APIKeySettings: View {
-    @ObservedObject var settings = AppSettings.shared
-    @Local private var secrets: [String: String] = SecretStore.all()
-    @Local private var newName = ""
-    @Local private var newValue = ""
-    @Local private var revealed: Set<String> = []
-
-    var body: some View {
-        Form {
-            Section {
-                ForEach(secrets.keys.sorted(), id: \.self) { name in
-                    HStack {
-                        Text(name).font(.system(size: 12, design: .monospaced)).frame(width: 190, alignment: .leading)
-                        if revealed.contains(name) {
-                            TextField("", text: binding(name)).labelsHidden()
-                        } else {
-                            SecureField("", text: binding(name)).labelsHidden()
-                        }
-                        Button { toggle(name) } label: { Image(systemName: revealed.contains(name) ? "eye.slash" : "eye") }
-                            .buttonStyle(.borderless)
-                        Button(role: .destructive) { save(name, "") } label: { Image(systemName: "trash") }
-                            .buttonStyle(.borderless)
-                    }
-                }
-                if secrets.isEmpty {
-                    Text("No keys yet.").foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("Stored keys")
-            } footer: {
-                Text("Saved in ~/Library/Application Support/Ilan Voice/secrets.json, readable only by your user account. In mcp.json, write ${NAME} to use a key. A key not listed here falls back to the environment variable of the same name.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Add a key") {
-                TextField("Name, e.g. ANTHROPIC_API_KEY", text: $newName)
-                    .font(.system(size: 12, design: .monospaced))
-                SecureField("Value", text: $newValue)
-                HStack {
-                    if !newName.isEmpty && !SecretStore.isValidName(newName) {
-                        Text("Use letters, digits and _ only.").font(.caption).foregroundStyle(Theme.orange)
-                    }
-                    Spacer()
-                    Button("Add") {
-                        save(newName, newValue)
-                        newName = ""
-                        newValue = ""
-                    }
-                    .disabled(!SecretStore.isValidName(newName) || newValue.isEmpty)
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .onAppear { secrets = SecretStore.all() }
-    }
-
-    private func binding(_ name: String) -> Binding<String> {
-        Binding(get: { secrets[name] ?? "" }, set: { save(name, $0) })
-    }
-
-    private func toggle(_ name: String) {
-        if revealed.contains(name) { revealed.remove(name) } else { revealed.insert(name) }
-    }
-
-    private func save(_ name: String, _ value: String) {
-        // The OpenAI key also drives the live session, so go through settings.
-        if name == SecretStore.openAI {
-            settings.apiKey = value
-        } else if name == SecretStore.gemini {
-            settings.geminiAPIKey = value
-        } else {
-            SecretStore.set(name, value)
-        }
-        secrets = SecretStore.all()
-    }
-}
-
 /// The built-in web_search tool: provider, key and model.
 private struct WebSearchSettings: View {
     @ObservedObject var settings = AppSettings.shared
@@ -465,7 +386,7 @@ private struct WebSearchSettings: View {
             }
             .disabled(!settings.webSearchEnabled)
             Section {
-                Text("When a question needs fresh or factual information, Ilan calls the web_search tool. Gemini answers it with Google Search and the answer, with its sources, appears in the transcript. The key is stored as GEMINI_API_KEY in Settings → API Keys. Changes apply to the next conversation (or Reconnect).")
+                Text("When a question needs fresh or factual information, Ilan calls the web_search tool. Gemini answers it with Google Search and the answer, with its sources, appears in the transcript. The key is stored as GEMINI_API_KEY in Ilan Voice's private secrets file. Changes apply to the next conversation (or Reconnect).")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

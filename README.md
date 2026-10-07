@@ -40,7 +40,7 @@ open "/Applications/Ilan Voice.app"
 
 On first launch:
 
-1. Open **Settings (⌘, or the Settings button at the bottom of the sidebar) → General** and paste your OpenAI API key. It is stored with your other API keys in `~/Library/Application Support/Ilan Voice/secrets.json`, readable only by your user account (see **Settings → API Keys**).
+1. Open **Settings (⌘, or the Settings button at the bottom of the sidebar) → General** and paste your OpenAI API key. It is stored with your other API keys in `~/Library/Application Support/Ilan Voice/secrets.json`, readable only by your user account.
 2. Allow microphone access when macOS asks.
 3. Click **Allow Accessibility** at the bottom of the window. Without it, the talk key only works while Ilan Voice is the active app. The first build creates a private self-signed certificate on your Mac (in `~/Library/Application Support/Ilan Voice/signing/`) and signs every later build with it, so macOS keeps the permission across rebuilds and updates. If you are upgrading from a build made before this, remove the old Ilan Voice entry under Privacy & Security → Accessibility and allow it once more.
 
@@ -52,7 +52,7 @@ Because the app is built on your Mac rather than downloaded, macOS has nothing t
 
 ## API keys
 
-**Settings → API Keys** holds every key the app uses, by name (`OPENAI_API_KEY`, `GEMINI_API_KEY`, and any others you add). They live in `secrets.json`, readable only by your user account. They are deliberately not in the Keychain, which would ask for your password after every update of a self-built app. `mcp.json` can use any of them as `${NAME}`, e.g. `"headers": { "Authorization": "Bearer ${MEMORY_TOKEN}" }`, so tokens don't have to be pasted into it. A name with no stored value falls back to the environment variable of the same name.
+Every key the app uses is stored by name (`OPENAI_API_KEY`, `GEMINI_API_KEY`, …) in `~/Library/Application Support/Ilan Voice/secrets.json`, readable only by your user account. The OpenAI key is set in Settings → General and the Gemini key in Settings → Web Search; other keys can be added to the file by hand. They are deliberately not in the Keychain, which would ask for your password after every update of a self-built app. `mcp.json` can use any of them as `${NAME}`, e.g. `"headers": { "Authorization": "Bearer ${MEMORY_TOKEN}" }`, so tokens don't have to be pasted into it. A name with no stored value falls back to the environment variable of the same name.
 
 ## Configuration
 

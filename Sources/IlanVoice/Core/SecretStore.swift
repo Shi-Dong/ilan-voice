@@ -58,11 +58,6 @@ enum SecretStore {
         return out
     }
 
-    /// A valid secret name: letters, digits and underscores, not starting with a digit.
-    static func isValidName(_ name: String) -> Bool {
-        name.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil
-    }
-
     private static func write(_ secrets: [String: String]) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
