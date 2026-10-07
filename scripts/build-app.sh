@@ -106,6 +106,36 @@ CNF
     echo "Created signing certificate \"$IDENTITY\" in $KEYCHAIN"
 }
 
+ORIG_KEYCHAINS=()
+restore_keychains() {
+    security list-keychains -d user -s ${ORIG_KEYCHAINS[@]+"${ORIG_KEYCHAINS[@]}"}
+}
+
+# codesign only finds identities in keychains on the user search list
+# (--keychain alone is not enough on macOS 26), so ours is added for the
+# signing step and the user's original list is put back afterwards.
+sign_with_identity() {
+    local kc listed=false status=0
+    ORIG_KEYCHAINS=()
+    while IFS= read -r kc; do
+        kc="${kc#"${kc%%[![:space:]]*}"}"; kc="${kc#\"}"; kc="${kc%\"}"
+        [[ -n "$kc" ]] || continue
+        ORIG_KEYCHAINS+=("$kc")
+        [[ "$kc" == "$KEYCHAIN" ]] && listed=true
+    done < <(security list-keychains -d user)
+    if [[ "$listed" == false ]]; then
+        trap restore_keychains EXIT
+        security list-keychains -d user -s ${ORIG_KEYCHAINS[@]+"${ORIG_KEYCHAINS[@]}"} "$KEYCHAIN"
+    fi
+    codesign --force --sign "$HASH" --keychain "$KEYCHAIN" \
+        --identifier me.dongshi.ilan-voice "$APP" || status=$?
+    if [[ "$listed" == false ]]; then
+        restore_keychains
+        trap - EXIT
+    fi
+    return $status
+}
+
 HASH="$(identity_hash)"
 if [[ -z "$HASH" ]]; then
     create_identity || true
@@ -114,8 +144,7 @@ fi
 
 # Never let signing block an update: fall back to an ad hoc signature (the app
 # works, but macOS will ask for Accessibility again after this build).
-if [[ -n "$HASH" ]] && codesign --force --sign "$HASH" --keychain "$KEYCHAIN" \
-        --identifier me.dongshi.ilan-voice "$APP"; then
+if [[ -n "$HASH" ]] && sign_with_identity; then
     echo "Signed with \"$IDENTITY\" ($HASH)"
 else
     echo "warning: could not sign with \"$IDENTITY\"; falling back to an ad hoc signature" >&2
