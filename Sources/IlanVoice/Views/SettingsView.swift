@@ -36,10 +36,6 @@ private struct GeneralSettings: View {
                         .buttonStyle(.borderless)
                 }
                 TextField("Realtime model", text: $settings.model)
-                Picker("Accent", selection: $settings.accent) {
-                    ForEach(Accent.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
                 Picker("Voice", selection: $settings.voiceGender) {
                     ForEach(VoiceGender.allCases) { Text($0.label).tag($0) }
                 }
