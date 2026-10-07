@@ -54,6 +54,8 @@ final class AppSettings: ObservableObject {
     /// for quality) and the accent is asked for in the instructions.
     var voice: String { voiceGender == .female ? "marin" : "cedar" }
     @Published var transcriptionModel: String { didSet { defaults.set(transcriptionModel, forKey: "transcriptionModel") } }
+    /// Text model that names conversations after each reply.
+    @Published var titleModel: String { didSet { defaults.set(titleModel, forKey: "titleModel") } }
     @Published var reasoningEffort: String { didSet { defaults.set(reasoningEffort, forKey: "reasoningEffort") } }
     @Published var outputMode: OutputMode { didSet { defaults.set(outputMode.rawValue, forKey: "outputMode") } }
     @Published var talkTrigger: TalkTrigger { didSet { defaults.set(try? JSONEncoder().encode(talkTrigger), forKey: "talkTrigger") } }
@@ -64,6 +66,7 @@ final class AppSettings: ObservableObject {
         accent = Accent(rawValue: defaults.string(forKey: "accent") ?? "") ?? .american
         voiceGender = VoiceGender(rawValue: defaults.string(forKey: "voiceGender") ?? "") ?? .female
         transcriptionModel = defaults.string(forKey: "transcriptionModel") ?? "gpt-transcribe"
+        titleModel = defaults.string(forKey: "titleModel") ?? "gpt-6-luna"
         reasoningEffort = defaults.string(forKey: "reasoningEffort") ?? "default"
         outputMode = OutputMode(rawValue: defaults.string(forKey: "outputMode") ?? "") ?? .realtime
         talkTrigger = defaults.data(forKey: "talkTrigger").flatMap { try? JSONDecoder().decode(TalkTrigger.self, from: $0) }

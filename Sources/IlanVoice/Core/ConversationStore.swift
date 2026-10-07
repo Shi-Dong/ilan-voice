@@ -24,6 +24,8 @@ struct Conversation: Codable, Identifiable, Equatable {
     var createdAt = Date()
     var updatedAt = Date()
     var messages: [Message] = []
+    /// Set when the user renames the conversation; automatic titles then stop.
+    var titleLocked: Bool?
 
     var unheardCount: Int { messages.filter { !$0.listened }.count }
 }
@@ -98,7 +100,17 @@ final class ConversationStore: ObservableObject {
     }
 
     func rename(_ id: UUID, to title: String) {
-        update(id) { $0.title = title.isEmpty ? "Untitled" : title }
+        update(id) {
+            $0.title = title.isEmpty ? "Untitled" : title
+            $0.titleLocked = true
+        }
+    }
+
+    /// An automatic title; ignored once the user has renamed the conversation.
+    func setAutoTitle(_ id: UUID, _ title: String) {
+        guard let conv = conversations.first(where: { $0.id == id }), conv.titleLocked != true,
+              conv.title != title else { return }
+        update(id) { $0.title = title }
     }
 
     func delete(_ id: UUID) {

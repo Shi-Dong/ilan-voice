@@ -48,6 +48,8 @@ private struct GeneralSettings: View {
                     ForEach(AppSettings.reasoningEfforts, id: \.self) { Text($0.capitalized).tag($0) }
                 }
                 TextField("Transcription model", text: $settings.transcriptionModel)
+                TextField("Title model", text: $settings.titleModel)
+                    .help("Names each conversation (30 characters max) from its 10 latest messages after every reply.")
             }
             Section("Talking") {
                 TalkTriggerRecorder(ptt: ptt)

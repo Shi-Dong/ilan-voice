@@ -10,6 +10,8 @@ A native macOS voice assistant built on OpenAI's **GPT-Realtime** (`gpt-realtime
 
 Apple Silicon only. Requires macOS 14 or later.
 
+Conversations name themselves: after every reply, a small text model (GPT-6 Luna by default; change it under Settings → General → Title model) reads the 10 latest messages and picks a title of at most 30 characters. Renaming a conversation yourself turns this off for that conversation.
+
 ## Two ways to hear replies
 
 | Mode | What happens |
