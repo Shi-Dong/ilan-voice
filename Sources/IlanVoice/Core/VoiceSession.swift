@@ -44,6 +44,8 @@ final class VoiceSession: ObservableObject {
     private var recordStart = Date()
     private var commitWhenReady = false
     private var responseActive = false
+    private var talkKeyHeld = false
+    private var finishingRecording = false
     private var currentResponseID: String?
     /// Audio for this response is dropped: the user interrupted it.
     private var mutedResponseID: String?
@@ -177,11 +179,15 @@ final class VoiceSession: ObservableObject {
         // Stop Ilan the instant the key goes down, even for a quick tap that
         // never becomes a recording.
         interrupt()
+        talkKeyHeld = true
         Task {
             guard await MicrophoneCapture.requestPermission() else {
                 errorMessage = "Ilan Voice needs microphone access (System Settings → Privacy & Security → Microphone)."
                 return
             }
+            // A quick tap can be over before permission comes back: then the
+            // tap only interrupted Ilan, and nothing is recorded.
+            guard talkKeyHeld else { return }
             beginRecording()
         }
     }
@@ -224,7 +230,7 @@ final class VoiceSession: ObservableObject {
         recordStart = Date()
         commitWhenReady = false
         do {
-            try mic.start(device: AudioDevices.resolve(settings.microphone))
+            try mic.start(deviceUID: AudioDevices.resolveUID(settings.microphone))
             phase = .recording
             NSSound(named: "Tink")?.play()
         } catch {
@@ -233,8 +239,21 @@ final class VoiceSession: ObservableObject {
     }
 
     func releaseToTalk() {
-        guard phase == .recording else { return }
+        talkKeyHeld = false
+        guard phase == .recording, !finishingRecording else { return }
         mic.stop()
+        // The microphone hands over audio in small batches; give the last one
+        // a moment to arrive so the end of the sentence isn't cut off.
+        finishingRecording = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self else { return }
+            self.finishingRecording = false
+            self.finishRecording()
+        }
+    }
+
+    private func finishRecording() {
+        guard phase == .recording else { return }
         inputLevel = 0
         // Ignore accidental taps: the API rejects buffers under ~100 ms anyway.
         guard PCM.seconds(recording) >= 0.3 else {
