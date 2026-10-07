@@ -72,7 +72,7 @@ Conversations/<id>/
 
 Both remote servers (Streamable HTTP) and local servers (stdio) are supported. Each tool is shown to the model as `<server>__<tool>`.
 
-Settings → General also covers the model, the voice (female or male), reasoning effort, transcription model, talk key, and output mode.
+Settings → General also covers the microphone (the Mac's built-in one by default, so Bluetooth headphones stay in high-quality mode), the model, the voice (female or male), reasoning effort, transcription model, talk key, and output mode.
 
 ## How it works
 

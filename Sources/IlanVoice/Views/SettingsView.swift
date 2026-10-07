@@ -49,6 +49,7 @@ private struct GeneralSettings: View {
                     .help("Names each conversation (30 characters max) from its 10 latest messages after every reply.")
             }
             Section("Talking") {
+                MicrophonePicker()
                 TalkTriggerRecorder(ptt: ptt)
                 Picker("Replies", selection: $settings.outputMode) {
                     ForEach(OutputMode.allCases) { Text($0.label).tag($0) }
@@ -244,6 +245,26 @@ private struct TalkTriggerRecorder: View {
         case .key: return "While Ilan Voice runs, this key only talks to Ilan and no longer types. Keys you rarely use, like F13–F19, work best."
         case .mouse: return "While Ilan Voice runs, this button only talks to Ilan and no longer does its usual job (e.g. Back in a browser)."
         }
+    }
+}
+
+private struct MicrophonePicker: View {
+    @ObservedObject var settings = AppSettings.shared
+    @Local private var devices = AudioDevices.inputs()
+
+    var body: some View {
+        Picker("Microphone", selection: $settings.microphone) {
+            Text(devices.contains(where: \.isBuiltIn) ? "Mac's built-in microphone" : "Built-in (none on this Mac, uses default)")
+                .tag(MicrophoneChoice.builtIn)
+            Text("System default").tag(MicrophoneChoice.system)
+            Divider()
+            ForEach(devices) { d in
+                Text(d.name + (d.isBluetooth ? " (Bluetooth)" : "")).tag(d.uid)
+            }
+        }
+        .onAppear { devices = AudioDevices.inputs() }
+        Text("Recording through Bluetooth headphones switches them to low-quality call audio and garbles the start of each reply. The built-in microphone avoids that.")
+            .font(.caption).foregroundStyle(.secondary)
     }
 }
 

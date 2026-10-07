@@ -35,6 +35,8 @@ final class AppSettings: ObservableObject {
 
     /// The Realtime voice name: OpenAI recommends marin and cedar for quality.
     var voice: String { voiceGender == .female ? "marin" : "cedar" }
+    /// MicrophoneChoice.builtIn, MicrophoneChoice.system, or a device UID.
+    @Published var microphone: String { didSet { defaults.set(microphone, forKey: "microphone") } }
     @Published var transcriptionModel: String { didSet { defaults.set(transcriptionModel, forKey: "transcriptionModel") } }
     /// Text model that names conversations after each reply.
     @Published var titleModel: String { didSet { defaults.set(titleModel, forKey: "titleModel") } }
@@ -56,6 +58,7 @@ final class AppSettings: ObservableObject {
         apiKey = Keychain.load() ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
         model = defaults.string(forKey: "model") ?? "gpt-realtime-2.1"
         voiceGender = VoiceGender(rawValue: defaults.string(forKey: "voiceGender") ?? "") ?? .female
+        microphone = defaults.string(forKey: "microphone") ?? MicrophoneChoice.builtIn
         transcriptionModel = defaults.string(forKey: "transcriptionModel") ?? "gpt-transcribe"
         titleModel = defaults.string(forKey: "titleModel") ?? "gpt-6-luna"
         shellEnabled = defaults.bool(forKey: "shellEnabled")
