@@ -12,7 +12,7 @@ Apple Silicon only. Requires macOS 14 or later.
 
 Conversations name themselves: after every reply, a small text model (GPT-6 Luna by default; change it under Settings → General → Title model) reads the 10 latest messages and picks a title of at most 30 characters. Renaming a conversation yourself turns this off for that conversation.
 
-**Shell commands (optional).** Turn on Settings → General → Shell commands and Ilan can run bash commands on your Mac via a built-in `run_shell` tool. Each command shows a **Run / Deny** card first (unanswered after 2 minutes = denied), except simple commands that start with an entry on your allow-list (`git status`, `ls`, …). Anything containing `;`, `&`, `|`, `>`, `<`, a backtick or `$(` always asks. Commands run with `bash -lc` in the directory you choose, are stopped after the timeout (60 s by default), and appear in the transcript with their output.
+**Shell commands (optional).** Turn on Settings → General → Shell commands and Ilan can run bash commands on your Mac via a built-in `run_shell` tool. It never asks for permission: commands on your allow-list run straight away and everything else is refused (Ilan then tells you what to add). The default list contains only read-only commands (`ls`, `cat`, `grep`, `git status`, `git log`, `kubectl get`, …) and you can edit it freely. Pipes, `&&` and `;` work when every part is allowed; writing to files (`>`), `$( )`, backticks and background `&` are always refused, as are writing flags such as `find -delete` or `git branch -D`. Commands run with `bash -lc` in the directory you choose, are stopped after the timeout (60 s by default), and appear in the transcript with their output.
 
 ## Two ways to hear replies
 

@@ -67,16 +67,21 @@ private struct GeneralSettings: View {
                     TextField("Working directory", text: $settings.shellDirectory)
                     Stepper("Timeout: \(settings.shellTimeout) s", value: $settings.shellTimeout, in: 5...600, step: 5)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Run without asking (one command prefix per line)")
+                        HStack {
+                            Text("Allowed commands (one prefix per line)")
+                            Spacer()
+                            Button("Reset to Read-only Defaults") { settings.shellAllowList = ShellTool.defaultAllowList }
+                                .buttonStyle(.link).font(.caption)
+                        }
                         TextEditor(text: $settings.shellAllowList)
                             .font(.system(size: 12, design: .monospaced))
-                            .frame(height: 90)
+                            .frame(height: 160)
                             .scrollContentBackground(.hidden)
                             .padding(4)
                             .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
                     }
                 }
-                Text("Every other command shows a Run / Deny card first; unanswered requests are denied after 2 minutes. Commands containing ; & | > < ` or $( always ask. Output is sent to OpenAI as part of the conversation.")
+                Text("Ilan never asks: commands on this list run straight away, anything else is refused and Ilan tells you what to add. Pipes, && and ; are fine when every part is allowed; writing to files (>), $( ), backticks and & are always refused. A prefix matches whole words, so \"ls\" does not allow \"lsof\". Output is sent to OpenAI as part of the conversation.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Data") {

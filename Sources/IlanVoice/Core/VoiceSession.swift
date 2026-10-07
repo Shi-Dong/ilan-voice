@@ -31,7 +31,6 @@ final class VoiceSession: ObservableObject {
     let store: ConversationStore
     let mcp: MCPManager
     let clips = ClipPlayer()
-    let shellApprovals = ShellApprovals()
     private let settings = AppSettings.shared
     private let mic = MicrophoneCapture()
     private let speaker = StreamPlayer()
@@ -100,7 +99,6 @@ final class VoiceSession: ObservableObject {
     }
 
     func disconnect() {
-        shellApprovals.denyAll()
         client?.disconnect()
         client = nil
         sessionReady = false
@@ -391,18 +389,16 @@ final class VoiceSession: ObservableObject {
         }
     }
 
-    /// Handles a run_shell call: checks it is enabled, asks the user unless
-    /// the command is allow-listed, then runs it.
+    /// Handles a run_shell call: checks it is enabled and that every part of
+    /// the command is allow-listed, then runs it. Never prompts the user.
     private func runShell(arguments: String) async -> String {
         guard settings.shellEnabled else { return "Error: the shell tool is turned off in Settings." }
         let args = (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] ?? [:]
         guard let command = (args["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
               !command.isEmpty else { return "Error: no command given." }
         let directory = (args["working_directory"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? settings.shellDirectory
-        if !ShellTool.isAllowListed(command, allowList: settings.shellAllowListEntries) {
-            guard await shellApprovals.ask(command: command, directory: directory) else {
-                return "The user denied this command; it was not run."
-            }
+        if let reason = ShellTool.refusal(for: command, allowList: settings.shellAllowListEntries) {
+            return "Not run: \(reason). Only allow-listed read-only commands can run; the user can add commands under Settings → General → Shell commands."
         }
         return await ShellTool.run(command, in: directory, timeout: TimeInterval(max(5, settings.shellTimeout)))
     }

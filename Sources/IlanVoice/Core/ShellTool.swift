@@ -1,9 +1,9 @@
-import AppKit
 import Foundation
 
-/// The built-in `run_shell` tool: lets the model run a bash command on this
-/// Mac. Off by default. Every command needs the user's OK on screen unless it
-/// matches the allow-list and contains no shell operators.
+/// The built-in `run_shell` tool: lets the model run bash commands on this
+/// Mac. Off by default. There is never a prompt: a command runs only if every
+/// part of it is on the user's allow-list (read-only commands by default);
+/// anything else is refused and the model is told why.
 enum ShellTool {
     static let functionName = "run_shell"
     static let maxOutput = 24_000
@@ -13,12 +13,13 @@ enum ShellTool {
             "type": "function",
             "name": functionName,
             "description": """
-            Run a bash command on the user's Mac and get back its exit code and \
-            combined stdout/stderr. The user must approve most commands on screen, \
-            so briefly say what you are about to run before calling this. Prefer \
-            short, read-only commands; never run destructive commands unless the \
-            user explicitly asked for exactly that. Long-running commands are \
-            stopped after the timeout.
+            Run a read-only bash command on the user's Mac and get back its exit \
+            code and combined stdout/stderr. Only commands on the user's allow-list \
+            run; pipes, &&, || and ; are fine when every part is allowed. Output \
+            redirection (>), command substitution ($( ) or backticks) and \
+            background jobs are refused. If a command is refused, tell the user \
+            which command they could add to the allow-list in Settings. \
+            Long-running commands are stopped after the timeout.
             """,
             "parameters": [
                 "type": "object",
@@ -32,18 +33,62 @@ enum ShellTool {
         ]
     }
 
-    /// True when the command may run without asking: it starts with an
-    /// allow-listed prefix (whole words) and has no operators that could chain
-    /// or redirect into something else.
-    static func isAllowListed(_ command: String, allowList: [String]) -> Bool {
-        let cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        let operators = [";", "&", "|", ">", "<", "`", "$(", "\n", "\r"]
-        guard !cmd.isEmpty, !operators.contains(where: { cmd.contains($0) }) else { return false }
-        return allowList.contains { entry in
-            let prefix = entry.trimmingCharacters(in: .whitespaces)
-            guard !prefix.isEmpty else { return false }
-            return cmd == prefix || cmd.hasPrefix(prefix + " ")
+    /// Default allow-list: commands that only read. One prefix per line;
+    /// a prefix matches whole words, so `ls` does not match `lsof`.
+    static let defaultAllowList = [
+        "cd", "pwd", "ls", "tree", "cat", "head", "tail", "wc", "grep", "rg", "find", "file",
+        "stat", "du", "df", "which", "whereis", "type", "echo", "date", "cal", "whoami", "id",
+        "hostname", "uname", "uptime", "ps", "printenv", "sw_vers", "sysctl", "lsof", "netstat",
+        "ifconfig", "diskutil list", "diskutil info", "jq", "sort", "uniq", "cut", "tr", "column",
+        "diff", "cmp", "shasum", "md5", "basename", "dirname", "realpath", "readlink",
+        "git status", "git log", "git diff", "git show", "git branch", "git remote -v",
+        "git rev-parse", "git ls-files", "git blame", "git describe", "git config --get",
+        "git config --list", "git stash list", "git worktree list",
+        "kubectl get", "kubectl describe", "kubectl logs", "kubectl top", "kubectl config view",
+        "kubectl config get-contexts", "kubectl config current-context",
+        "gh pr view", "gh pr list", "gh pr diff", "gh pr checks", "gh run list", "gh run view",
+        "brew list", "brew info", "docker ps", "docker images", "docker logs", "tmux ls",
+    ].joined(separator: "\n")
+
+    /// Flags that turn an otherwise read-only command into one that writes.
+    /// Checked even when the user has allow-listed the command.
+    private static let writingFlags: [String: [String]] = [
+        "find": ["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"],
+        "git branch": ["-d", "-D", "-m", "-M", "-c", "-C", "--delete", "--move", "--copy", "-f", "--force",
+                       "-u", "--set-upstream-to", "--unset-upstream", "--edit-description"],
+        "sort": ["-o", "--output"],
+        "sysctl": ["-w"],
+    ]
+
+    /// Redirections that only throw output away, removed before checking.
+    private static let harmlessRedirects = ["2>&1", "1>&2", "&>/dev/null", "2>/dev/null", "1>/dev/null", ">/dev/null",
+                                            "&> /dev/null", "2> /dev/null", "> /dev/null"]
+
+    /// nil when every part of `command` is allowed; otherwise the reason it is refused.
+    static func refusal(for command: String, allowList: [String]) -> String? {
+        var cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cmd.isEmpty else { return "the command is empty" }
+        for redirect in harmlessRedirects { cmd = cmd.replacingOccurrences(of: redirect, with: " ") }
+        if cmd.contains(">") { return "it redirects output into a file (>)" }
+        if cmd.contains("`") || cmd.contains("$(") || cmd.contains("<(") { return "it uses command substitution" }
+        // Split into the commands of a pipeline / list.
+        let separators = ["&&", "||", ";", "|", "\n", "\r"]
+        var parts = [cmd]
+        for sep in separators { parts = parts.flatMap { $0.components(separatedBy: sep) } }
+        parts = parts.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        if parts.contains(where: { $0.contains("&") }) { return "it starts a background job (&)" }
+        for part in parts {
+            guard allowList.contains(where: { part == $0 || part.hasPrefix($0 + " ") }) else {
+                return "`\(part.split(separator: " ").prefix(2).joined(separator: " "))` is not on the allow-list"
+            }
+            let words = Set(part.split(separator: " ").map(String.init))
+            for (prefix, flags) in writingFlags where part == prefix || part.hasPrefix(prefix + " ") {
+                if let flag = flags.first(where: { words.contains($0) || part.contains(" \($0)=") }) {
+                    return "`\(prefix) \(flag)` can change files"
+                }
+            }
         }
+        return nil
     }
 
     /// Runs `command` with `bash -lc`, merging stdout and stderr. Kills it
@@ -120,53 +165,5 @@ enum ShellTool {
             buffer.append(chunk)
             lock.unlock()
         }
-    }
-}
-
-/// Queue of commands waiting for the user's Run / Deny. The chat view shows
-/// the first one as a card; the caller awaits the answer.
-@MainActor
-final class ShellApprovals: ObservableObject {
-    struct Request: Identifiable {
-        let id = UUID()
-        let command: String
-        let directory: String
-        fileprivate let reply: (Bool) -> Void
-    }
-
-    @Published private(set) var queue: [Request] = []
-    /// Unanswered requests are denied after this long.
-    static let patience: TimeInterval = 120
-
-    var current: Request? { queue.first }
-
-    func ask(command: String, directory: String) async -> Bool {
-        await withCheckedContinuation { cont in
-            var answered = false
-            let request = Request(command: command, directory: directory) { approved in
-                guard !answered else { return }
-                answered = true
-                cont.resume(returning: approved)
-            }
-            queue.append(request)
-            NSSound(named: "Submarine")?.play()
-            NSApp.requestUserAttention(.criticalRequest)
-            NSApp.activate(ignoringOtherApps: true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.patience) { [weak self] in
-                self?.answer(request.id, approved: false)
-            }
-        }
-    }
-
-    func answer(_ id: UUID, approved: Bool) {
-        guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
-        let request = queue.remove(at: index)
-        request.reply(approved)
-    }
-
-    /// Denies everything still waiting (e.g. when the conversation changes).
-    func denyAll() {
-        for request in queue { request.reply(false) }
-        queue.removeAll()
     }
 }

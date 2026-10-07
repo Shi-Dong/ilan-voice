@@ -60,11 +60,8 @@ final class AppSettings: ObservableObject {
     @Published var shellEnabled: Bool { didSet { defaults.set(shellEnabled, forKey: "shellEnabled") } }
     @Published var shellDirectory: String { didSet { defaults.set(shellDirectory, forKey: "shellDirectory") } }
     @Published var shellTimeout: Int { didSet { defaults.set(shellTimeout, forKey: "shellTimeout") } }
-    /// One command prefix per line; matching commands run without asking.
+    /// One command prefix per line; only these commands may run.
     @Published var shellAllowList: String { didSet { defaults.set(shellAllowList, forKey: "shellAllowList") } }
-
-    static let defaultShellAllowList = ["pwd", "ls", "date", "whoami", "git status", "git log", "git diff", "git branch"]
-        .joined(separator: "\n")
 
     var shellAllowListEntries: [String] {
         shellAllowList.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
@@ -83,7 +80,7 @@ final class AppSettings: ObservableObject {
         shellEnabled = defaults.bool(forKey: "shellEnabled")
         shellDirectory = defaults.string(forKey: "shellDirectory") ?? "~"
         shellTimeout = defaults.object(forKey: "shellTimeout") as? Int ?? 60
-        shellAllowList = defaults.string(forKey: "shellAllowList") ?? Self.defaultShellAllowList
+        shellAllowList = defaults.string(forKey: "shellAllowList") ?? ShellTool.defaultAllowList
         reasoningEffort = defaults.string(forKey: "reasoningEffort") ?? "default"
         outputMode = OutputMode(rawValue: defaults.string(forKey: "outputMode") ?? "") ?? .realtime
         talkTrigger = defaults.data(forKey: "talkTrigger").flatMap { try? JSONDecoder().decode(TalkTrigger.self, from: $0) }
