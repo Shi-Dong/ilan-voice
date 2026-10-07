@@ -57,7 +57,7 @@ struct IlanVoiceApp: App {
             }
             CommandGroup(replacing: .newItem) {
                 Button("New Conversation") { model.store.newConversation() }
-                    .keyboardShortcut("n")
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
             }
             CommandMenu("Voice") {
                 Button("Play Next Unheard Reply") { model.session.playNextUnheard() }

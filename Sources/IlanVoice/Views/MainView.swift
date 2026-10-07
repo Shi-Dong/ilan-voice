@@ -69,8 +69,10 @@ struct Sidebar: View {
         .listStyle(.sidebar)
         .toolbar {
             ToolbarItem {
+                // ⇧⌘O is the menu shortcut; ⌘N keeps working through this button.
                 Button { store.newConversation() } label: { Image(systemName: "square.and.pencil") }
-                    .help("New conversation (⌘N)")
+                    .keyboardShortcut("n")
+                    .help("New conversation (⇧⌘O or ⌘N)")
             }
         }
     }
