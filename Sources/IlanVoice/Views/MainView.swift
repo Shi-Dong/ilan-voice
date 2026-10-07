@@ -67,6 +67,20 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom) {
+            SettingsLink {
+                Label("Settings", systemImage: "gearshape.fill")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(Theme.textDim)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Settings (⌘,)")
+            .padding(10)
+        }
         .toolbar {
             ToolbarItem {
                 Button { store.newConversation() } label: { Image(systemName: "square.and.pencil") }
@@ -141,16 +155,19 @@ struct ChatView: View {
             .labelsHidden()
             .frame(width: 210)
             .help("Real-time plays replies as they arrive; Cached keeps them until you press play.")
-            SettingsLink {
-                Image(systemName: "gearshape.fill")
+            Button { session.connect() } label: {
+                Image(systemName: "arrow.clockwise")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textDim)
+                    .rotationEffect(.degrees(session.phase == .connecting ? 180 : 0))
+                    .animation(.easeInOut(duration: 0.4), value: session.phase == .connecting)
                     .frame(width: 30, height: 26)
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Settings (⌘,)")
+            .disabled(session.phase == .recording || session.phase == .connecting)
+            .help("Reconnect (⇧⌘R): start a fresh session so changes to agent.md, the dictionary, tools and voice take effect. The conversation is kept.")
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
     }
