@@ -46,6 +46,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppSleepDisabled</key><true/>
     <key>NSMicrophoneUsageDescription</key><string>Ilan Voice records your voice while you hold the talk key.</string>
 </dict>
 </plist>

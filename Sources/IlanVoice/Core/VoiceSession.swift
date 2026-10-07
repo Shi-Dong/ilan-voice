@@ -105,6 +105,8 @@ final class VoiceSession: ObservableObject {
             guard let self, self.client === client else { return }
             self.client = nil
             self.sessionReady = false
+            self.cancelWatchdog()
+            if self.retryUnsentTurn() { return }
             if self.phase != .recording { self.phase = .offline }
             if let reason, reason != "Connection closed" { self.errorMessage = reason }
         }
@@ -298,14 +300,66 @@ final class VoiceSession: ObservableObject {
     }
 
     private func commit() {
+        unsentTurn = pendingUserAudio ?? recording
         client?.send(["type": "input_audio_buffer.commit"])
         client?.send(["type": "response.create"])
+        armWatchdog()
+    }
+
+    // MARK: Never wait forever
+
+    /// The message just sent, kept until the server confirms it, so a dropped
+    /// connection can be redialled and the message sent again once.
+    private var unsentTurn: Data?
+    private var turnRetried = false
+    private var watchdog: DispatchWorkItem?
+    private static let replyTimeout: TimeInterval = 20
+
+    /// If the server says nothing at all after a message, the connection is
+    /// dead even if the socket hasn't noticed yet.
+    private func armWatchdog() {
+        watchdog?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.phase == .thinking else { return }
+            self.client?.disconnect()
+            self.client = nil
+            self.sessionReady = false
+            if !self.retryUnsentTurn() {
+                self.phase = .offline
+                self.errorMessage = "No reply from OpenAI. Check your connection and try again."
+            }
+        }
+        watchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.replyTimeout, execute: work)
+    }
+
+    private func cancelWatchdog() {
+        watchdog?.cancel()
+        watchdog = nil
+    }
+
+    /// Redials and resends the unconfirmed message, once. Returns false if
+    /// there was nothing to resend or it was already retried.
+    private func retryUnsentTurn() -> Bool {
+        guard let turn = unsentTurn, !turnRetried else {
+            unsentTurn = nil
+            turnRetried = false
+            return false
+        }
+        turnRetried = true
+        connect()
+        pendingUserAudio = turn
+        bufferedAudio = [turn]
+        commitWhenReady = true
+        phase = .thinking
+        return true
     }
 
     // MARK: Server events
 
     private func handle(_ event: [String: Any]) {
         guard let type = event["type"] as? String, let convID = conversationID else { return }
+        if type != "session.created" && type != "session.updated" { cancelWatchdog() }
         switch type {
         case "session.created":
             client?.send(sessionConfig())
@@ -323,6 +377,8 @@ final class VoiceSession: ObservableObject {
             }
 
         case "input_audio_buffer.committed":
+            unsentTurn = nil
+            turnRetried = false
             guard let itemID = event["item_id"] as? String else { return }
             var msg = Message(id: itemID, role: .user, text: "", pending: true)
             if let pcm = pendingUserAudio {
