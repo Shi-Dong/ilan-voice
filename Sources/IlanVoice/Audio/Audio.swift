@@ -79,7 +79,7 @@ final class MicrophoneCapture {
 /// `prebufferSeconds` of audio is ready (or the reply ends), then played; once
 /// it is playing, later chunks queue behind it.
 final class StreamPlayer {
-    static let prebufferSeconds = 0.5
+    static let prebufferSeconds = 1.0
 
     private let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
