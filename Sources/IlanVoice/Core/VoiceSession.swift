@@ -113,10 +113,23 @@ final class VoiceSession: ObservableObject {
         if client == nil || stale { connect() }
     }
 
+    /// Grounds speech recognition with the user's dictionary: a prompt for
+    /// every model, plus `keywords` for the live-transcribe models that take them.
+    private func transcriptionConfig(_ dictionary: [String]) -> [String: Any] {
+        var config: [String: Any] = ["model": settings.transcriptionModel]
+        if let prompt = UserDictionary.transcriptionPrompt(dictionary) { config["prompt"] = prompt }
+        if settings.transcriptionModel.contains("live-transcribe"), !dictionary.isEmpty {
+            config["keywords"] = Array(dictionary.prefix(100))
+        }
+        return config
+    }
+
     private func sessionConfig() -> [String: Any] {
         var instructions = Paths.loadAgent()
         let now = DateFormatter.localizedString(from: Date(), dateStyle: .full, timeStyle: .short)
         instructions += "\n\n---\nCurrent local time: \(now).\n"
+        let dictionary = UserDictionary.terms()
+        if let vocabulary = UserDictionary.instructions(dictionary) { instructions += vocabulary + "\n" }
         if let conv = store.conversations.first(where: { $0.id == conversationID }) {
             let history = conv.messages.filter { $0.role != .tool && !$0.text.isEmpty }.suffix(40)
             if !history.isEmpty {
@@ -133,7 +146,7 @@ final class VoiceSession: ObservableObject {
                 "input": [
                     "format": ["type": "audio/pcm", "rate": 24000],
                     "turn_detection": NSNull(),
-                    "transcription": ["model": settings.transcriptionModel],
+                    "transcription": transcriptionConfig(dictionary),
                 ],
                 "output": [
                     "format": ["type": "audio/pcm", "rate": 24000],

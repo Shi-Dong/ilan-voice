@@ -14,6 +14,8 @@ Conversations name themselves: after every reply, a small text model (GPT-6 Luna
 
 **Shell commands (optional).** Turn on Settings → Shell and Ilan can run bash commands on your Mac via a built-in `run_shell` tool. It never asks for permission: commands on your allow-list run straight away and everything else is refused (Ilan then tells you what to add). The default list contains only read-only commands (`ls`, `cat`, `grep`, `git status`, `git log`, `kubectl get`, …) and you can edit it freely. Each line is either a command prefix (whole words: `ls` does not allow `lsof`) or a regular expression wrapped in slashes that must match the whole command, e.g. `/kubectl -n [a-z-]+ (get|describe) .*/`. Pipes, `&&` and `;` work when every part is allowed; writing to files (`>`), `$( )`, backticks and background `&` are always refused, as are writing flags such as `find -delete` or `git branch -D`. Commands run with `bash -lc` in the directory you choose, are stopped after the timeout (60 s by default), and appear in the transcript with their output.
 
+**Dictionary.** Settings → Dictionary holds your own words (names, jargon, acronyms), one per line. They are sent to the transcription model as a hint and to Ilan as a vocabulary list, so both recognise and spell them your way. Stored in `dictionary.txt` next to `agent.md`.
+
 ## Two ways to hear replies
 
 | Mode | What happens |
@@ -53,6 +55,7 @@ Everything lives in `~/Library/Application Support/Ilan Voice/`:
 ```
 agent.md                      the agent's instructions (also editable in Settings → Agent)
 mcp.json                      MCP servers (Settings → MCP Tools)
+dictionary.txt                your words, one per line (Settings → Dictionary)
 Conversations/<id>/
     conversation.json         the full record
     transcript.md             the same record, easy to read

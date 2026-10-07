@@ -11,6 +11,7 @@ struct SettingsView: View {
             AgentSettings().tabItem { Label("Agent", systemImage: "person.text.rectangle") }
             MCPSettings(mcp: mcp).tabItem { Label("MCP Tools", systemImage: "wrench.and.screwdriver") }
             ShellSettings().tabItem { Label("Shell", systemImage: "terminal") }
+            DictionarySettings().tabItem { Label("Dictionary", systemImage: "character.book.closed") }
         }
         .frame(width: 640, height: 520)
         .preferredColorScheme(.dark)
@@ -310,5 +311,37 @@ private struct ShellSettings: View {
             .disabled(!settings.shellEnabled)
         }
         .formStyle(.grouped)
+    }
+}
+
+/// One word or phrase per line; grounds transcription and the model's spelling.
+private struct DictionarySettings: View {
+    @Local private var text = UserDictionary.loadText()
+    @Local private var saved = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Your words: names, jargon and acronyms that speech recognition gets wrong. One per line, spelled the way you want them written. They are given to the transcription model and to Ilan, so both hear and spell them your way. Changes apply to the next conversation (or Voice → Reconnect).")
+                .font(.callout).foregroundStyle(.secondary)
+            TextEditor(text: $text)
+                .font(.system(size: 13, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+                .onChange(of: text) { _, _ in saved = false }
+            HStack {
+                Text("\(UserDictionary.terms(from: text).count) terms")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if saved { Label("Saved", systemImage: "checkmark").foregroundStyle(.secondary).font(.caption) }
+                Button("Save") {
+                    UserDictionary.save(text)
+                    saved = true
+                }
+                .keyboardShortcut("s")
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
     }
 }
