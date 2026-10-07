@@ -60,10 +60,24 @@ SIGN_DIR="$HOME/Library/Application Support/Ilan Voice/signing"
 KEYCHAIN="$SIGN_DIR/ilan-voice-signing.keychain-db"
 KEYCHAIN_PASS="ilan-voice-local"
 IDENTITY="Ilan Voice Local Signing"
-if [[ ! -f "$KEYCHAIN" ]]; then
+
+# Prints the SHA-1 of the signing identity in our keychain, or nothing.
+# (awk reads all its input on purpose: exiting early would SIGPIPE `security`
+# and trip pipefail.)
+identity_hash() {
+    [[ -f "$KEYCHAIN" ]] || return 0
+    security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN" 2>/dev/null || return 0
+    security find-identity -p codesigning "$KEYCHAIN" 2>/dev/null \
+        | awk -v name="\"$IDENTITY\"" 'index($0, name) && h == "" { h = $2 } END { if (h != "") print h }'
+}
+
+create_identity() {
+    # Start clean: a keychain left over from an interrupted run may be empty.
+    security delete-keychain "$KEYCHAIN" 2>/dev/null || rm -f "$KEYCHAIN"
     mkdir -p "$SIGN_DIR"
-    TMP="$(mktemp -d)"
-    cat > "$TMP/cert.cnf" <<CNF
+    local tmp
+    tmp="$(mktemp -d)"
+    cat > "$tmp/cert.cnf" <<CNF
 [req]
 distinguished_name=dn
 x509_extensions=ext
@@ -75,22 +89,38 @@ basicConstraints=critical,CA:false
 keyUsage=critical,digitalSignature
 extendedKeyUsage=critical,codeSigning
 CNF
-    openssl req -x509 -newkey rsa:2048 -nodes -days 7300 -config "$TMP/cert.cnf" \
-        -keyout "$TMP/key.pem" -out "$TMP/cert.pem" 2>/dev/null
-    openssl pkcs12 -export -legacy -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-        -out "$TMP/id.p12" -passout pass:ilan 2>/dev/null \
-        || openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-            -out "$TMP/id.p12" -passout pass:ilan
+    openssl req -x509 -newkey rsa:2048 -nodes -days 7300 -config "$tmp/cert.cnf" \
+        -keyout "$tmp/key.pem" -out "$tmp/cert.pem" 2>/dev/null
+    # OpenSSL 3 needs -legacy for a .p12 that `security import` accepts;
+    # macOS's own LibreSSL writes that format by default.
+    openssl pkcs12 -export -legacy -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
+        -out "$tmp/id.p12" -passout pass:ilan 2>/dev/null \
+        || openssl pkcs12 -export -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
+            -out "$tmp/id.p12" -passout pass:ilan
     security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
     security set-keychain-settings "$KEYCHAIN"   # never auto-lock
     security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
-    security import "$TMP/id.p12" -k "$KEYCHAIN" -P ilan -T /usr/bin/codesign >/dev/null
-    security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
-    rm -rf "$TMP"
+    security import "$tmp/id.p12" -k "$KEYCHAIN" -P ilan -T /usr/bin/codesign >/dev/null
+    security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null 2>&1 || true
+    rm -rf "$tmp"
     echo "Created signing certificate \"$IDENTITY\" in $KEYCHAIN"
+}
+
+HASH="$(identity_hash)"
+if [[ -z "$HASH" ]]; then
+    create_identity || true
+    HASH="$(identity_hash)"
 fi
-security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
-codesign --force --sign "$IDENTITY" --keychain "$KEYCHAIN" --identifier me.dongshi.ilan-voice "$APP"
+
+# Never let signing block an update: fall back to an ad hoc signature (the app
+# works, but macOS will ask for Accessibility again after this build).
+if [[ -n "$HASH" ]] && codesign --force --sign "$HASH" --keychain "$KEYCHAIN" \
+        --identifier me.dongshi.ilan-voice "$APP"; then
+    echo "Signed with \"$IDENTITY\" ($HASH)"
+else
+    echo "warning: could not sign with \"$IDENTITY\"; falling back to an ad hoc signature" >&2
+    codesign --force --sign - --identifier me.dongshi.ilan-voice "$APP"
+fi
 echo "Built $APP"
 
 if [[ "${1:-}" == "--install" ]]; then
