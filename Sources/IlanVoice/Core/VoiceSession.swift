@@ -45,6 +45,12 @@ final class VoiceSession: ObservableObject {
     private var commitWhenReady = false
     private var responseActive = false
     private var talkKeyHeld = false
+    /// The current press cut Ilan off (so a quick tap reads as "stop").
+    private var interruptedThisPress = false
+
+    /// What a press of the talk key turned out to be, for the floating pill.
+    enum PressOutcome { case sent, stoppedSpeech, discarded }
+    let pressEnded = PassthroughSubject<PressOutcome, Never>()
     private var finishingRecording = false
     private var currentResponseID: String?
     /// Audio for this response is dropped: the user interrupted it.
@@ -187,7 +193,10 @@ final class VoiceSession: ObservableObject {
             }
             // A quick tap can be over before permission comes back: then the
             // tap only interrupted Ilan, and nothing is recorded.
-            guard talkKeyHeld else { return }
+            guard talkKeyHeld else {
+                pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded)
+                return
+            }
             beginRecording()
         }
     }
@@ -196,10 +205,13 @@ final class VoiceSession: ObservableObject {
     /// cancels the reply being generated, drops audio from it that is still on
     /// its way, skips the follow-up to any running tool call, and tells the
     /// server how much of the reply was actually heard.
-    func interrupt() {
+    /// Returns true if there was something to stop.
+    @discardableResult
+    func interrupt() -> Bool {
         let wasSpeaking = speaker.isPlaying || responseActive || phase == .speaking || phase == .working
+        let wasReplaying = clips.playingID != nil
         clips.stop()
-        guard wasSpeaking else { return }
+        guard wasSpeaking else { return wasReplaying }
         if let itemID = speakingItemID, let start = speakingItemStartFrame, client != nil {
             let heardMs = max(0, (speaker.playedFrames - start) * 1000 / Int(PCM.sampleRate))
             client?.send(["type": "conversation.item.truncate", "item_id": itemID,
@@ -220,6 +232,7 @@ final class VoiceSession: ObservableObject {
             }
         }
         if phase == .speaking || phase == .working || phase == .thinking { phase = sessionReady ? .ready : .offline }
+        return true
     }
 
     private func beginRecording() {
@@ -258,9 +271,11 @@ final class VoiceSession: ObservableObject {
         // Ignore accidental taps: the API rejects buffers under ~100 ms anyway.
         guard PCM.seconds(recording) >= 0.3 else {
             if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
+            pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded)
             phase = sessionReady ? .ready : (client == nil ? .offline : .connecting)
             return
         }
+        pressEnded.send(.sent)
         NSSound(named: "Pop")?.play()
         pendingUserAudio = recording
         phase = .thinking

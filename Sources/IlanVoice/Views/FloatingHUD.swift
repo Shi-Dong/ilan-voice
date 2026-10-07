@@ -13,7 +13,7 @@ final class FloatingHUD {
     private var hideWork: DispatchWorkItem?
 
     init(session: VoiceSession) {
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 200, height: 44),
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 44),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         panel.isFloatingPanel = true
         panel.level = .statusBar
@@ -31,25 +31,40 @@ final class FloatingHUD {
             .removeDuplicates()
             .sink { [weak self] phase in self?.update(phase) }
             .store(in: &cancellables)
+        session.pressEnded
+            .sink { [weak self] outcome in self?.finish(outcome) }
+            .store(in: &cancellables)
         session.$inputLevel
             .sink { [weak self] level in self?.model.push(level) }
             .store(in: &cancellables)
     }
 
     private func update(_ phase: VoiceSession.Phase) {
-        switch phase {
-        case .recording:
-            hideWork?.cancel()
-            model.mode = .listening
-            model.reset()
-            show()
-        default:
-            guard panel.isVisible, model.mode == .listening else { return }
+        guard phase == .recording else { return }
+        hideWork?.cancel()
+        model.mode = .listening
+        model.reset()
+        show()
+    }
+
+    /// How a press ended: "Sent to Ilan", "Stopped assistant speech" (a quick
+    /// tap that cut Ilan off), or nothing for an accidental tap.
+    private func finish(_ outcome: VoiceSession.PressOutcome) {
+        hideWork?.cancel()
+        switch outcome {
+        case .discarded:
+            if panel.isVisible { hide() }
+            return
+        case .sent:
+            guard panel.isVisible else { return }
             model.mode = .sent
-            let work = DispatchWorkItem { [weak self] in self?.hide() }
-            hideWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: work)
+        case .stoppedSpeech:
+            model.mode = .stopped
+            if !panel.isVisible { show() }
         }
+        let work = DispatchWorkItem { [weak self] in self?.hide() }
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: work)
     }
 
     private func show() {
@@ -77,7 +92,7 @@ final class FloatingHUD {
 
 @MainActor
 final class HUDModel: ObservableObject {
-    enum Mode { case listening, sent }
+    enum Mode { case listening, sent, stopped }
     static let barCount = 14
 
     @Published var mode: Mode = .listening
@@ -112,7 +127,8 @@ private struct HUDView: View {
                     .fill(Color(red: 1, green: 0.42, blue: 0.42))
                     .frame(width: 7, height: 7)
             } else {
-                Label("Sent to Ilan", systemImage: "checkmark")
+                Label(model.mode == .stopped ? "Stopped assistant speech" : "Sent to Ilan",
+                      systemImage: model.mode == .stopped ? "stop.fill" : "checkmark")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Theme.mint)
                     .transition(.opacity)
@@ -125,7 +141,7 @@ private struct HUDView: View {
                 .overlay(Capsule().stroke(Theme.mint.opacity(0.35), lineWidth: 1))
         )
         .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
-        .frame(width: 200, height: 44)
+        .frame(width: 240, height: 44)
         .animation(.easeInOut(duration: 0.15), value: model.mode)
     }
 }
