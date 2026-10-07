@@ -141,6 +141,16 @@ struct ChatView: View {
             .labelsHidden()
             .frame(width: 210)
             .help("Real-time plays replies as they arrive; Cached keeps them until you press play.")
+            SettingsLink {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.textDim)
+                    .frame(width: 30, height: 26)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Settings (⌘,)")
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
     }
