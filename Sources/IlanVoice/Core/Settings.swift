@@ -22,19 +22,19 @@ enum VoiceGender: String, CaseIterable, Identifiable {
 }
 
 /// User preferences. Everything but the API key lives in UserDefaults; the
-/// key lives in the login Keychain.
+/// key lives in a private file (see `SecretStore`).
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
     static let reasoningEfforts = ["default", "minimal", "low", "medium", "high"]
 
     private let defaults = UserDefaults.standard
 
-    @Published var apiKey: String { didSet { Keychain.save(apiKey) } }
+    @Published var apiKey: String { didSet { SecretStore.set(SecretStore.openAI, apiKey) } }
     /// Built-in web_search tool. On by default; it only reaches the model
     /// once a search API key is set.
     @Published var webSearchEnabled: Bool { didSet { defaults.set(webSearchEnabled, forKey: "webSearchEnabled") } }
     @Published var webSearchProvider: WebSearchProvider { didSet { defaults.set(webSearchProvider.rawValue, forKey: "webSearchProvider") } }
-    @Published var geminiAPIKey: String { didSet { Keychain.save(geminiAPIKey, account: Keychain.geminiAccount) } }
+    @Published var geminiAPIKey: String { didSet { SecretStore.set(SecretStore.gemini, geminiAPIKey) } }
     @Published var geminiModel: String { didSet { defaults.set(geminiModel, forKey: "geminiModel") } }
 
     var webSearchAvailable: Bool {
@@ -65,7 +65,7 @@ final class AppSettings: ObservableObject {
     @Published var talkTrigger: TalkTrigger { didSet { defaults.set(try? JSONEncoder().encode(talkTrigger), forKey: "talkTrigger") } }
 
     private init() {
-        apiKey = Keychain.load() ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
+        apiKey = SecretStore.get(SecretStore.openAI) ?? ""
         model = defaults.string(forKey: "model") ?? "gpt-realtime-2.1"
         voiceGender = VoiceGender(rawValue: defaults.string(forKey: "voiceGender") ?? "") ?? .female
         microphone = defaults.string(forKey: "microphone") ?? MicrophoneChoice.builtIn
@@ -74,7 +74,7 @@ final class AppSettings: ObservableObject {
         shellEnabled = defaults.bool(forKey: "shellEnabled")
         webSearchEnabled = defaults.object(forKey: "webSearchEnabled") as? Bool ?? true
         webSearchProvider = WebSearchProvider(rawValue: defaults.string(forKey: "webSearchProvider") ?? "") ?? .gemini
-        geminiAPIKey = Keychain.load(Keychain.geminiAccount) ?? ProcessInfo.processInfo.environment["GEMINI_API_KEY"] ?? ""
+        geminiAPIKey = SecretStore.get(SecretStore.gemini) ?? ""
         geminiModel = defaults.string(forKey: "geminiModel") ?? WebSearchTool.defaultGeminiModel
         shellDirectory = defaults.string(forKey: "shellDirectory") ?? "~"
         shellTimeout = defaults.object(forKey: "shellTimeout") as? Int ?? 60
@@ -91,32 +91,3 @@ final class AppSettings: ObservableObject {
     }
 }
 
-enum Keychain {
-    private static let service = "Ilan Voice"
-    static let openAIAccount = "openai-api-key"
-    static let geminiAccount = "gemini-api-key"
-
-    private static func query(_ account: String) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: service,
-         kSecAttrAccount as String: account]
-    }
-
-    static func load(_ account: String = openAIAccount) -> String? {
-        var q = query(account)
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func save(_ value: String, account: String = openAIAccount) {
-        SecItemDelete(query(account) as CFDictionary)
-        guard !value.isEmpty else { return }
-        var q = query(account)
-        q[kSecValueData as String] = Data(value.utf8)
-        SecItemAdd(q as CFDictionary, nil)
-    }
-}

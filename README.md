@@ -14,7 +14,7 @@ Conversations name themselves: after every reply, a small text model (GPT-6 Luna
 
 **Shell commands (optional).** Turn on Settings → Shell and Ilan can run bash commands on your Mac via a built-in `run_shell` tool. It never asks for permission: commands on your allow-list run straight away and everything else is refused (Ilan then tells you what to add). The default list contains only read-only commands (`ls`, `cat`, `grep`, `git status`, `git log`, `kubectl get`, …) and you can edit it freely. Each line is either a command prefix (whole words: `ls` does not allow `lsof`) or a regular expression wrapped in slashes that must match the whole command, e.g. `/kubectl -n [a-z-]+ (get|describe) .*/`. Pipes, `&&` and `;` work when every part is allowed; writing to files (`>`), `$( )`, backticks and background `&` are always refused, as are writing flags such as `find -delete` or `git branch -D`. Commands run with `bash -lc` in the directory you choose, are stopped after the timeout (60 s by default), and appear in the transcript with their output.
 
-**Web search.** Settings → Web Search: paste a Gemini API key and Ilan gets a built-in `web_search` tool. Gemini (`gemini-3.8-flash` by default) answers each query with Grounding with Google Search, and the answer and its sources appear in the transcript. The key is stored in the Keychain; `GEMINI_API_KEY` in the environment also works.
+**Web search.** Settings → Web Search: paste a Gemini API key and Ilan gets a built-in `web_search` tool. Gemini (`gemini-3.8-flash` by default) answers each query with Grounding with Google Search, and the answer and its sources appear in the transcript. The key is stored as `GEMINI_API_KEY` with your other API keys (see below); `GEMINI_API_KEY` in the environment also works.
 
 **Dictionary.** Settings → Dictionary holds your own words (names, jargon, acronyms), one per line. They are sent to the transcription model as a hint and to Ilan as a vocabulary list, so both recognise and spell them your way. Stored in `dictionary.txt` next to `agent.md`.
 
@@ -40,7 +40,7 @@ open "/Applications/Ilan Voice.app"
 
 On first launch:
 
-1. Open **Settings (⌘, or the Settings button at the bottom of the sidebar) → General** and paste your OpenAI API key. It is stored in the macOS login Keychain.
+1. Open **Settings (⌘, or the Settings button at the bottom of the sidebar) → General** and paste your OpenAI API key. It is stored with your other API keys in `~/Library/Application Support/Ilan Voice/secrets.json`, readable only by your user account (see **Settings → API Keys**).
 2. Allow microphone access when macOS asks.
 3. Click **Allow Accessibility** at the bottom of the window. Without it, the talk key only works while Ilan Voice is the active app. The first build creates a private self-signed certificate on your Mac (in `~/Library/Application Support/Ilan Voice/signing/`) and signs every later build with it, so macOS keeps the permission across rebuilds and updates. If you are upgrading from a build made before this, remove the old Ilan Voice entry under Privacy & Security → Accessibility and allow it once more.
 
@@ -49,6 +49,10 @@ On first launch:
 Click **Check for Updates** in Settings → General (or use **Ilan Voice → Check for Updates…**). The app also checks once each time it starts, and shows an orange **Update** button at the top of the window when GitHub has a newer version. **Install & Relaunch** downloads the latest `main` into `~/Library/Application Support/Ilan Voice/source`, builds it on this Mac, replaces the installed app, and reopens it. The build log is saved to `update.log` in the same folder. Your settings, `agent.md`, `mcp.json` and conversations are not touched.
 
 Because the app is built on your Mac rather than downloaded, macOS has nothing to block. The only requirement is the Command Line Tools (`xcode-select --install`).
+
+## API keys
+
+**Settings → API Keys** holds every key the app uses, by name (`OPENAI_API_KEY`, `GEMINI_API_KEY`, and any others you add). They live in `secrets.json`, readable only by your user account. They are deliberately not in the Keychain, which would ask for your password after every update of a self-built app. `mcp.json` can use any of them as `${NAME}`, e.g. `"headers": { "Authorization": "Bearer ${MEMORY_TOKEN}" }`, so tokens don't have to be pasted into it. A name with no stored value falls back to the environment variable of the same name.
 
 ## Configuration
 

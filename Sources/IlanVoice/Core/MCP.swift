@@ -256,11 +256,13 @@ final class MCPManager: ObservableObject {
 
     private static func connect(name: String, spec: [String: Any]) async throws -> (MCPTransport, [ToolBinding]) {
         let transport: MCPTransport
-        if let urlString = spec["url"] as? String, let url = URL(string: urlString) {
-            transport = HTTPTransport(url: url, headers: spec["headers"] as? [String: String] ?? [:])
-        } else if let command = spec["command"] as? String {
-            transport = try StdioTransport(command: command, args: spec["args"] as? [String] ?? [],
-                                           env: spec["env"] as? [String: String] ?? [:])
+        // "${NAME}" anywhere in a server's settings is filled from the secret store.
+        let expand = SecretStore.expand
+        if let urlString = (spec["url"] as? String).map(expand), let url = URL(string: urlString) {
+            transport = HTTPTransport(url: url, headers: (spec["headers"] as? [String: String] ?? [:]).mapValues(expand))
+        } else if let command = (spec["command"] as? String).map(expand) {
+            transport = try StdioTransport(command: command, args: (spec["args"] as? [String] ?? []).map(expand),
+                                           env: (spec["env"] as? [String: String] ?? [:]).mapValues(expand))
         } else {
             throw MCPError.protocolError("Needs a \"url\" or a \"command\"")
         }
