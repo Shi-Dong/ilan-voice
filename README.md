@@ -40,13 +40,13 @@ On first launch:
 
 1. Open **Settings (⌘, or the gear button at the top right of the window) → General** and paste your OpenAI API key. It is stored in the macOS login Keychain.
 2. Allow microphone access when macOS asks.
-3. Click **Allow Accessibility** at the bottom of the window. Without it, the talk key only works while Ilan Voice is the active app. The app is signed ad hoc (no developer certificate), so after each rebuild you have to remove and re-add it under Privacy & Security → Accessibility.
+3. Click **Allow Accessibility** at the bottom of the window. Without it, the talk key only works while Ilan Voice is the active app. The first build creates a private self-signed certificate on your Mac (in `~/Library/Application Support/Ilan Voice/signing/`) and signs every later build with it, so macOS keeps the permission across rebuilds and updates. If you are upgrading from a build made before this, remove the old Ilan Voice entry under Privacy & Security → Accessibility and allow it once more.
 
 ## Updating
 
 Click **Check for Updates** in Settings → General (or use **Ilan Voice → Check for Updates…**). The app also checks once each time it starts, and shows an orange **Update** button at the top of the window when GitHub has a newer version. **Install & Relaunch** downloads the latest `main` into `~/Library/Application Support/Ilan Voice/source`, builds it on this Mac, replaces the installed app, and reopens it. The build log is saved to `update.log` in the same folder. Your settings, `agent.md`, `mcp.json` and conversations are not touched.
 
-Because the app is built on your Mac rather than downloaded, macOS has nothing to block. The only requirement is the Command Line Tools (`xcode-select --install`). After an update, macOS may ask you to allow Accessibility again.
+Because the app is built on your Mac rather than downloaded, macOS has nothing to block. The only requirement is the Command Line Tools (`xcode-select --install`).
 
 ## Configuration
 

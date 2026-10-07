@@ -45,6 +45,14 @@ final class PushToTalk: ObservableObject {
             return swallowed ? nil : event
         }) { monitors.append(m) }
         installTap()
+        // Re-check right away when the user comes back from System Settings.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.trusted = AXIsProcessTrusted()
+                if self.tap == nil { self.installTap() }
+            }
+        }
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
