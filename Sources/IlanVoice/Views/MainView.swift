@@ -207,6 +207,7 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain).foregroundStyle(Theme.textDim)
             }
+            ShellApprovalCard(approvals: session.shellApprovals)
             ZStack {
                 TalkOrb(session: session)
                 HStack {
@@ -238,6 +239,55 @@ struct ChatView: View {
         case .recording: "Listening — release to send"
         case .speaking: "Hold \(settings.talkTrigger.shortLabel) to interrupt"
         default: "Hold \(settings.talkTrigger.shortLabel) or the button to talk"
+        }
+    }
+}
+
+/// Shown while the model is waiting for permission to run a shell command.
+struct ShellApprovalCard: View {
+    @ObservedObject var approvals: ShellApprovals
+
+    var body: some View {
+        if let request = approvals.current {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "terminal.fill").foregroundStyle(Theme.orange)
+                    Text("Ilan wants to run a command")
+                        .font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    if approvals.queue.count > 1 {
+                        Text("+\(approvals.queue.count - 1) more")
+                            .font(.system(size: 11)).foregroundStyle(Theme.textDim)
+                    }
+                }
+                ScrollView {
+                    Text(request.command)
+                        .font(.system(size: 12.5, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 120)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(10)
+                .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                HStack {
+                    Label(request.directory, systemImage: "folder")
+                        .font(.system(size: 11)).foregroundStyle(Theme.textDim).lineLimit(1)
+                    Spacer()
+                    Button("Deny") { approvals.answer(request.id, approved: false) }
+                        .keyboardShortcut(.cancelAction)
+                    Button("Run") { approvals.answer(request.id, approved: true) }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: 620)
+            .background(Theme.inkRaised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.orange.opacity(0.6)))
+            .padding(.horizontal, 24)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 }

@@ -61,6 +61,24 @@ private struct GeneralSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             UpdatesSection(updater: updater)
+            Section("Shell commands") {
+                Toggle("Let Ilan run bash commands on this Mac", isOn: $settings.shellEnabled)
+                if settings.shellEnabled {
+                    TextField("Working directory", text: $settings.shellDirectory)
+                    Stepper("Timeout: \(settings.shellTimeout) s", value: $settings.shellTimeout, in: 5...600, step: 5)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Run without asking (one command prefix per line)")
+                        TextEditor(text: $settings.shellAllowList)
+                            .font(.system(size: 12, design: .monospaced))
+                            .frame(height: 90)
+                            .scrollContentBackground(.hidden)
+                            .padding(4)
+                            .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+                Text("Every other command shows a Run / Deny card first; unanswered requests are denied after 2 minutes. Commands containing ; & | > < ` or $( always ask. Output is sent to OpenAI as part of the conversation.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Data") {
                 LabeledContent("Folder") {
                     Button("Open in Finder") { NSWorkspace.shared.open(Paths.root) }

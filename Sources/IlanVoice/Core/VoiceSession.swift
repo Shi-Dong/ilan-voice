@@ -31,6 +31,7 @@ final class VoiceSession: ObservableObject {
     let store: ConversationStore
     let mcp: MCPManager
     let clips = ClipPlayer()
+    let shellApprovals = ShellApprovals()
     private let settings = AppSettings.shared
     private let mic = MicrophoneCapture()
     private let speaker = StreamPlayer()
@@ -99,6 +100,7 @@ final class VoiceSession: ObservableObject {
     }
 
     func disconnect() {
+        shellApprovals.denyAll()
         client?.disconnect()
         client = nil
         sessionReady = false
@@ -141,7 +143,7 @@ final class VoiceSession: ObservableObject {
                     "voice": settings.voice,
                 ],
             ],
-            "tools": mcp.realtimeTools,
+            "tools": mcp.realtimeTools + (settings.shellEnabled ? [ShellTool.definition] : []),
             "tool_choice": "auto",
         ]
         if settings.reasoningEffort != "default" {
@@ -373,7 +375,9 @@ final class VoiceSession: ObservableObject {
                                                    toolName: name, toolArguments: args))
                     }
                     group.addTask { @MainActor in
-                        let output = await self.mcp.call(functionName: name, arguments: args)
+                        let output = name == ShellTool.functionName
+                            ? await self.runShell(arguments: args)
+                            : await self.mcp.call(functionName: name, arguments: args)
                         self.store.updateMessage(convID, callID) { $0.text = output; $0.pending = false }
                         guard self.conversationID == convID else { return }
                         self.client?.send(["type": "conversation.item.create",
@@ -385,6 +389,22 @@ final class VoiceSession: ObservableObject {
             phase = .thinking
             client?.send(["type": "response.create"])
         }
+    }
+
+    /// Handles a run_shell call: checks it is enabled, asks the user unless
+    /// the command is allow-listed, then runs it.
+    private func runShell(arguments: String) async -> String {
+        guard settings.shellEnabled else { return "Error: the shell tool is turned off in Settings." }
+        let args = (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] ?? [:]
+        guard let command = (args["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !command.isEmpty else { return "Error: no command given." }
+        let directory = (args["working_directory"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? settings.shellDirectory
+        if !ShellTool.isAllowListed(command, allowList: settings.shellAllowListEntries) {
+            guard await shellApprovals.ask(command: command, directory: directory) else {
+                return "The user denied this command; it was not run."
+            }
+        }
+        return await ShellTool.run(command, in: directory, timeout: TimeInterval(max(5, settings.shellTimeout)))
     }
 
     // MARK: Playback of saved clips

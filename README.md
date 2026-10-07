@@ -12,6 +12,8 @@ Apple Silicon only. Requires macOS 14 or later.
 
 Conversations name themselves: after every reply, a small text model (GPT-6 Luna by default; change it under Settings → General → Title model) reads the 10 latest messages and picks a title of at most 30 characters. Renaming a conversation yourself turns this off for that conversation.
 
+**Shell commands (optional).** Turn on Settings → General → Shell commands and Ilan can run bash commands on your Mac via a built-in `run_shell` tool. Each command shows a **Run / Deny** card first (unanswered after 2 minutes = denied), except simple commands that start with an entry on your allow-list (`git status`, `ls`, …). Anything containing `;`, `&`, `|`, `>`, `<`, a backtick or `$(` always asks. Commands run with `bash -lc` in the directory you choose, are stopped after the timeout (60 s by default), and appear in the transcript with their output.
+
 ## Two ways to hear replies
 
 | Mode | What happens |
