@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Combine
 import Foundation
 
 /// The conversation engine: it records while the talk key is held, sends the
@@ -46,9 +47,23 @@ final class VoiceSession: ObservableObject {
     private var replyAudio: [String: Data] = [:]
     private var pendingUserAudio: Data?
 
+    static let missingKeyMessage = "Add your OpenAI API key in Settings (⌘,)."
+    private var keyWatcher: AnyCancellable?
+
     init(store: ConversationStore, mcp: MCPManager) {
         self.store = store
         self.mcp = mcp
+        // Once a key is entered, drop the "add your key" warning and dial in.
+        // Debounced so typing or pasting the key doesn't connect per keystroke.
+        keyWatcher = settings.$apiKey
+            .dropFirst()
+            .debounce(for: .seconds(0.8), scheduler: DispatchQueue.main)
+            .sink { [weak self] key in
+                guard let self else { return }
+                if key.isEmpty { return }
+                if self.errorMessage == Self.missingKeyMessage { self.errorMessage = nil }
+                if self.client == nil { self.connect() }
+            }
         mic.onChunk = { [weak self] data, level in
             DispatchQueue.main.async { self?.handleMic(data, level) }
         }
@@ -63,7 +78,7 @@ final class VoiceSession: ObservableObject {
     func connect() {
         guard let conv = store.selected else { return }
         guard !settings.apiKey.isEmpty else {
-            errorMessage = "Add your OpenAI API key in Settings (⌘,)."
+            errorMessage = Self.missingKeyMessage
             return
         }
         disconnect()

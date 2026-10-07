@@ -71,7 +71,7 @@ struct IlanVoiceApp: App {
         }
 
         Settings {
-            SettingsView(mcp: model.mcp, updater: model.updater)
+            SettingsView(mcp: model.mcp, updater: model.updater, ptt: model.ptt)
         }
 
         MenuBarExtra {

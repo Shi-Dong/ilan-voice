@@ -1,47 +1,55 @@
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 
-/// Watches the chosen talk key or mouse button everywhere.
+/// Watches the recorded talk trigger everywhere, and records a new one.
 ///
-/// Modifier keys: inside the app a local monitor is enough; in other apps
-/// macOS only delivers the events once Ilan Voice is trusted under
-/// Privacy & Security → Accessibility.
+/// Modifier keys arrive as `flagsChanged`: inside the app a local monitor is
+/// enough; in other apps macOS only delivers them once Ilan Voice is trusted
+/// under Privacy & Security → Accessibility. They are never swallowed.
 ///
-/// Mouse buttons: an event tap (also needs Accessibility) sees the button in
-/// every app and swallows it, so a side button does not also navigate Back.
-/// Without the tap, a local monitor still works inside the app's own window.
+/// Ordinary keys and mouse buttons go through an event tap (also needs
+/// Accessibility) that sees them in every app and swallows them, so the key
+/// doesn't type and a side button doesn't also go Back. Without the tap, local
+/// monitors still make them work inside the app's own windows.
 @MainActor
 final class PushToTalk: ObservableObject {
     @Published private(set) var trusted = AXIsProcessTrusted()
+    /// True while Settings is waiting for the user to press a new trigger.
+    @Published private(set) var isRecording = false
     var onPress: (() -> Void)?
     var onRelease: (() -> Void)?
 
-    private var globalMonitor: Any?
-    private var localMonitor: Any?
-    private var mouseMonitor: Any?
-    private var mouseTap: CFMachPort?
+    private var monitors: [Any] = []
+    private var tap: CFMachPort?
     private var isDown = false
     private let settings = AppSettings.shared
 
     func start() {
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            Task { @MainActor in self?.handleKey(event) }
-        }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            Task { @MainActor in self?.handleKey(event) }
+        if let m = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: { [weak self] event in
+            Task { @MainActor in self?.handleFlags(event) }
+        }) { monitors.append(m) }
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { [weak self] event in
+            self?.handleFlags(event)
             return event
-        }
-        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown, .otherMouseUp]) { [weak self] event in
-            guard let self, event.buttonNumber == self.settings.pushToTalkKey.mouseButton else { return event }
-            self.setDown(event.type == .otherMouseDown)
-            return nil
-        }
-        installMouseTap()
+        }) { monitors.append(m) }
+        // In-app fallback for keys and mouse buttons when there is no tap.
+        if let m = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .otherMouseDown, .otherMouseUp], handler: { [weak self] event in
+            guard let self else { return event }
+            let swallowed = switch event.type {
+            case .keyDown, .keyUp:
+                self.handleKey(code: Int(event.keyCode), down: event.type == .keyDown, characters: event.charactersIgnoringModifiers)
+            default:
+                self.handleMouse(button: event.buttonNumber, down: event.type == .otherMouseDown)
+            }
+            return swallowed ? nil : event
+        }) { monitors.append(m) }
+        installTap()
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 self.trusted = AXIsProcessTrusted()
-                if self.mouseTap == nil { self.installMouseTap() }
+                if self.tap == nil { self.installTap() }
             }
         }
     }
@@ -51,10 +59,59 @@ final class PushToTalk: ObservableObject {
         trusted = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
     }
 
-    private func handleKey(_ event: NSEvent) {
-        let key = settings.pushToTalkKey
-        guard let code = key.keyCode, event.keyCode == code else { return }
-        setDown(event.modifierFlags.contains(key.flag))
+    // MARK: Recording a new trigger
+
+    func beginRecording() {
+        if isDown { setDown(false) }
+        isRecording = true
+    }
+
+    func cancelRecording() { isRecording = false }
+
+    private func record(_ trigger: TalkTrigger) {
+        settings.talkTrigger = trigger
+        isRecording = false
+    }
+
+    // MARK: Event handling. Each returns true when the event should be swallowed.
+
+    private func handleFlags(_ event: NSEvent) {
+        let code = Int(event.keyCode)
+        if isRecording {
+            // Record a modifier the moment it goes down.
+            if let trigger = TalkTrigger.modifier(keyCode: code), let flag = trigger.modifierFlag,
+               event.modifierFlags.contains(flag) {
+                record(trigger)
+            }
+            return
+        }
+        let trigger = settings.talkTrigger
+        guard trigger.kind == .modifier, trigger.code == code, let flag = trigger.modifierFlag else { return }
+        setDown(event.modifierFlags.contains(flag))
+    }
+
+    private func handleKey(code: Int, down: Bool, characters: String?) -> Bool {
+        if isRecording {
+            guard down else { return true }
+            if code == kVK_Escape { cancelRecording() } else { record(.key(keyCode: code, characters: characters)) }
+            return true
+        }
+        let trigger = settings.talkTrigger
+        guard trigger.kind == .key, trigger.code == code else { return false }
+        setDown(down)  // key repeats are absorbed by setDown's same-state guard
+        return true
+    }
+
+    private func handleMouse(button: Int, down: Bool) -> Bool {
+        if isRecording {
+            guard down, let trigger = TalkTrigger.mouse(button: button) else { return false }
+            record(trigger)
+            return true
+        }
+        let trigger = settings.talkTrigger
+        guard trigger.kind == .mouse, trigger.code == button else { return false }
+        setDown(down)
+        return true
     }
 
     private func setDown(_ down: Bool) {
@@ -63,13 +120,13 @@ final class PushToTalk: ObservableObject {
         down ? onPress?() : onRelease?()
     }
 
-    // MARK: Mouse event tap
+    // MARK: Event tap
 
-    /// Fails (returns nil) until Accessibility is granted; the timer retries.
-    private func installMouseTap() {
+    /// Fails until Accessibility is granted; the timer retries.
+    private func installTap() {
         guard AXIsProcessTrusted() else { return }
-        let mask = CGEventMask(1 << CGEventType.otherMouseDown.rawValue)
-            | CGEventMask(1 << CGEventType.otherMouseUp.rawValue)
+        let types: [CGEventType] = [.keyDown, .keyUp, .otherMouseDown, .otherMouseUp]
+        let mask = types.reduce(CGEventMask(0)) { $0 | CGEventMask(1 << $1.rawValue) }
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
                                           options: .defaultTap, eventsOfInterest: mask,
@@ -77,22 +134,30 @@ final class PushToTalk: ObservableObject {
         let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
-        mouseTap = tap
+        self.tap = tap
     }
 
-    /// Runs on the main run loop. Returning nil swallows the click.
+    /// Runs on the main run loop. Returning nil swallows the event.
     private static let tapCallback: CGEventTapCallBack = { _, type, event, refcon in
         guard let refcon else { return Unmanaged.passUnretained(event) }
         let me = Unmanaged<PushToTalk>.fromOpaque(refcon).takeUnretainedValue()
         return MainActor.assumeIsolated {
-            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                if let tap = me.mouseTap { CGEvent.tapEnable(tap: tap, enable: true) }
-                return Unmanaged.passUnretained(event)
+            let swallowed: Bool
+            switch type {
+            case .tapDisabledByTimeout, .tapDisabledByUserInput:
+                if let tap = me.tap { CGEvent.tapEnable(tap: tap, enable: true) }
+                swallowed = false
+            case .keyDown, .keyUp:
+                let code = Int(event.getIntegerValueField(.keyboardEventKeycode))
+                swallowed = me.handleKey(code: code, down: type == .keyDown,
+                                         characters: NSEvent(cgEvent: event)?.charactersIgnoringModifiers)
+            case .otherMouseDown, .otherMouseUp:
+                let button = Int(event.getIntegerValueField(.mouseEventButtonNumber))
+                swallowed = me.handleMouse(button: button, down: type == .otherMouseDown)
+            default:
+                swallowed = false
             }
-            let button = Int(event.getIntegerValueField(.mouseEventButtonNumber))
-            guard button == me.settings.pushToTalkKey.mouseButton else { return Unmanaged.passUnretained(event) }
-            me.setDown(type == .otherMouseDown)
-            return nil
+            return swallowed ? nil : Unmanaged.passUnretained(event)
         }
     }
 }
