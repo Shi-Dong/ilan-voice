@@ -399,7 +399,7 @@ final class VoiceSession: ObservableObject {
               !command.isEmpty else { return "Error: no command given." }
         let directory = (args["working_directory"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? settings.shellDirectory
         if let reason = ShellTool.refusal(for: command, allowList: settings.shellAllowListEntries) {
-            return "Not run: \(reason). Only allow-listed read-only commands can run; the user can add commands under Settings → General → Shell commands."
+            return "Not run: \(reason). Only allow-listed read-only commands can run; the user can add commands under Settings → Shell."
         }
         return await ShellTool.run(command, in: directory, timeout: TimeInterval(max(5, settings.shellTimeout)))
     }
