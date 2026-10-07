@@ -1,0 +1,131 @@
+import AppKit
+import Combine
+import SwiftUI
+
+/// A small pill near the bottom of the screen that shows, over any app, that
+/// Ilan is listening, with live voice bars. After you let go it briefly says
+/// "Sent" and fades away. It never takes focus and clicks pass through it.
+@MainActor
+final class FloatingHUD {
+    private let panel: NSPanel
+    private let model = HUDModel()
+    private var cancellables: Set<AnyCancellable> = []
+    private var hideWork: DispatchWorkItem?
+
+    init(session: VoiceSession) {
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 200, height: 44),
+                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        panel.isFloatingPanel = true
+        panel.level = .statusBar
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        let host = NSHostingView(rootView: HUDView(model: model))
+        host.frame = panel.contentRect(forFrameRect: panel.frame)
+        panel.contentView = host
+
+        session.$phase
+            .removeDuplicates()
+            .sink { [weak self] phase in self?.update(phase) }
+            .store(in: &cancellables)
+        session.$inputLevel
+            .sink { [weak self] level in self?.model.push(level) }
+            .store(in: &cancellables)
+    }
+
+    private func update(_ phase: VoiceSession.Phase) {
+        switch phase {
+        case .recording:
+            hideWork?.cancel()
+            model.mode = .listening
+            model.reset()
+            show()
+        default:
+            guard panel.isVisible, model.mode == .listening else { return }
+            model.mode = .sent
+            let work = DispatchWorkItem { [weak self] in self?.hide() }
+            hideWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: work)
+        }
+    }
+
+    private func show() {
+        // Sit above the Dock on whichever screen the pointer is on.
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
+        if let visible = screen?.visibleFrame {
+            let size = panel.frame.size
+            panel.setFrameOrigin(NSPoint(x: visible.midX - size.width / 2, y: visible.minY + 28))
+        }
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.12; panel.animator().alphaValue = 1 }
+    }
+
+    private func hide() {
+        NSAnimationContext.runAnimationGroup({ $0.duration = 0.25; panel.animator().alphaValue = 0 }) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.model.mode != .listening else { return }
+                self.panel.orderOut(nil)
+            }
+        }
+    }
+}
+
+@MainActor
+final class HUDModel: ObservableObject {
+    enum Mode { case listening, sent }
+    static let barCount = 14
+
+    @Published var mode: Mode = .listening
+    @Published private(set) var levels = Array(repeating: Float(0), count: barCount)
+
+    func push(_ level: Float) {
+        guard mode == .listening else { return }
+        levels.removeFirst()
+        levels.append(level)
+    }
+
+    func reset() { levels = Array(repeating: 0, count: Self.barCount) }
+}
+
+private struct HUDView: View {
+    @ObservedObject var model: HUDModel
+
+    var body: some View {
+        HStack(spacing: 9) {
+            AppIcon(size: 22)
+            if model.mode == .listening {
+                HStack(alignment: .center, spacing: 2.5) {
+                    ForEach(Array(model.levels.enumerated()), id: \.offset) { _, level in
+                        Capsule()
+                            .fill(Theme.mint)
+                            .frame(width: 3, height: 4 + CGFloat(level) * 18)
+                    }
+                }
+                .frame(height: 22)
+                .animation(.easeOut(duration: 0.08), value: model.levels)
+                Circle()
+                    .fill(Color(red: 1, green: 0.42, blue: 0.42))
+                    .frame(width: 7, height: 7)
+            } else {
+                Label("Sent to Ilan", systemImage: "checkmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.mint)
+                    .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 38)
+        .background(
+            Capsule().fill(Theme.ink.opacity(0.92))
+                .overlay(Capsule().stroke(Theme.mint.opacity(0.35), lineWidth: 1))
+        )
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+        .frame(width: 200, height: 44)
+        .animation(.easeInOut(duration: 0.15), value: model.mode)
+    }
+}

@@ -4,7 +4,7 @@
 
 A native macOS voice assistant built on OpenAI's **GPT-Realtime** (`gpt-realtime-2.1` by default). It works like ChatGPT Voice, with three differences:
 
-- **Push to talk.** Hold a key (right ⌥ by default) or an extra mouse button (middle, Back or Forward), speak, and let go. Releasing the key ends your message, so the assistant never cuts in while you pause.
+- **Push to talk.** Hold a key (right ⌥ by default) or an extra mouse button (middle, Back or Forward), speak, and let go. Releasing the key ends your message, so the assistant never cuts in while you pause. While you talk, a small floating pill near the bottom of the screen shows live voice bars, over any app.
 - **Your own agent.** Its instructions come from an `agent.md` file you write.
 - **Your MCP tools.** It can call any MCP server you configure. It reads the same `mcpServers` format as Claude Code and can import that config in one click.
 
