@@ -7,6 +7,19 @@ import Foundation
 enum ShellTool {
     static let functionName = "run_shell"
     static let maxOutput = 24_000
+    static let closeFunctionName = "close_shell"
+
+    static var closeDefinition: [String: Any] {
+        [
+            "type": "function",
+            "name": closeFunctionName,
+            "description": """
+            Close this conversation's persistent bash session and stop anything \
+            still running in it. The next run_shell starts a fresh session.
+            """,
+            "parameters": ["type": "object", "properties": [String: Any]()] as [String: Any],
+        ]
+    }
 
     static var definition: [String: Any] {
         [
@@ -19,14 +32,17 @@ enum ShellTool {
             redirection (>), command substitution ($( ) or backticks) and \
             background jobs are refused. If a command is refused, tell the user \
             which command they could add to the allow-list in Settings. \
-            Long-running commands are stopped after the timeout.
+            Long-running commands are stopped after the timeout. Commands run in \
+            one persistent bash session per conversation, so cd, exported \
+            variables and activated environments carry over between calls. \
+            Call close_shell when you no longer need the session.
             """,
             "parameters": [
                 "type": "object",
                 "properties": [
                     "command": ["type": "string", "description": "The bash command to run."],
                     "working_directory": ["type": "string",
-                                          "description": "Optional directory to run in; defaults to the one set in Settings."],
+                                          "description": "Optional directory to cd into first (this stays the session's directory). A new session starts in the directory set in Settings."],
                 ],
                 "required": ["command"],
             ] as [String: Any],
@@ -117,81 +133,5 @@ enum ShellTool {
             }
         }
         return nil
-    }
-
-    /// Runs `command` with `bash -lc`, merging stdout and stderr. Kills it
-    /// after `timeout` seconds.
-    static func run(_ command: String, in directory: String, timeout: TimeInterval) async -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["-lc", command]
-        var isDir: ObjCBool = false
-        let dir = (directory as NSString).expandingTildeInPath
-        guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else {
-            return "Error: working directory does not exist: \(dir)"
-        }
-        process.currentDirectoryURL = URL(fileURLWithPath: dir)
-        var env = ProcessInfo.processInfo.environment
-        let extra = ["/opt/homebrew/bin", "/usr/local/bin", NSHomeDirectory() + "/.local/bin"]
-        env["PATH"] = (extra + [env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"]).joined(separator: ":")
-        env["TERM"] = "dumb"
-        process.environment = env
-        process.standardInput = FileHandle.nullDevice
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        let collector = OutputCollector()
-        pipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if !data.isEmpty { collector.append(data) }
-        }
-
-        let started = Date()
-        let status: Int32 = await withCheckedContinuation { cont in
-            process.terminationHandler = { cont.resume(returning: $0.terminationStatus) }
-            do {
-                try process.run()
-            } catch {
-                collector.append(Data("Could not start bash: \(error.localizedDescription)".utf8))
-                cont.resume(returning: -1)
-                return
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                guard process.isRunning else { return }
-                collector.timedOut = true
-                process.terminate()
-                DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
-                    if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                }
-            }
-        }
-        pipe.fileHandleForReading.readabilityHandler = nil
-        if let rest = try? pipe.fileHandleForReading.readToEnd() { collector.append(rest) }
-
-        var output = String(decoding: collector.data, as: UTF8.self)
-        if output.count > maxOutput {
-            output = String(output.prefix(maxOutput)) + "\n…[output truncated]"
-        }
-        let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
-        var header = collector.timedOut
-            ? "Stopped after the \(Int(timeout)) s timeout."
-            : "Exit code \(status) (\(seconds) s)."
-        header += " Directory: \(dir)"
-        return header + "\n" + (output.isEmpty ? "(no output)" : output)
-    }
-
-    private final class OutputCollector: @unchecked Sendable {
-        private let lock = NSLock()
-        private var buffer = Data()
-        var timedOut = false
-
-        var data: Data { lock.lock(); defer { lock.unlock() }; return buffer }
-
-        func append(_ chunk: Data) {
-            lock.lock()
-            buffer.append(chunk)
-            lock.unlock()
-        }
     }
 }

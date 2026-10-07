@@ -171,7 +171,7 @@ final class VoiceSession: ObservableObject {
                 ],
             ],
             "tools": mcp.realtimeTools
-                + (settings.shellEnabled ? [ShellTool.definition] : [])
+                + (settings.shellEnabled ? [ShellTool.definition, ShellTool.closeDefinition] : [])
                 + (settings.webSearchAvailable ? [WebSearchTool.definition] : []),
             "tool_choice": "auto",
         ]
@@ -529,7 +529,10 @@ final class VoiceSession: ObservableObject {
                     group.addTask { @MainActor in
                         let output: String
                         switch name {
-                        case ShellTool.functionName: output = await self.runShell(arguments: args)
+                        case ShellTool.functionName: output = await self.runShell(arguments: args, conversation: convID)
+                        case ShellTool.closeFunctionName:
+                            output = ShellSessions.shared.close(convID)
+                                ? "Closed the bash session." : "There was no open bash session."
                         case WebSearchTool.functionName: output = await self.runWebSearch(arguments: args)
                         default: output = await self.mcp.call(functionName: name, arguments: args)
                         }
@@ -557,16 +560,22 @@ final class VoiceSession: ObservableObject {
                                           apiKey: settings.geminiAPIKey, model: settings.geminiModel)
     }
 
-    private func runShell(arguments: String) async -> String {
+    private func runShell(arguments: String, conversation: UUID) async -> String {
         guard settings.shellEnabled else { return "Error: the shell tool is turned off in Settings." }
         let args = (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] ?? [:]
         guard let command = (args["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
               !command.isEmpty else { return "Error: no command given." }
-        let directory = (args["working_directory"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? settings.shellDirectory
         if let reason = ShellTool.refusal(for: command, allowList: settings.shellAllowListEntries) {
             return "Not run: \(reason). Only allow-listed read-only commands can run; the user can add commands under Settings → Shell."
         }
-        return await ShellTool.run(command, in: directory, timeout: TimeInterval(max(5, settings.shellTimeout)))
+        // A requested directory becomes a cd inside the session, so it sticks.
+        var script = command
+        if let dir = (args["working_directory"] as? String), !dir.isEmpty {
+            let path = (dir as NSString).expandingTildeInPath.replacingOccurrences(of: "'", with: "'\\''")
+            script = "cd -- '\(path)' && \(command)"
+        }
+        return await ShellSessions.shared.run(script, conversation: conversation, directory: settings.shellDirectory,
+                                              timeout: TimeInterval(max(5, settings.shellTimeout)))
     }
 
     // MARK: Playback of saved clips
