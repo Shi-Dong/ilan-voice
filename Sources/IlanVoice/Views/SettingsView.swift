@@ -5,14 +5,23 @@ struct SettingsView: View {
     @ObservedObject var updater: Updater
     @ObservedObject var ptt: PushToTalk
 
+    enum Tab: Hashable { case general, agent, mcp, shell, dictionary }
+
+    /// Settings always opens on General. The window is kept alive between
+    /// openings, so the tab is reset whenever it appears and disappears;
+    /// binding the selection also stops macOS restoring the last tab.
+    @Local private var tab: Tab = .general
+
     var body: some View {
-        TabView {
-            GeneralSettings(updater: updater, ptt: ptt).tabItem { Label("General", systemImage: "gearshape") }
-            AgentSettings().tabItem { Label("Agent", systemImage: "person.text.rectangle") }
-            MCPSettings(mcp: mcp).tabItem { Label("MCP Tools", systemImage: "wrench.and.screwdriver") }
-            ShellSettings().tabItem { Label("Shell", systemImage: "terminal") }
-            DictionarySettings().tabItem { Label("Dictionary", systemImage: "character.book.closed") }
+        TabView(selection: $tab) {
+            GeneralSettings(updater: updater, ptt: ptt).tabItem { Label("General", systemImage: "gearshape") }.tag(Tab.general)
+            AgentSettings().tabItem { Label("Agent", systemImage: "person.text.rectangle") }.tag(Tab.agent)
+            MCPSettings(mcp: mcp).tabItem { Label("MCP Tools", systemImage: "wrench.and.screwdriver") }.tag(Tab.mcp)
+            ShellSettings().tabItem { Label("Shell", systemImage: "terminal") }.tag(Tab.shell)
+            DictionarySettings().tabItem { Label("Dictionary", systemImage: "character.book.closed") }.tag(Tab.dictionary)
         }
+        .onAppear { tab = .general }
+        .onDisappear { tab = .general }
         .frame(width: 640, height: 520)
         .preferredColorScheme(.dark)
         .tint(Theme.mint)
