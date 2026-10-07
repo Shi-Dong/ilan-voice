@@ -93,7 +93,7 @@ struct IlanVoiceApp: App {
             Divider()
             Button("Quit") { NSApp.terminate(nil) }.keyboardShortcut("q")
         } label: {
-            Image(systemName: "waveform.circle.fill")
+            Image(nsImage: MenuBarIcon.image)
         }
     }
 }
