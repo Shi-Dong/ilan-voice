@@ -30,6 +30,16 @@ final class AppSettings: ObservableObject {
     private let defaults = UserDefaults.standard
 
     @Published var apiKey: String { didSet { SecretStore.set(SecretStore.openAI, apiKey) } }
+    /// Built-in web_search tool. On by default; it only reaches the model
+    /// once a search API key is set.
+    @Published var webSearchEnabled: Bool { didSet { defaults.set(webSearchEnabled, forKey: "webSearchEnabled") } }
+    @Published var webSearchProvider: WebSearchProvider { didSet { defaults.set(webSearchProvider.rawValue, forKey: "webSearchProvider") } }
+    @Published var geminiAPIKey: String { didSet { SecretStore.set(SecretStore.gemini, geminiAPIKey) } }
+    @Published var geminiModel: String { didSet { defaults.set(geminiModel, forKey: "geminiModel") } }
+
+    var webSearchAvailable: Bool {
+        webSearchEnabled && !geminiAPIKey.trimmingCharacters(in: .whitespaces).isEmpty
+    }
     @Published var model: String { didSet { defaults.set(model, forKey: "model") } }
     @Published var voiceGender: VoiceGender { didSet { defaults.set(voiceGender.rawValue, forKey: "voiceGender") } }
 
@@ -62,6 +72,10 @@ final class AppSettings: ObservableObject {
         transcriptionModel = defaults.string(forKey: "transcriptionModel") ?? "gpt-transcribe"
         titleModel = defaults.string(forKey: "titleModel") ?? "gpt-6-luna"
         shellEnabled = defaults.bool(forKey: "shellEnabled")
+        webSearchEnabled = defaults.object(forKey: "webSearchEnabled") as? Bool ?? true
+        webSearchProvider = WebSearchProvider(rawValue: defaults.string(forKey: "webSearchProvider") ?? "") ?? .gemini
+        geminiAPIKey = SecretStore.get(SecretStore.gemini) ?? ""
+        geminiModel = defaults.string(forKey: "geminiModel") ?? WebSearchTool.defaultGeminiModel
         shellDirectory = defaults.string(forKey: "shellDirectory") ?? "~"
         shellTimeout = defaults.object(forKey: "shellTimeout") as? Int ?? 60
         shellAllowList = defaults.string(forKey: "shellAllowList") ?? ShellTool.defaultAllowList
@@ -73,7 +87,7 @@ final class AppSettings: ObservableObject {
 
     /// Fields that only take effect on a fresh Realtime session.
     var sessionFingerprint: String {
-        [apiKey, model, voice, transcriptionModel, reasoningEffort, String(shellEnabled)].joined(separator: "|")
+        [apiKey, model, voice, transcriptionModel, reasoningEffort, String(shellEnabled), String(webSearchAvailable)].joined(separator: "|")
     }
 }
 

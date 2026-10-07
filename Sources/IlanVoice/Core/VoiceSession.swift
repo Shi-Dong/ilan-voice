@@ -170,7 +170,9 @@ final class VoiceSession: ObservableObject {
                     "voice": settings.voice,
                 ],
             ],
-            "tools": mcp.realtimeTools + (settings.shellEnabled ? [ShellTool.definition] : []),
+            "tools": mcp.realtimeTools
+                + (settings.shellEnabled ? [ShellTool.definition] : [])
+                + (settings.webSearchAvailable ? [WebSearchTool.definition] : []),
             "tool_choice": "auto",
         ]
         if settings.reasoningEffort != "default" {
@@ -525,9 +527,12 @@ final class VoiceSession: ObservableObject {
                                                    toolName: name, toolArguments: args))
                     }
                     group.addTask { @MainActor in
-                        let output = name == ShellTool.functionName
-                            ? await self.runShell(arguments: args)
-                            : await self.mcp.call(functionName: name, arguments: args)
+                        let output: String
+                        switch name {
+                        case ShellTool.functionName: output = await self.runShell(arguments: args)
+                        case WebSearchTool.functionName: output = await self.runWebSearch(arguments: args)
+                        default: output = await self.mcp.call(functionName: name, arguments: args)
+                        }
                         self.store.updateMessage(convID, callID) { $0.text = output; $0.pending = false }
                         guard self.conversationID == convID else { return }
                         self.client?.send(["type": "conversation.item.create",
@@ -543,6 +548,15 @@ final class VoiceSession: ObservableObject {
 
     /// Handles a run_shell call: checks it is enabled and that every part of
     /// the command is allow-listed, then runs it. Never prompts the user.
+    private func runWebSearch(arguments: String) async -> String {
+        guard settings.webSearchAvailable else { return "Error: web search is turned off or has no API key." }
+        let args = (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] ?? [:]
+        guard let query = (args["query"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !query.isEmpty else { return "Error: no query given." }
+        return await WebSearchTool.search(query, provider: settings.webSearchProvider,
+                                          apiKey: settings.geminiAPIKey, model: settings.geminiModel)
+    }
+
     private func runShell(arguments: String) async -> String {
         guard settings.shellEnabled else { return "Error: the shell tool is turned off in Settings." }
         let args = (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] ?? [:]

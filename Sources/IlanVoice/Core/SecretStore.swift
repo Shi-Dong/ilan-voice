@@ -16,6 +16,7 @@ import Security
 /// and asked for your password before handing the key back.
 enum SecretStore {
     static let openAI = "OPENAI_API_KEY"
+    static let gemini = "GEMINI_API_KEY"
 
     private static var file: URL { Paths.root.appendingPathComponent("secrets.json") }
 
@@ -74,22 +75,29 @@ enum SecretStore {
 
     private static var migrated = false
 
-    /// The first time, the OpenAI key is read from the Keychain (this may ask
-    /// for the password one last time), saved here, and the Keychain item deleted.
+    /// Keys the app used to keep in the Keychain, by Keychain account.
+    private static let legacyAccounts = ["openai-api-key": openAI, "gemini-api-key": gemini]
+
+    /// The first time, keys are read from the Keychain (this may ask for the
+    /// password one last time), saved here, and the Keychain items deleted.
     private static func migrateIfNeeded() {
         guard !migrated else { return }
         migrated = true
         guard !FileManager.default.fileExists(atPath: file.path) else { return }
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                    kSecAttrService as String: "Ilan Voice",
-                                    kSecAttrAccount as String: "openai-api-key"]
-        var lookup = query
-        lookup[kSecReturnData as String] = true
-        lookup[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(lookup as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data, let key = String(data: data, encoding: .utf8), !key.isEmpty else { return }
-        write([openAI: key])
-        SecItemDelete(query as CFDictionary)
+        var found: [String: String] = [:]
+        for (account, name) in legacyAccounts {
+            let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                        kSecAttrService as String: "Ilan Voice",
+                                        kSecAttrAccount as String: account]
+            var lookup = query
+            lookup[kSecReturnData as String] = true
+            lookup[kSecMatchLimit as String] = kSecMatchLimitOne
+            var item: CFTypeRef?
+            guard SecItemCopyMatching(lookup as CFDictionary, &item) == errSecSuccess,
+                  let data = item as? Data, let key = String(data: data, encoding: .utf8), !key.isEmpty else { continue }
+            found[name] = key
+            SecItemDelete(query as CFDictionary)
+        }
+        if !found.isEmpty { write(found) }
     }
 }
