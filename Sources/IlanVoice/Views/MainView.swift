@@ -27,6 +27,7 @@ struct MainView: View {
 
 struct Sidebar: View {
     @ObservedObject var store: ConversationStore
+    @ObservedObject var shells = ShellSessions.shared
     @Local private var renaming: UUID?
     @Local private var draft = ""
 
@@ -42,6 +43,21 @@ struct Sidebar: View {
                         HStack {
                             Text(conv.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
                             Spacer()
+                            if shells.isOpen(conv.id) {
+                                // An open bash session: click for the option to close it.
+                                Menu {
+                                    Text("A bash session is open in this conversation")
+                                    Button("Close Bash Session", role: .destructive) { shells.close(conv.id) }
+                                } label: {
+                                    Image(systemName: "terminal.fill")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(Theme.mint)
+                                }
+                                .menuStyle(.borderlessButton)
+                                .menuIndicator(.hidden)
+                                .fixedSize()
+                                .help("Bash session open. Click to close it.")
+                            }
                             if conv.unheardCount > 0 {
                                 Text("\(conv.unheardCount)")
                                     .font(.system(size: 10, weight: .bold))
@@ -61,8 +77,11 @@ struct Sidebar: View {
                     Button("Show Transcript in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([Paths.conversation(conv.id).appendingPathComponent("transcript.md")])
                     }
+                    if shells.isOpen(conv.id) {
+                        Button("Close Bash Session") { shells.close(conv.id) }
+                    }
                     Divider()
-                    Button("Delete", role: .destructive) { store.delete(conv.id) }
+                    Button("Delete", role: .destructive) { shells.close(conv.id); store.delete(conv.id) }
                 }
             }
         }
