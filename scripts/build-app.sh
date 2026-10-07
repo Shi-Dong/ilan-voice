@@ -7,6 +7,9 @@ cd "$(dirname "$0")/.."
 
 APP="dist/Ilan Voice.app"
 VERSION="$(git describe --tags --always 2>/dev/null || echo 0.1.0)"
+# The in-app updater compares this against the newest commit on GitHub.
+COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+BUILD_DATE="$(date +%Y-%m-%d)"
 
 swift build -c release --arch arm64
 BIN="$(swift build -c release --arch arm64 --show-bin-path)/IlanVoice"
@@ -38,6 +41,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundleVersion</key><string>${VERSION}</string>
+    <key>IlanVoiceCommit</key><string>${COMMIT}</string>
+    <key>IlanVoiceBuildDate</key><string>${BUILD_DATE}</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
     <key>NSHighResolutionCapable</key><true/>

@@ -5,12 +5,14 @@ final class AppModel: ObservableObject {
     let store = ConversationStore()
     let mcp = MCPManager()
     let ptt = PushToTalk()
+    let updater = Updater()
     lazy var session = VoiceSession(store: store, mcp: mcp)
 
     func start() {
         ptt.onPress = { [weak self] in self?.session.pressToTalk() }
         ptt.onRelease = { [weak self] in self?.session.releaseToTalk() }
         ptt.start()
+        Task { await updater.check() }
         Task {
             await mcp.reload()
             session.connect()
@@ -31,10 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct IlanVoiceApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = AppModel()
+    @Environment(\.openSettings) private var openSettings
 
     var body: some Scene {
         Window("Ilan Voice", id: "main") {
-            MainView(store: model.store, session: model.session, ptt: model.ptt, mcp: model.mcp)
+            MainView(store: model.store, session: model.session, ptt: model.ptt, mcp: model.mcp, updater: model.updater)
                 .frame(minWidth: 760, minHeight: 540)
                 .task { model.start() }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
@@ -44,6 +47,12 @@ struct IlanVoiceApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    Task { await model.updater.check() }
+                    openSettings()
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Conversation") { model.store.newConversation() }
                     .keyboardShortcut("n")
@@ -60,7 +69,7 @@ struct IlanVoiceApp: App {
         }
 
         Settings {
-            SettingsView(mcp: model.mcp)
+            SettingsView(mcp: model.mcp, updater: model.updater)
         }
 
         MenuBarExtra {
