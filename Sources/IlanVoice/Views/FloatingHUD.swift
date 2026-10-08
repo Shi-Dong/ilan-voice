@@ -11,6 +11,8 @@ final class FloatingHUD {
     private let model = HUDModel()
     private var cancellables: Set<AnyCancellable> = []
     private var hideWork: DispatchWorkItem?
+    private var showWork: DispatchWorkItem?
+    private static let listeningDelay: TimeInterval = 0.3
 
     init(session: VoiceSession) {
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 44),
@@ -39,18 +41,26 @@ final class FloatingHUD {
             .store(in: &cancellables)
     }
 
+    /// Recording starts the moment the key goes down, but the pill waits
+    /// 0.3 s, the same cutoff below which a recording is never sent: a quick
+    /// tap is almost always meant to cut Ilan off, so it goes straight to
+    /// "Stopped assistant speech" without flashing "Listening".
     private func update(_ phase: VoiceSession.Phase) {
         guard phase == .recording else { return }
         hideWork?.cancel()
+        showWork?.cancel()
         model.mode = .listening
         model.reset()
-        show()
+        let work = DispatchWorkItem { [weak self] in self?.show() }
+        showWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.listeningDelay, execute: work)
     }
 
     /// How a press ended: "Sent to Ilan", "Stopped assistant speech" (a quick
     /// tap that cut Ilan off), or nothing for an accidental tap.
     private func finish(_ outcome: VoiceSession.PressOutcome) {
         hideWork?.cancel()
+        showWork?.cancel()
         switch outcome {
         case .discarded:
             if panel.isVisible { hide() }
