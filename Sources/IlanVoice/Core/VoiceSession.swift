@@ -609,10 +609,10 @@ final class VoiceSession: ObservableObject {
     /// MCP tools plus the built-in ones that are turned on.
     private func builtInTools() -> [[String: Any]] {
         var tools: [[String: Any]] = mcp.realtimeTools
-        if settings.shellEnabled { tools += [ShellTool.definition(bypass: settings.shellBypassPermissions), ShellTool.closeDefinition] }
+        if settings.shellEnabled { tools += [ShellTool.definition(bypass: settings.bypassActive), ShellTool.closeDefinition] }
         if settings.webSearchAvailable { tools.append(WebSearchTool.definition) }
         tools.append(FileTools.readDefinition)
-        if settings.fileChangesEnabled { tools += [FileTools.editDefinition, FileTools.writeDefinition] }
+        if settings.fileChangesAllowed { tools += [FileTools.editDefinition, FileTools.writeDefinition] }
         return tools
     }
 
@@ -623,8 +623,8 @@ final class VoiceSession: ObservableObject {
             return "Error: no path given."
         }
         let base = settings.shellDirectory
-        let blocked = FileTools.blockedPaths(settings.fileBlockList)
-        if name != FileTools.readName, !settings.fileChangesEnabled {
+        let blocked = settings.bypassActive ? [] : FileTools.blockedPaths(settings.fileBlockList)
+        if name != FileTools.readName, !settings.fileChangesAllowed {
             return "Error: changing files is turned off in Settings."
         }
         switch name {
@@ -645,7 +645,7 @@ final class VoiceSession: ObservableObject {
         let args = (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] ?? [:]
         guard let command = (args["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
               !command.isEmpty else { return "Error: no command given." }
-        if !settings.shellBypassPermissions,
+        if !settings.bypassActive,
            let reason = ShellTool.refusal(for: command, allowList: settings.shellAllowListEntries) {
             return "Not run: \(reason). Only allow-listed read-only commands can run; the user can add commands under Settings → Shell."
         }

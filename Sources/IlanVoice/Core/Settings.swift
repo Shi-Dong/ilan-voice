@@ -94,8 +94,13 @@ final class AppSettings: ObservableObject {
             defaults.set(shellTimeout, forKey: "shellTimeout")
         }
     }
-    /// Runs every shell command without checking the allow-list. Off by default.
+    /// Runs every shell command without checking the allow-list, and lets the
+    /// file tools change any file (block list ignored). Off by default.
     @Published var shellBypassPermissions: Bool { didSet { defaults.set(shellBypassPermissions, forKey: "shellBypassPermissions") } }
+    /// Bypass only counts while bash itself is on.
+    var bypassActive: Bool { shellEnabled && shellBypassPermissions }
+    /// edit_file / write_file: on by their own switch, or by bypass.
+    var fileChangesAllowed: Bool { fileChangesEnabled || bypassActive }
     /// One command prefix per line; only these commands may run.
     @Published var shellAllowList: String { didSet { defaults.set(shellAllowList, forKey: "shellAllowList") } }
 
@@ -138,7 +143,7 @@ final class AppSettings: ObservableObject {
 
     /// Fields that only take effect on a fresh Realtime session.
     var sessionFingerprint: String {
-        [apiKey, model, voice, transcriptionModel, reasoningEffort, String(shellEnabled), String(shellBypassPermissions), String(webSearchAvailable), String(fileChangesEnabled)].joined(separator: "|")
+        [apiKey, model, voice, transcriptionModel, reasoningEffort, String(shellEnabled), String(shellBypassPermissions), String(webSearchAvailable), String(fileChangesAllowed)].joined(separator: "|")
     }
 }
 

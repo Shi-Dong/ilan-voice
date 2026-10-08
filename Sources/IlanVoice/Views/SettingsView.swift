@@ -464,8 +464,8 @@ private struct ShellSettings: View {
                     Text("Bypass all permissions").foregroundStyle(.red).fontWeight(.medium)
                 }
                 .disabled(!settings.shellEnabled)
-                if settings.shellBypassPermissions {
-                    Label("Any command runs, including ones that delete or change files. The allow-list below is ignored.",
+                if settings.bypassActive {
+                    Label("Any command runs, including ones that delete or change files, and Ilan can change any file. The file block list and the allow-list below are ignored.",
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.red)
                 }
@@ -474,11 +474,14 @@ private struct ShellSettings: View {
                 Button("Turn On", role: .destructive) { settings.shellBypassPermissions = true }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Ilan will be able to run any bash command on this Mac without checks, including commands that delete files, change system settings, install software or send your data elsewhere. A misheard request or a mistake by the model can cause damage that can't be undone. Only turn this on if you understand the risk.")
+                Text("Ilan will be able to run any bash command and change any file on this Mac without checks, including commands that delete files, change system settings, install software or send your data elsewhere. A misheard request or a mistake by the model can cause damage that can't be undone. Only turn this on if you understand the risk.")
             }
             Section {
                 LabeledContent("Read files") { Text("Always on").foregroundStyle(.secondary) }
-                Toggle("Let Ilan edit, create and overwrite files", isOn: $settings.fileChangesEnabled)
+                // Shown on while bypass is on, since bypass allows file changes too.
+                Toggle("Let Ilan edit, create and overwrite files", isOn: Binding(
+                    get: { settings.fileChangesAllowed },
+                    set: { settings.fileChangesEnabled = $0 }))
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Never change these files or folders, one per line").font(.caption)
                     TextEditor(text: $settings.fileBlockList)
@@ -493,6 +496,8 @@ private struct ShellSettings: View {
                 Text("Every change is backed up first to Ilan Voice's file-backups folder. SSH, AWS and GnuPG keys, the Keychain and Ilan's own secrets are never read or changed. File contents are sent to OpenAI as part of the conversation.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            .disabled(settings.bypassActive)
+            .opacity(settings.bypassActive ? 0.45 : 1)
             Section("Running") {
                 TextField("Working directory", text: $settings.shellDirectory)
                 LabeledContent("Timeout") {
@@ -527,8 +532,8 @@ private struct ShellSettings: View {
                         .buttonStyle(.link).font(.caption)
                 }
             }
-            .disabled(!settings.shellEnabled || settings.shellBypassPermissions)
-            .opacity(settings.shellBypassPermissions ? 0.45 : 1)
+            .disabled(!settings.shellEnabled || settings.bypassActive)
+            .opacity(settings.bypassActive ? 0.45 : 1)
         }
         .formStyle(.grouped)
     }
