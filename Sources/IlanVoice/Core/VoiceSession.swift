@@ -270,7 +270,6 @@ final class VoiceSession: ObservableObject {
         do {
             try mic.start(deviceUID: AudioDevices.resolveUID(settings.microphone))
             phase = .recording
-            NSSound(named: "Tink")?.play()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -294,7 +293,9 @@ final class VoiceSession: ObservableObject {
         guard phase == .recording else { return }
         inputLevel = 0
         // Ignore accidental taps: the API rejects buffers under ~100 ms anyway.
-        guard PCM.seconds(recording) >= 0.3 else {
+        // Silence (a press with nothing said) is dropped the same way, so it
+        // never shows up in the conversation or reaches the model.
+        guard PCM.seconds(recording) >= 0.3, PCM.containsSpeech(recording) else {
             if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
             pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded)
             phase = sessionReady ? .ready : (client == nil ? .offline : .connecting)
@@ -327,6 +328,22 @@ final class VoiceSession: ObservableObject {
         client?.send(["type": "input_audio_buffer.commit"])
         client?.send(["type": "response.create"])
         armWatchdog()
+    }
+
+    /// The recording got past the loudness check but the transcriber heard no
+    /// words in it (a cough, a door). Cancels the reply it started and removes
+    /// the turn, and anything said back to it, from the app and the server.
+    private func discardSilentTurn(_ convID: UUID, _ itemID: String) {
+        guard let messages = store.conversations.first(where: { $0.id == convID })?.messages,
+              let index = messages.firstIndex(where: { $0.id == itemID }) else { return }
+        let dropped = messages[index...].prefix { $0.id == itemID || $0.role == .assistant }
+        interrupt()
+        for m in dropped {
+            client?.send(["type": "conversation.item.delete", "item_id": m.id])
+            if let file = m.audioFile { try? FileManager.default.removeItem(at: store.audioURL(convID, file)) }
+        }
+        let ids = Set(dropped.map(\.id))
+        store.update(convID) { $0.messages.removeAll { ids.contains($0.id) } }
     }
 
     // MARK: Never wait forever
@@ -420,8 +437,12 @@ final class VoiceSession: ObservableObject {
         case "conversation.item.input_audio_transcription.completed":
             guard let itemID = event["item_id"] as? String else { return }
             let text = (event["transcript"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                discardSilentTurn(convID, itemID)
+                return
+            }
             store.updateMessage(convID, itemID) {
-                $0.text = text.isEmpty ? "(no speech detected)" : text
+                $0.text = text
                 $0.pending = false
             }
 
