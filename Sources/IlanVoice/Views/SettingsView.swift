@@ -40,21 +40,12 @@ private struct GeneralSettings: View {
     @ObservedObject var updater: Updater
     @ObservedObject var ptt: PushToTalk
     @ObservedObject var settings = AppSettings.shared
-    @Local private var reveal = false
 
     var body: some View {
         Form {
             UpdatesSection(updater: updater)
             Section("OpenAI") {
-                HStack {
-                    if reveal {
-                        TextField("API key", text: $settings.apiKey)
-                    } else {
-                        SecureField("API key", text: $settings.apiKey)
-                    }
-                    Button { reveal.toggle() } label: { Image(systemName: reveal ? "eye.slash" : "eye") }
-                        .buttonStyle(.borderless)
-                }
+                APIKeyRow(title: "API key", provider: .openAI, key: $settings.apiKey)
                 TextField("Realtime model", text: $settings.model)
                 Picker("Voice", selection: $settings.voiceGender) {
                     ForEach(VoiceGender.allCases) { Text($0.label).tag($0) }
@@ -508,7 +499,6 @@ private struct DictionarySettings: View {
 /// The built-in web_search tool, shown as one section of the General tab.
 private struct WebSearchSection: View {
     @ObservedObject var settings = AppSettings.shared
-    @Local private var reveal = false
 
     var body: some View {
         Section {
@@ -517,15 +507,7 @@ private struct WebSearchSection: View {
                 Picker("Search with", selection: $settings.webSearchProvider) {
                     ForEach(WebSearchProvider.allCases) { Text($0.label).tag($0) }
                 }
-                HStack {
-                    if reveal {
-                        TextField("Gemini API key", text: $settings.geminiAPIKey)
-                    } else {
-                        SecureField("Gemini API key", text: $settings.geminiAPIKey)
-                    }
-                    Button { reveal.toggle() } label: { Image(systemName: reveal ? "eye.slash" : "eye") }
-                        .buttonStyle(.borderless)
-                }
+                APIKeyRow(title: "Gemini API key", provider: .gemini, key: $settings.geminiAPIKey)
                 TextField("Gemini model", text: $settings.geminiModel)
             }
             .disabled(!settings.webSearchEnabled)
@@ -621,6 +603,110 @@ private struct TickSlider: NSViewRepresentable {
             // Snap away floating-point noise (0.9000000001 → 0.9).
             let snapped = (sender.doubleValue / parent.step).rounded() * parent.step
             parent.value = (snapped * 100).rounded() / 100
+        }
+    }
+}
+
+/// An API key is never shown or typed in place. The row says whether a key is
+/// set (with a short hint such as "sk-…a1b2"); "Set API Key…" opens a sheet
+/// where the new key is pasted, checked with the provider, and stored only
+/// if the check passes.
+private struct APIKeyRow: View {
+    let title: String
+    let provider: APIKeyCheck.Provider
+    @Binding var key: String
+    @Local private var editing = false
+    @Local private var confirmRemove = false
+
+    private var isSet: Bool { !key.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    var body: some View {
+        LabeledContent(title) {
+            HStack(spacing: 10) {
+                if isSet {
+                    Label(APIKeyCheck.hint(for: key), systemImage: "checkmark.seal.fill")
+                        .labelStyle(.titleAndIcon)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Theme.mint)
+                } else {
+                    Label("Not set", systemImage: "exclamationmark.circle")
+                        .foregroundStyle(Theme.orange)
+                }
+                Button(isSet ? "Change…" : "Set API Key…") { editing = true }
+                if isSet {
+                    Button(role: .destructive) { confirmRemove = true } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless)
+                        .help("Remove this key")
+                }
+            }
+        }
+        .sheet(isPresented: $editing) {
+            SetAPIKeySheet(title: title, provider: provider) { newKey in key = newKey }
+        }
+        .confirmationDialog("Remove the \(provider.name) API key?", isPresented: $confirmRemove) {
+            Button("Remove", role: .destructive) { key = "" }
+        }
+    }
+}
+
+private struct SetAPIKeySheet: View {
+    let title: String
+    let provider: APIKeyCheck.Provider
+    let onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @Local private var draft = ""
+    @Local private var checking = false
+    @Local private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Set \(title)").font(.headline)
+            Text("Paste your new \(provider.name) key. It is checked with \(provider.name) before it is saved, and it is never shown again.")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            SecureField("Paste the key here", text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 13, design: .monospaced))
+                .onSubmit(save)
+                .disabled(checking)
+            if let error {
+                Label(error, systemImage: "xmark.octagon.fill")
+                    .font(.caption).foregroundStyle(Theme.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                if checking {
+                    ProgressView().controlSize(.small)
+                    Text("Checking with \(provider.name)…").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Check & Save", action: save)
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(checking || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
+    }
+
+    private func save() {
+        let key = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, !checking else { return }
+        checking = true
+        error = nil
+        Task { @MainActor in
+            let outcome = await APIKeyCheck.check(key, provider: provider)
+            checking = false
+            switch outcome {
+            case .valid:
+                onSave(key)
+                dismiss()
+            case .invalid(let message):
+                error = message
+            }
         }
     }
 }
