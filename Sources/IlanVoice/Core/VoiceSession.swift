@@ -300,7 +300,8 @@ final class VoiceSession: ObservableObject {
             return
         }
         pressEnded.send(.sent)
-        NSSound(named: "Pop")?.play()
+        // "Breeze" in System Settings → Sound; the file is still Blow.aiff.
+        NSSound(named: "Blow")?.play()
         pendingUserAudio = recording
         phase = .thinking
         if sessionReady { commit() } else { commitWhenReady = true }
