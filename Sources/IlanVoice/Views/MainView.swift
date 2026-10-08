@@ -87,7 +87,7 @@ struct Sidebar: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            SettingsLink {
+            GeneralSettingsButton {
                 Label("Settings", systemImage: "gearshape.fill")
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(Theme.textDim)
@@ -116,7 +116,6 @@ struct ChatView: View {
     @ObservedObject var mcp: MCPManager
     @ObservedObject var updater: Updater
     @ObservedObject var settings = AppSettings.shared
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let conv = store.selected
@@ -155,7 +154,7 @@ struct ChatView: View {
             }
             Spacer()
             if updater.updateAvailable {
-                Button { openSettings() } label: {
+                GeneralSettingsButton {
                     Label("Update", systemImage: "arrow.down.circle.fill")
                         .font(.system(size: 11.5, weight: .semibold))
                         .padding(.horizontal, 10).padding(.vertical, 5)

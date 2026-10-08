@@ -69,6 +69,7 @@ struct IlanVoiceApp: App {
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") {
                     Task { await model.updater.check() }
+                    NotificationCenter.default.post(name: .showGeneralSettings, object: nil)
                     openSettings()
                 }
             }
@@ -97,7 +98,7 @@ struct IlanVoiceApp: App {
                 NSApp.windows.first { $0.identifier?.rawValue == "main" }?.makeKeyAndOrderFront(nil)
             }
             Button("Play Next Unheard Reply") { model.session.playNextUnheard() }
-            SettingsLink { Text("Settings…") }
+            GeneralSettingsButton { Text("Settings…") }
             Divider()
             Button("Quit") { NSApp.terminate(nil) }.keyboardShortcut("q")
         } label: {
