@@ -61,6 +61,7 @@ struct IlanVoiceApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     model.store.flush()
                     ShellSessions.shared.closeAll()
+                    model.updater.installPendingOnQuit()
                 }
         }
         .windowStyle(.hiddenTitleBar)
