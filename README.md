@@ -59,7 +59,7 @@ Every key the app uses is stored by name (`OPENAI_API_KEY`, `GEMINI_API_KEY`, �
 Everything lives in `~/Library/Application Support/Ilan Voice/`:
 
 ```
-agent.md                      the agent's instructions (also editable in Settings → Agent)
+agent.md                      the agent's instructions (Settings → Agent reveals or opens it)
 mcp.json                      MCP servers (Settings → MCP Tools)
 dictionary.txt                your words, one per line (Settings → Dictionary)
 Conversations/<id>/

@@ -103,34 +103,98 @@ private struct GeneralSettings: View {
     }
 }
 
+/// agent.md lives on disk and is edited in the user's own editor; this tab
+/// just shows where it is and how to get to it.
 private struct AgentSettings: View {
-    @Local private var text = Paths.loadAgent()
-    @Local private var saved = true
+    @Local private var modified: Date?
+    @Local private var lineCount = 0
+    @Local private var copied = false
+    @Local private var confirmReset = false
+
+    private var path: String { Paths.agentFile.path }
+    private var displayPath: String { (path as NSString).abbreviatingWithTildeInPath }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("agent.md — the instructions Ilan follows in every conversation. Changes apply to the next conversation you open.")
-                .font(.callout).foregroundStyle(.secondary)
-            TextEditor(text: $text)
-                .font(.system(size: 13, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
-                .onChange(of: text) { _, _ in saved = false }
-            HStack {
-                Button("Reveal File") { NSWorkspace.shared.activateFileViewerSelecting([Paths.agentFile]) }
-                Button("Reset to Default") { text = Paths.defaultAgent }
-                Spacer()
-                if saved { Label("Saved", systemImage: "checkmark").foregroundStyle(.secondary).font(.caption) }
-                Button("Save") {
-                    try? text.write(to: Paths.agentFile, atomically: true, encoding: .utf8)
-                    saved = true
-                }
-                .keyboardShortcut("s")
-                .buttonStyle(.borderedProminent)
+        VStack(spacing: 18) {
+            Spacer(minLength: 0)
+            Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+                .resizable()
+                .frame(width: 72, height: 72)
+                .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
+            VStack(spacing: 6) {
+                Text("agent.md").font(.system(size: 20, weight: .semibold))
+                Text("The instructions Ilan follows in every conversation.")
+                    .foregroundStyle(.secondary)
             }
+            HStack(spacing: 8) {
+                Image(systemName: "folder").foregroundStyle(.secondary)
+                Text(displayPath)
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineLimit(1).truncationMode(.middle)
+                    .textSelection(.enabled)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(path, forType: .string)
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .help("Copy path")
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.hairline))
+            .frame(maxWidth: 520)
+
+            HStack(spacing: 10) {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([Paths.agentFile])
+                } label: {
+                    Label("Reveal in Finder", systemImage: "magnifyingglass")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                Button {
+                    NSWorkspace.shared.open(Paths.agentFile)
+                } label: {
+                    Label("Open in Editor", systemImage: "square.and.pencil")
+                }
+                .controlSize(.large)
+            }
+
+            if let modified {
+                Text("Edited \(modified, format: .relative(presentation: .named)) · \(lineCount) lines")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            HStack {
+                Text("Changes apply to the next conversation (or Voice → Reconnect).")
+                Spacer()
+                Button("Reset to Default…") { confirmReset = true }
+                    .buttonStyle(.link)
+            }
+            .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(20)
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear(perform: refresh)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
+        .confirmationDialog("Replace agent.md with the default instructions?", isPresented: $confirmReset) {
+            Button("Replace", role: .destructive) {
+                try? Paths.defaultAgent.write(to: Paths.agentFile, atomically: true, encoding: .utf8)
+                refresh()
+            }
+        } message: {
+            Text("Your current instructions will be overwritten.")
+        }
+    }
+
+    private func refresh() {
+        let text = Paths.loadAgent()  // creates the file with defaults if missing
+        lineCount = text.split(separator: "\n", omittingEmptySubsequences: false).count
+        modified = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
     }
 }
 
