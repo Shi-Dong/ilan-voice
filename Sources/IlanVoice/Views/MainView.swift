@@ -86,6 +86,7 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom, spacing: 0) { SidebarSettingsRow() }
         .toolbar {
             ToolbarItem {
                 Button { store.newConversation() } label: { Image(systemName: "square.and.pencil") }
@@ -172,16 +173,6 @@ struct ChatView: View {
             .buttonStyle(.plain)
             .disabled(session.phase == .recording || session.phase == .connecting)
             .help("Reconnect (⇧⌘R): start a fresh session so changes to agent.md, the dictionary, tools and voice take effect. The conversation is kept.")
-            GeneralSettingsButton {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.textDim)
-                    .frame(width: 30, height: 26)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Settings (⌘,)")
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
     }
@@ -270,6 +261,34 @@ struct ChatView: View {
         case .recording: "Listening — release to send"
         case .speaking: "Hold \(settings.talkTrigger.shortLabel) to interrupt"
         default: "Hold \(settings.talkTrigger.shortLabel) to talk"
+        }
+    }
+}
+
+/// A quiet footer row under the conversation list: a hairline, then a small
+/// gear and label in the sidebar's dim text, lit only on hover.
+private struct SidebarSettingsRow: View {
+    @Local private var hovering = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+            GeneralSettingsButton {
+                HStack(spacing: 7) {
+                    Image(systemName: "gearshape").font(.system(size: 12, weight: .medium))
+                    Text("Settings").font(.system(size: 12, weight: .medium))
+                    Spacer()
+                    Text("⌘,").font(.system(size: 11)).opacity(hovering ? 0.8 : 0)
+                }
+                .foregroundStyle(hovering ? Color.primary : Theme.textDim)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(hovering ? Theme.card : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .padding(.horizontal, 8).padding(.vertical, 8)
         }
     }
 }
