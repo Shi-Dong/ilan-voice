@@ -191,9 +191,7 @@ final class VoiceSession: ObservableObject {
                     "speed": AppSettings.speedJSON(settings.voiceSpeed),
                 ],
             ],
-            "tools": mcp.realtimeTools
-                + (settings.shellEnabled ? [ShellTool.definition, ShellTool.closeDefinition] : [])
-                + (settings.webSearchAvailable ? [WebSearchTool.definition] : []),
+            "tools": builtInTools(),
             "tool_choice": "auto",
         ]
         if settings.reasoningEffort != "default" {
@@ -576,6 +574,8 @@ final class VoiceSession: ObservableObject {
                             output = ShellSessions.shared.close(convID)
                                 ? "Closed the bash session." : "There was no open bash session."
                         case WebSearchTool.functionName: output = await self.runWebSearch(arguments: args)
+                        case FileTools.readName, FileTools.editName, FileTools.writeName:
+                            output = self.runFileTool(name, arguments: args)
                         default: output = await self.mcp.call(functionName: name, arguments: args)
                         }
                         self.store.updateMessage(convID, callID) { $0.text = output; $0.pending = false }
@@ -600,6 +600,40 @@ final class VoiceSession: ObservableObject {
               !query.isEmpty else { return "Error: no query given." }
         return await WebSearchTool.search(query, provider: settings.webSearchProvider,
                                           apiKey: settings.geminiAPIKey, model: settings.geminiModel)
+    }
+
+    /// MCP tools plus the built-in ones that are turned on.
+    private func builtInTools() -> [[String: Any]] {
+        var tools: [[String: Any]] = mcp.realtimeTools
+        if settings.shellEnabled { tools += [ShellTool.definition, ShellTool.closeDefinition] }
+        if settings.webSearchAvailable { tools.append(WebSearchTool.definition) }
+        tools.append(FileTools.readDefinition)
+        if settings.fileEditEnabled { tools.append(FileTools.editDefinition) }
+        if settings.fileWriteEnabled { tools.append(FileTools.writeDefinition) }
+        return tools
+    }
+
+    /// read_file always; edit_file / write_file only when turned on in Settings.
+    private func runFileTool(_ name: String, arguments: String) -> String {
+        let args = (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] ?? [:]
+        guard let path = (args["path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else {
+            return "Error: no path given."
+        }
+        let base = settings.shellDirectory
+        let folders = FileTools.allowedFolders(settings.fileWriteFolders)
+        switch name {
+        case FileTools.editName:
+            guard settings.fileEditEnabled else { return "Error: editing files is turned off in Settings." }
+            return FileTools.edit(path: path, oldText: args["old_text"] as? String ?? "",
+                                  newText: args["new_text"] as? String ?? "",
+                                  replaceAll: args["replace_all"] as? Bool ?? false, base: base, folders: folders)
+        case FileTools.writeName:
+            guard settings.fileWriteEnabled else { return "Error: writing files is turned off in Settings." }
+            return FileTools.write(path: path, content: args["content"] as? String ?? "", base: base, folders: folders)
+        default:
+            return FileTools.read(path: path, offset: (args["offset"] as? NSNumber)?.intValue,
+                                  limit: (args["limit"] as? NSNumber)?.intValue, base: base)
+        }
     }
 
     private func runShell(arguments: String, conversation: UUID) async -> String {

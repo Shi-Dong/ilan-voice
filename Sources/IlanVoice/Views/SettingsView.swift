@@ -369,6 +369,24 @@ private struct ShellSettings: View {
                 Text("Ilan never asks: commands on the allow-list run straight away, anything else is refused and Ilan tells you what to add. Changes apply to the next conversation (or Voice → Reconnect). Command output is sent to OpenAI as part of the conversation.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                LabeledContent("Read files") { Text("Always on").foregroundStyle(.secondary) }
+                Toggle("Let Ilan edit files (replace exact text)", isOn: $settings.fileEditEnabled)
+                Toggle("Let Ilan create or overwrite files", isOn: $settings.fileWriteEnabled)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Folders Ilan may change, one per line").font(.caption)
+                    TextEditor(text: $settings.fileWriteFolders)
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(minHeight: 50)
+                        .scrollContentBackground(.hidden)
+                }
+                .disabled(!settings.fileEditEnabled && !settings.fileWriteEnabled)
+            } header: {
+                Text("Files")
+            } footer: {
+                Text("Every change is backed up first to Ilan Voice's file-backups folder. SSH, AWS and GnuPG keys, the Keychain and Ilan's own secrets are never read or changed. File contents are sent to OpenAI as part of the conversation.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Running") {
                 TextField("Working directory", text: $settings.shellDirectory)
                 LabeledContent("Timeout") {
