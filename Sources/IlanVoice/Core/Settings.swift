@@ -61,6 +61,15 @@ final class AppSettings: ObservableObject {
         return (clamped * 100).rounded() / 100
     }
 
+    /// The speed as it has to go into a `session` payload. Rounding the `Double`
+    /// is not enough on its own: `JSONSerialization` writes a `Double` with 17
+    /// significant digits, so even an exactly rounded 0.9 is sent as
+    /// 0.90000000000000002 and the API rejects it. An `NSDecimalNumber` of the
+    /// rounded value is written as plain `0.9`.
+    static func speedJSON(_ value: Double) -> NSDecimalNumber {
+        NSDecimalNumber(value: clampSpeed(value))
+    }
+
     /// The Realtime voice name: OpenAI recommends marin and cedar for quality.
     var voice: String { voiceGender == .female ? "marin" : "cedar" }
     /// MicrophoneChoice.builtIn, MicrophoneChoice.system, or a device UID.
