@@ -82,7 +82,7 @@ final class VoiceSession: ObservableObject {
             .sink { [weak self] speed in
                 guard let self, self.sessionReady else { return }
                 self.client?.send(["type": "session.update",
-                                   "session": ["type": "realtime", "audio": ["output": ["speed": speed]]]])
+                                   "session": ["type": "realtime", "audio": ["output": ["speed": AppSettings.speedJSON(speed)]]]])
             }
         keyWatcher = settings.$apiKey
             .dropFirst()
@@ -188,7 +188,7 @@ final class VoiceSession: ObservableObject {
                 "output": [
                     "format": ["type": "audio/pcm", "rate": 24000],
                     "voice": settings.voice,
-                    "speed": settings.voiceSpeed,
+                    "speed": AppSettings.speedJSON(settings.voiceSpeed),
                 ],
             ],
             "tools": mcp.realtimeTools
