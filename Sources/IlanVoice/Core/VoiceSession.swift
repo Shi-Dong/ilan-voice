@@ -72,8 +72,11 @@ final class VoiceSession: ObservableObject {
         // Once a key is entered, drop the "add your key" warning and dial in.
         // Debounced so typing or pasting the key doesn't connect per keystroke.
         // A new speed applies from the next reply, without reconnecting.
+        // Rounded here too: @Published publishes from willSet, so this sees the
+        // slider's raw value before voiceSpeed's didSet has rounded it.
         speedWatcher = settings.$voiceSpeed
             .dropFirst()
+            .map(AppSettings.clampSpeed)
             .removeDuplicates()
             .debounce(for: .seconds(0.5), scheduler: DispatchQueue.main)
             .sink { [weak self] speed in

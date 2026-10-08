@@ -51,8 +51,14 @@ final class AppSettings: ObservableObject {
         }
     }
     static let speedRange = 0.5...1.5
+    /// Rounded to two decimals as well as clamped: the slider steps by 0.1, and
+    /// adding 0.1 repeatedly in binary floating point lands on values like
+    /// 0.8999999999999999, which go onto the wire with all their digits and are
+    /// rejected by the Realtime API ("invalid session.audio.output.speed: max
+    /// decimal places exceeded").
     static func clampSpeed(_ value: Double) -> Double {
-        min(max(value, speedRange.lowerBound), speedRange.upperBound)
+        let clamped = min(max(value, speedRange.lowerBound), speedRange.upperBound)
+        return (clamped * 100).rounded() / 100
     }
 
     /// The Realtime voice name: OpenAI recommends marin and cedar for quality.
