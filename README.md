@@ -64,7 +64,7 @@ Everything lives in `~/Library/Application Support/Ilan Voice/`:
 
 ```
 agent.md                      the agent's instructions (Settings → Agent reveals or opens it)
-mcp.json                      MCP servers (Settings → MCP Tools)
+mcp.json                      MCP servers (Settings → MCP Tools reveals or opens it)
 dictionary.txt                your words, one per line (Settings → Dictionary)
 Conversations/<id>/
     conversation.json         the full record

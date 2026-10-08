@@ -107,11 +107,9 @@ private struct GeneralSettings: View {
 private struct AgentSettings: View {
     @Local private var modified: Date?
     @Local private var lineCount = 0
-    @Local private var copied = false
     @Local private var confirmReset = false
 
     private var path: String { Paths.agentFile.path }
-    private var displayPath: String { (path as NSString).abbreviatingWithTildeInPath }
 
     var body: some View {
         VStack(spacing: 18) {
@@ -125,27 +123,7 @@ private struct AgentSettings: View {
                 Text("The instructions Ilan follows in every conversation.")
                     .foregroundStyle(.secondary)
             }
-            HStack(spacing: 8) {
-                Image(systemName: "folder").foregroundStyle(.secondary)
-                Text(displayPath)
-                    .font(.system(size: 12, design: .monospaced))
-                    .lineLimit(1).truncationMode(.middle)
-                    .textSelection(.enabled)
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(path, forType: .string)
-                    copied = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
-                } label: {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                }
-                .buttonStyle(.borderless)
-                .help("Copy path")
-            }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.hairline))
-            .frame(maxWidth: 520)
+            FilePathPill(path: path)
 
             HStack(spacing: 10) {
                 Button {
@@ -197,61 +175,152 @@ private struct AgentSettings: View {
     }
 }
 
+/// mcp.json, like agent.md, is edited in the user's own editor; this tab
+/// shows where it is, the servers it defines and whether each one connected.
 private struct MCPSettings: View {
     @ObservedObject var mcp: MCPManager
-    @Local private var text = (try? String(contentsOf: Paths.mcpFile, encoding: .utf8)) ?? Paths.defaultMCP
+    @Local private var modified: Date?
     @Local private var note: String?
 
+    private var path: String { Paths.mcpFile.path }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("mcp.json uses the same shape as Claude Code: each server has a \"url\" (+ optional \"headers\") or a \"command\" (+ \"args\", \"env\").")
-                .font(.callout).foregroundStyle(.secondary)
-            HStack(alignment: .top, spacing: 12) {
-                TextEditor(text: $text)
-                    .font(.system(size: 12, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Servers").font(.headline)
-                    if mcp.loading { ProgressView().controlSize(.small) }
-                    ForEach(mcp.servers) { s in
-                        HStack(alignment: .top, spacing: 6) {
-                            Circle().fill(s.ok ? Theme.mint : Theme.orange).frame(width: 7, height: 7).padding(.top, 5)
-                            VStack(alignment: .leading) {
-                                Text(s.name).font(.system(size: 12, weight: .medium))
-                                Text(s.state).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(3)
-                            }
-                        }
-                    }
-                    Spacer()
-                }
-                .frame(width: 190)
+        VStack(spacing: 18) {
+            Spacer(minLength: 0)
+            Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+                .resizable()
+                .frame(width: 72, height: 72)
+                .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
+            VStack(spacing: 6) {
+                Text("mcp.json").font(.system(size: 20, weight: .semibold))
+                Text("The MCP servers whose tools Ilan can use.")
+                    .foregroundStyle(.secondary)
             }
+            FilePathPill(path: path)
+
+            HStack(spacing: 10) {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([Paths.mcpFile])
+                } label: {
+                    Label("Reveal in Finder", systemImage: "magnifyingglass")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                Button {
+                    NSWorkspace.shared.open(Paths.mcpFile)
+                } label: {
+                    Label("Open in Editor", systemImage: "square.and.pencil")
+                }
+                .controlSize(.large)
+            }
+
+            serverList
+
+            Spacer(minLength: 0)
             HStack {
+                Text(note ?? "Same format as Claude Code. Edits are picked up when you come back to Ilan Voice.")
+                    .lineLimit(1)
+                Spacer()
                 Button("Import from Claude Code") {
                     do {
                         let n = try MCPManager.importFromClaudeCode()
-                        text = (try? String(contentsOf: Paths.mcpFile, encoding: .utf8)) ?? text
                         note = "Imported \(n) servers."
-                        Task { await mcp.reload() }
+                        reload()
                     } catch { note = error.localizedDescription }
                 }
-                if let note { Text(note).font(.caption).foregroundStyle(.secondary) }
+                .buttonStyle(.link)
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear { modified = Self.modificationDate() }
+        // Reload after the file was edited elsewhere, e.g. in the editor.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            let now = Self.modificationDate()
+            if now != modified { reload() }
+        }
+    }
+
+    /// One quiet row per server: a status dot, the name, and its tool count or error.
+    private var serverList: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Servers").font(.system(size: 12, weight: .semibold))
+                if mcp.loading { ProgressView().controlSize(.mini) }
                 Spacer()
-                Button("Save & Reconnect") {
-                    guard (try? JSONSerialization.jsonObject(with: Data(text.utf8))) != nil else {
-                        note = "That is not valid JSON."
-                        return
-                    }
-                    try? text.write(to: Paths.mcpFile, atomically: true, encoding: .utf8)
-                    note = "Saved. New tools apply to the next conversation."
-                    Task { await mcp.reload() }
+                Button { reload() } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless)
+                    .disabled(mcp.loading)
+                    .help("Reload mcp.json and reconnect to every server")
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            if mcp.servers.isEmpty {
+                Rectangle().fill(Theme.hairline).frame(height: 1)
+                Text("No servers yet. Add one to mcp.json, or import them from Claude Code.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+            }
+            ForEach(mcp.servers) { s in
+                Rectangle().fill(Theme.hairline).frame(height: 1)
+                HStack(spacing: 8) {
+                    Circle().fill(s.ok ? Theme.mint : Theme.orange).frame(width: 7, height: 7)
+                    Text(s.name).font(.system(size: 12, weight: .medium))
+                    Spacer(minLength: 12)
+                    Text(s.state)
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.tail)
+                        .help(s.state)
                 }
-                .buttonStyle(.borderedProminent)
+                .padding(.horizontal, 12).padding(.vertical, 7)
             }
         }
-        .padding(20)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.hairline))
+        .frame(maxWidth: 520)
+    }
+
+    private func reload() {
+        modified = Self.modificationDate()
+        Task { await mcp.reload() }
+    }
+
+    private static func modificationDate() -> Date? {
+        if !FileManager.default.fileExists(atPath: Paths.mcpFile.path) {
+            try? Paths.defaultMCP.write(to: Paths.mcpFile, atomically: true, encoding: .utf8)
+        }
+        return (try? FileManager.default.attributesOfItem(atPath: Paths.mcpFile.path))?[.modificationDate] as? Date
+    }
+}
+
+/// A file's path in a rounded pill, with a button that copies it.
+private struct FilePathPill: View {
+    let path: String
+    @Local private var copied = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "folder").foregroundStyle(.secondary)
+            Text((path as NSString).abbreviatingWithTildeInPath)
+                .font(.system(size: 12, design: .monospaced))
+                .lineLimit(1).truncationMode(.middle)
+                .textSelection(.enabled)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(path, forType: .string)
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+            } label: {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+            }
+            .buttonStyle(.borderless)
+            .help("Copy path")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.hairline))
+        .frame(maxWidth: 520)
     }
 }
 
