@@ -102,6 +102,8 @@ final class AppSettings: ObservableObject {
     }
     @Published var reasoningEffort: String { didSet { defaults.set(reasoningEffort, forKey: "reasoningEffort") } }
     @Published var outputMode: OutputMode { didSet { defaults.set(outputMode.rawValue, forKey: "outputMode") } }
+    /// Drop the Dock icon while the main window is closed.
+    @Published var hideDockWhenClosed: Bool { didSet { defaults.set(hideDockWhenClosed, forKey: "hideDockWhenClosed") } }
     @Published var talkTrigger: TalkTrigger { didSet { defaults.set(try? JSONEncoder().encode(talkTrigger), forKey: "talkTrigger") } }
 
     private init() {
@@ -126,6 +128,7 @@ final class AppSettings: ObservableObject {
         shellAllowList = defaults.string(forKey: "shellAllowList") ?? ShellTool.defaultAllowList
         reasoningEffort = defaults.string(forKey: "reasoningEffort") ?? "default"
         outputMode = OutputMode(rawValue: defaults.string(forKey: "outputMode") ?? "") ?? .realtime
+        hideDockWhenClosed = defaults.object(forKey: "hideDockWhenClosed") as? Bool ?? true
         talkTrigger = defaults.data(forKey: "talkTrigger").flatMap { try? JSONDecoder().decode(TalkTrigger.self, from: $0) }
             ?? TalkTrigger.migrating(defaults.string(forKey: "pushToTalkKey"))
     }

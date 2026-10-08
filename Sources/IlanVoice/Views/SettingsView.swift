@@ -84,6 +84,14 @@ private struct GeneralSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             WebSearchSection()
+            Section("App") {
+                Toggle("Hide from Dock when the window is closed", isOn: $settings.hideDockWhenClosed)
+                    .onChange(of: settings.hideDockWhenClosed) { _, hide in
+                        if !hide { AppDelegate.showInDock() }
+                    }
+                Text("Ilan Voice keeps running in the menu bar, so the talk key still works. Choose Show Ilan Voice from the menu bar icon to bring the window and the Dock icon back.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Data") {
                 LabeledContent("Folder") {
                     Button("Open in Finder") { NSWorkspace.shared.open(Paths.root) }

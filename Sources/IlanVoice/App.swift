@@ -42,6 +42,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // With "Hide from Dock" on, the Dock icon follows the main window:
+        // gone while it is closed (the app lives on in the menu bar), back
+        // as soon as it opens again.
+        let center = NotificationCenter.default
+        center.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { note in
+            guard Self.isMain(note.object), AppSettings.shared.hideDockWhenClosed else { return }
+            NSApp.setActivationPolicy(.accessory)
+        }
+        center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { note in
+            guard Self.isMain(note.object) else { return }
+            Self.showInDock()
+        }
+    }
+
+    private static func isMain(_ window: Any?) -> Bool {
+        (window as? NSWindow)?.identifier?.rawValue == "main"
+    }
+
+    static func showInDock() {
+        guard NSApp.activationPolicy() != .regular else { return }
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -52,6 +74,7 @@ struct IlanVoiceApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = AppModel()
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         Window("Ilan Voice", id: "main") {
@@ -95,8 +118,9 @@ struct IlanVoiceApp: App {
 
         MenuBarExtra {
             Button("Show Ilan Voice") {
+                AppDelegate.showInDock()
+                openWindow(id: "main")
                 NSApp.activate(ignoringOtherApps: true)
-                NSApp.windows.first { $0.identifier?.rawValue == "main" }?.makeKeyAndOrderFront(nil)
             }
             Button("Play Next Unheard Reply") { model.session.playNextUnheard() }
             GeneralSettingsButton { Text("Settings…") }
