@@ -104,6 +104,8 @@ struct IlanVoiceApp: App {
             CommandMenu("Voice") {
                 Button("Play Next Unheard Reply") { model.session.playNextUnheard() }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
+                Button("Replay Last Reply") { model.session.replayLast() }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
                 Button("Stop Playback") { model.session.clips.stop() }
                     .keyboardShortcut(".")
                 Divider()
@@ -123,6 +125,7 @@ struct IlanVoiceApp: App {
                 NSApp.activate(ignoringOtherApps: true)
             }
             Button("Play Next Unheard Reply") { model.session.playNextUnheard() }
+            Button("Replay Last Reply") { model.session.replayLast() }
             Button("Settings…") {
                 // With the window closed the app is out of the Dock and not
                 // active, so Settings would open behind other apps (or not at

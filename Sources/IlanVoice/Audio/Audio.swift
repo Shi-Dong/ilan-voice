@@ -232,6 +232,8 @@ final class StreamPlayer {
 final class ClipPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var playingID: String?
     @Published private(set) var progress: Double = 0
+    /// The assistant reply heard most recently, live or replayed.
+    @Published private(set) var lastPlayed: (id: String, url: URL)?
     private var player: AVAudioPlayer?
     private var timer: Timer?
     private var onFinish: (() -> Void)?
@@ -244,6 +246,7 @@ final class ClipPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         p.play()
         player = p
         playingID = id
+        lastPlayed = (id, url)
         self.onFinish = onFinish
         timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -252,6 +255,9 @@ final class ClipPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             }
         }
     }
+
+    /// Records a reply that was heard live, so it can be replayed later.
+    func markPlayed(id: String, url: URL) { lastPlayed = (id, url) }
 
     func stop() {
         player?.stop()

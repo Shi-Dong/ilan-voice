@@ -554,7 +554,11 @@ final class VoiceSession: ObservableObject {
             $0.audioFile = file
             $0.audioSeconds = PCM.seconds(pcm)
         }
-        if settings.outputMode == .cached { NSSound(named: "Glass")?.play() }
+        if settings.outputMode == .cached {
+            NSSound(named: "Glass")?.play()
+        } else {
+            clips.markPlayed(id: itemID, url: store.audioURL(convID, file))
+        }
     }
 
     private func runTools(_ calls: [[String: Any]], _ convID: UUID) {
@@ -668,6 +672,15 @@ final class VoiceSession: ObservableObject {
     }
 
     /// Plays the oldest reply the user has not heard yet, then the next one.
+    /// Plays the assistant reply heard most recently again from the start,
+    /// cutting off anything Ilan is saying now.
+    func replayLast() {
+        guard let last = clips.lastPlayed, FileManager.default.fileExists(atPath: last.url.path) else { return }
+        interrupt()
+        clips.stop()
+        clips.toggle(id: last.id, url: last.url)
+    }
+
     func playNextUnheard() {
         guard let conv = store.selected,
               let next = conv.messages.first(where: { $0.role == .assistant && !$0.listened && $0.audioFile != nil }) else { return }
