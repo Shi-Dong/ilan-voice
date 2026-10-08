@@ -94,6 +94,8 @@ final class AppSettings: ObservableObject {
             defaults.set(shellTimeout, forKey: "shellTimeout")
         }
     }
+    /// Runs every shell command without checking the allow-list. Off by default.
+    @Published var shellBypassPermissions: Bool { didSet { defaults.set(shellBypassPermissions, forKey: "shellBypassPermissions") } }
     /// One command prefix per line; only these commands may run.
     @Published var shellAllowList: String { didSet { defaults.set(shellAllowList, forKey: "shellAllowList") } }
 
@@ -125,6 +127,7 @@ final class AppSettings: ObservableObject {
             ?? (defaults.bool(forKey: "fileEditEnabled") || defaults.bool(forKey: "fileWriteEnabled"))
         fileBlockList = defaults.string(forKey: "fileBlockList") ?? FileTools.defaultBlockList
         shellTimeout = defaults.object(forKey: "shellTimeout") as? Int ?? 60
+        shellBypassPermissions = defaults.bool(forKey: "shellBypassPermissions")
         shellAllowList = defaults.string(forKey: "shellAllowList") ?? ShellTool.defaultAllowList
         reasoningEffort = defaults.string(forKey: "reasoningEffort") ?? "default"
         outputMode = OutputMode(rawValue: defaults.string(forKey: "outputMode") ?? "") ?? .realtime
@@ -135,7 +138,7 @@ final class AppSettings: ObservableObject {
 
     /// Fields that only take effect on a fresh Realtime session.
     var sessionFingerprint: String {
-        [apiKey, model, voice, transcriptionModel, reasoningEffort, String(shellEnabled), String(webSearchAvailable), String(fileChangesEnabled)].joined(separator: "|")
+        [apiKey, model, voice, transcriptionModel, reasoningEffort, String(shellEnabled), String(shellBypassPermissions), String(webSearchAvailable), String(fileChangesEnabled)].joined(separator: "|")
     }
 }
 

@@ -446,6 +446,13 @@ private struct MicrophonePicker: View {
 /// the allow-list of commands Ilan may run without asking.
 private struct ShellSettings: View {
     @ObservedObject var settings = AppSettings.shared
+    @Local private var confirmBypass = false
+
+    /// Turning bypass on goes through a warning; turning it off is immediate.
+    private var bypassBinding: Binding<Bool> {
+        Binding(get: { settings.shellBypassPermissions },
+                set: { on in if on { confirmBypass = true } else { settings.shellBypassPermissions = false } })
+    }
 
     var body: some View {
         Form {
@@ -453,6 +460,21 @@ private struct ShellSettings: View {
                 Toggle("Let Ilan run bash commands on this Mac", isOn: $settings.shellEnabled)
                 Text("Ilan never asks: commands on the allow-list run straight away, anything else is refused and Ilan tells you what to add. Changes apply to the next conversation (or Voice → Reconnect). Command output is sent to OpenAI as part of the conversation.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle(isOn: bypassBinding) {
+                    Text("Bypass all permissions").foregroundStyle(.red).fontWeight(.medium)
+                }
+                .disabled(!settings.shellEnabled)
+                if settings.shellBypassPermissions {
+                    Label("Any command runs, including ones that delete or change files. The allow-list below is ignored.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.red)
+                }
+            }
+            .alert("Bypass all permissions?", isPresented: $confirmBypass) {
+                Button("Turn On", role: .destructive) { settings.shellBypassPermissions = true }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Ilan will be able to run any bash command on this Mac without checks, including commands that delete files, change system settings, install software or send your data elsewhere. A misheard request or a mistake by the model can cause damage that can't be undone. Only turn this on if you understand the risk.")
             }
             Section {
                 LabeledContent("Read files") { Text("Always on").foregroundStyle(.secondary) }
@@ -505,7 +527,8 @@ private struct ShellSettings: View {
                         .buttonStyle(.link).font(.caption)
                 }
             }
-            .disabled(!settings.shellEnabled)
+            .disabled(!settings.shellEnabled || settings.shellBypassPermissions)
+            .opacity(settings.shellBypassPermissions ? 0.45 : 1)
         }
         .formStyle(.grouped)
     }
