@@ -257,14 +257,17 @@ private struct UpdatesSection: View {
                 status
                 Spacer()
                 if case .available = updater.state {
-                    Button("Install & Relaunch") { Task { await updater.install() } }
+                    Button("Install Update") { Task { await updater.install() } }
+                        .buttonStyle(.borderedProminent)
+                } else if case .readyToRestart = updater.state {
+                    Button("Restart Now") { updater.restartNow() }
                         .buttonStyle(.borderedProminent)
                 } else {
                     Button("Check for Updates") { Task { await updater.check() } }
                         .disabled(updater.isBusy)
                 }
             }
-            Text("Updates build the newest version from GitHub on this Mac (needs Apple's Command Line Tools), then restart the app. After an update, macOS may ask you to re-allow Accessibility.")
+            Text("Updates build the newest version from GitHub on this Mac (needs Apple's Command Line Tools), then ask you to restart the app. After an update, macOS may ask you to re-allow Accessibility.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -285,7 +288,12 @@ private struct UpdatesSection: View {
                 if let date { Text(date, format: .dateTime.month().day().hour().minute()).font(.caption).foregroundStyle(.secondary) }
             }
         case .installing(let step):
-            HStack(spacing: 6) { ProgressView().controlSize(.small); Text(step) }
+            VStack(alignment: .leading, spacing: 4) {
+                ProgressView(value: updater.progress).progressViewStyle(.linear).frame(width: 220)
+                Text(step).font(.caption).foregroundStyle(.secondary)
+            }
+        case .readyToRestart:
+            Label("Update installed. Restart to use it.", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.mint)
         case .failed(let message):
             VStack(alignment: .leading, spacing: 4) {
                 Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.orange)

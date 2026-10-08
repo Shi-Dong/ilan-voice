@@ -18,8 +18,16 @@ final class Updater: ObservableObject {
         case upToDate
         case available(commit: String, summary: String, date: Date?)
         case installing(String)
+        /// Built and waiting for the user to click Restart Now.
+        case readyToRestart
         case failed(String)
     }
+
+    /// 0…1 while installing: download, then the build's own [n/total] steps.
+    @Published private(set) var progress: Double = 0
+    /// The freshly built app, swapped in on Restart Now (or when the app quits).
+    private var pendingApp: URL?
+    private var swapScheduled = false
 
     static let repo = "Shi-Dong/ilan-voice"
     static let branch = "main"
@@ -85,10 +93,12 @@ final class Updater: ObservableObject {
 
     func install() async {
         guard !isBusy else { return }
+        UpdateWindow.shared.show(self)
         guard Self.hasCommandLineTools() else {
             state = .failed("Updating builds the app from source and needs Apple's Command Line Tools. Run `xcode-select --install` in Terminal, then try again.")
             return
         }
+        progress = 0.02
         state = .installing("Downloading the latest source…")
         let script = """
         set -euo pipefail
@@ -112,8 +122,42 @@ final class Updater: ObservableObject {
             state = .failed("The build finished but produced no app. See update.log.")
             return
         }
-        state = .installing("Restarting…")
-        relaunch(replacingWith: newApp)
+        pendingApp = newApp
+        progress = 1
+        state = .readyToRestart
+    }
+
+    /// Swaps in the new build and reopens the app.
+    func restartNow() {
+        guard let app = pendingApp else { return }
+        swap(in: app, reopen: true)
+    }
+
+    /// "Later": if the app quits with an update waiting, install it on the
+    /// way out (without reopening), so the next launch is the new version.
+    func installPendingOnQuit() {
+        guard let app = pendingApp, !swapScheduled else { return }
+        swap(in: app, reopen: false, terminate: false)
+    }
+
+    /// Maps a chunk of build output to overall progress.
+    private func advance(with text: String) {
+        if text.contains("@@BUILD") {
+            progress = max(progress, 0.12)
+            state = .installing("Building the new version…")
+        }
+        // swift build prints "[12/345] Compiling …".
+        let pattern = try! NSRegularExpression(pattern: #"\[\s*(\d+)\s*/\s*(\d+)\s*\]"#)
+        let range = NSRange(text.startIndex..., in: text)
+        if let match = pattern.matches(in: text, range: range).last,
+           let done = Double((text as NSString).substring(with: match.range(at: 1))),
+           let total = Double((text as NSString).substring(with: match.range(at: 2))), total > 0 {
+            progress = max(progress, 0.12 + 0.78 * min(1, done / total))
+        }
+        if text.contains("Signed with") || text.contains("signature") {
+            progress = max(progress, 0.95)
+            state = .installing("Finishing up…")
+        }
     }
 
     /// Runs a bash script, logging to update.log and turning milestones into status text.
@@ -134,9 +178,7 @@ final class Updater: ObservableObject {
             guard !data.isEmpty else { return }
             try? log?.write(contentsOf: data)
             let text = String(decoding: data, as: UTF8.self)
-            Task { @MainActor in
-                if text.contains("@@BUILD") { self?.state = .installing("Building — this takes a minute or two…") }
-            }
+            Task { @MainActor in self?.advance(with: text) }
         }
         let status: Int32 = await withCheckedContinuation { cont in
             process.terminationHandler = { cont.resume(returning: $0.terminationStatus) }
@@ -153,22 +195,26 @@ final class Updater: ObservableObject {
         return true
     }
 
-    /// A detached shell waits for this process to exit, swaps the bundle and reopens it.
-    private func relaunch(replacingWith newApp: URL) {
+    /// A detached shell waits for this process to exit, swaps the bundle and
+    /// (optionally) reopens it.
+    private func swap(in newApp: URL, reopen: Bool, terminate: Bool = true) {
+        swapScheduled = true
         let target = Bundle.main.bundleURL
         let script = """
         while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
         rm -rf "$2"
         cp -R "$3" "$2"
-        open "$2"
+        if [ "$4" = "1" ]; then open "$2"; fi
         """
         let helper = Process()
         helper.executableURL = URL(fileURLWithPath: "/bin/sh")
-        helper.arguments = ["-c", script, "relaunch", String(ProcessInfo.processInfo.processIdentifier), target.path, newApp.path]
+        helper.arguments = ["-c", script, "relaunch", String(ProcessInfo.processInfo.processIdentifier),
+                            target.path, newApp.path, reopen ? "1" : "0"]
         do {
             try helper.run()
-            NSApp.terminate(nil)
+            if terminate { NSApp.terminate(nil) }
         } catch {
+            swapScheduled = false
             state = .failed("Could not restart: \(error.localizedDescription)")
         }
     }
