@@ -10,6 +10,28 @@ enum PCM {
 
     static func seconds(_ data: Data) -> Double { Double(data.count) / Double(bytesPerSecond) }
 
+    /// True if some of the recording is louder than a quiet room: at least
+    /// 100 ms, in 20 ms frames, above about -40 dBFS. Background hiss on a
+    /// built-in mic sits well below that; normal speech well above.
+    static func containsSpeech(_ data: Data) -> Bool {
+        let frame = 480, threshold = 0.01 * 32_768.0
+        var loudFrames = 0
+        data.withUnsafeBytes { raw in
+            let samples = raw.bindMemory(to: Int16.self)
+            var start = 0
+            while start + frame <= samples.count {
+                var sum = 0.0
+                for i in start..<start + frame {
+                    let v = Double(Int16(littleEndian: samples[i]))
+                    sum += v * v
+                }
+                if (sum / Double(frame)).squareRoot() > threshold { loudFrames += 1 }
+                start += frame
+            }
+        }
+        return loudFrames >= 5
+    }
+
     /// Wraps raw PCM in a 44-byte RIFF header.
     static func wav(_ pcm: Data) -> Data {
         var d = Data()
