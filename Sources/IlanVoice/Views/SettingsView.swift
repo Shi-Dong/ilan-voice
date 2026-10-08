@@ -8,10 +8,13 @@ struct SettingsView: View {
 
     enum Tab: Hashable { case general, keys, agent, mcp, shell, dictionary }
 
-    /// Settings always opens on General. The window is kept alive between
-    /// openings, so the tab is reset whenever it appears and disappears;
-    /// binding the selection also stops macOS restoring the last tab.
+    /// Settings always opens on General. SwiftUI keeps the Settings window
+    /// (and this view) alive after it is closed, so onAppear/onDisappear don't
+    /// fire reliably. Instead the tab goes back to General whenever the window
+    /// closes, and whenever any Settings button in the app is clicked (even if
+    /// the window is already open behind another one).
     @Local private var tab: Tab = .general
+    @Local private var window = WeakWindow()
 
     var body: some View {
         TabView(selection: $tab) {
@@ -22,8 +25,12 @@ struct SettingsView: View {
             APIKeySettings().tabItem { Label("API Keys", systemImage: "key") }.tag(Tab.keys)
             DictionarySettings().tabItem { Label("Dictionary", systemImage: "character.book.closed") }.tag(Tab.dictionary)
         }
+        .background(WindowReader { window.value = $0 })
         .onAppear { tab = .general }
-        .onDisappear { tab = .general }
+        .onReceive(NotificationCenter.default.publisher(for: .showGeneralSettings)) { _ in tab = .general }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
+            if let closing = note.object as? NSWindow, closing === window.value { tab = .general }
+        }
         .frame(width: 640, height: 520)
         .preferredColorScheme(.dark)
         .tint(Theme.mint)
@@ -534,5 +541,43 @@ private struct WebSearchSection: View {
     private var status: String {
         if !settings.webSearchEnabled { return "Off" }
         return settings.webSearchAvailable ? "Ready" : "Needs a Gemini API key"
+    }
+}
+
+extension Notification.Name {
+    /// Posted before Settings is opened from a button, to land on General.
+    static let showGeneralSettings = Notification.Name("IlanVoice.showGeneralSettings")
+}
+
+/// Opens Settings on the General tab. Use instead of `SettingsLink` and
+/// `openSettings()` everywhere in the app.
+struct GeneralSettingsButton<Label: View>: View {
+    @Environment(\.openSettings) private var openSettings
+    @ViewBuilder var label: () -> Label
+
+    var body: some View {
+        Button {
+            NotificationCenter.default.post(name: .showGeneralSettings, object: nil)
+            openSettings()
+        } label: { label() }
+    }
+}
+
+final class WeakWindow {
+    weak var value: NSWindow?
+}
+
+/// Reports the window a SwiftUI view lives in.
+private struct WindowReader: NSViewRepresentable {
+    let onWindow: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { onWindow(view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { onWindow(nsView.window) }
     }
 }
