@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @ObservedObject var mcp: MCPManager
@@ -326,34 +327,88 @@ private struct ShellSettings: View {
 }
 
 /// One word or phrase per line; grounds transcription and the model's spelling.
+/// The personal dictionary as a list: add a word, delete one, or import a
+/// text file with one word or phrase per line.
 private struct DictionarySettings: View {
-    @Local private var text = UserDictionary.loadText()
-    @Local private var saved = true
+    @Local private var terms = UserDictionary.terms()
+    @Local private var newTerm = ""
+    @Local private var note: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Your words: names, jargon and acronyms that speech recognition gets wrong. One per line, spelled the way you want them written. They are given to the transcription model and to Ilan, so both hear and spell them your way. Changes apply to the next conversation (or Voice → Reconnect).")
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Names, jargon and acronyms that speech recognition gets wrong, spelled the way you want them written. Ilan and the transcription model both use them. Changes apply to the next conversation (or Voice → Reconnect).")
                 .font(.callout).foregroundStyle(.secondary)
-            TextEditor(text: $text)
-                .font(.system(size: 13, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
-                .onChange(of: text) { _, _ in saved = false }
-            HStack {
-                Text("\(UserDictionary.terms(from: text).count) terms")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                if saved { Label("Saved", systemImage: "checkmark").foregroundStyle(.secondary).font(.caption) }
-                Button("Save") {
-                    UserDictionary.save(text)
-                    saved = true
+            HStack(spacing: 8) {
+                TextField("Add a word or phrase", text: $newTerm)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(addTerm)
+                Button("Add", action: addTerm)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(newTerm.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Import…", action: importFile)
+                    .help("Add every line of a text file (one word or phrase per line).")
+            }
+            if terms.isEmpty {
+                VStack(spacing: 6) {
+                    Image(systemName: "character.book.closed").font(.system(size: 28)).foregroundStyle(.secondary)
+                    Text("No words yet").foregroundStyle(.secondary)
                 }
-                .keyboardShortcut("s")
-                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(terms, id: \.self) { term in
+                        HStack {
+                            Text(term).font(.system(size: 13))
+                            Spacer()
+                            Button { remove(term) } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(.secondary)
+                                .help("Delete \"\(term)\"")
+                        }
+                    }
+                }
+                .listStyle(.inset)
+                .scrollContentBackground(.hidden)
+                .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+            }
+            HStack {
+                Text("\(terms.count) \(terms.count == 1 ? "word" : "words")").font(.caption).foregroundStyle(.secondary)
+                if let note { Text("· \(note)").font(.caption).foregroundStyle(.secondary) }
+                Spacer()
             }
         }
         .padding(20)
+        .onAppear { terms = UserDictionary.terms() }
+    }
+
+    private func addTerm() {
+        let term = newTerm.trimmingCharacters(in: .whitespaces)
+        guard !term.isEmpty else { return }
+        let added = UserDictionary.add([term])
+        note = added == 0 ? "\"\(term)\" is already in the list" : nil
+        newTerm = ""
+        terms = UserDictionary.terms()
+    }
+
+    private func remove(_ term: String) {
+        UserDictionary.remove(term)
+        note = nil
+        terms = UserDictionary.terms()
+    }
+
+    private func importFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.plainText, .text]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a text file with one word or phrase per line."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let result = try UserDictionary.importFile(url)
+            note = "Imported \(result.added) new of \(result.read) from \(url.lastPathComponent)"
+        } catch {
+            note = "Couldn't read \(url.lastPathComponent): \(error.localizedDescription)"
+        }
+        terms = UserDictionary.terms()
     }
 }
 

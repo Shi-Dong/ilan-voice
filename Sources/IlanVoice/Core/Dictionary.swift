@@ -27,6 +27,32 @@ enum UserDictionary {
         try? text.write(to: file, atomically: true, encoding: .utf8)
     }
 
+    /// Writes the list back, one term per line.
+    static func save(terms: [String]) {
+        save(terms.joined(separator: "\n") + (terms.isEmpty ? "" : "\n"))
+    }
+
+    /// Adds terms that aren't already there (case-insensitive), keeping the
+    /// existing order. Returns how many were new.
+    @discardableResult
+    static func add(_ newTerms: [String]) -> Int {
+        let current = terms()
+        let merged = terms(from: (current + newTerms).joined(separator: "\n"))
+        save(terms: merged)
+        return merged.count - current.count
+    }
+
+    static func remove(_ term: String) {
+        save(terms: terms().filter { $0.caseInsensitiveCompare(term) != .orderedSame })
+    }
+
+    /// Adds every line of a text file. Returns (new, total lines read).
+    static func importFile(_ url: URL) throws -> (added: Int, read: Int) {
+        let text = try String(contentsOf: url, encoding: .utf8)
+        let lines = terms(from: text)
+        return (add(lines), lines.count)
+    }
+
     /// Clean terms: trimmed, no comments or blanks, no characters the
     /// Realtime API rejects in keywords (`<`, `>`), de-duplicated in order.
     static func terms(from text: String = loadText()) -> [String] {
