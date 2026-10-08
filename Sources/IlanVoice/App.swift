@@ -73,8 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct IlanVoiceApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = AppModel()
-    @Environment(\.openSettings) private var openSettings
-    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         Window("Ilan Voice", id: "main") {
@@ -94,7 +92,9 @@ struct IlanVoiceApp: App {
                 Button("Check for Updates…") {
                     Task { await model.updater.check() }
                     NotificationCenter.default.post(name: .showGeneralSettings, object: nil)
-                    openSettings()
+                    // openSettings can't be read from the App struct; this is the
+                    // action the standard Settings… menu item sends.
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                 }
             }
             CommandGroup(replacing: .newItem) {
@@ -117,29 +117,42 @@ struct IlanVoiceApp: App {
         }
 
         MenuBarExtra {
-            Button("Show Ilan Voice") {
-                AppDelegate.showInDock()
-                openWindow(id: "main")
-                NSApp.activate(ignoringOtherApps: true)
-            }
-            Button("Play Next Unheard Reply") { model.session.playNextUnheard() }
-            Button("Settings…") {
-                // With the window closed the app is out of the Dock and not
-                // active, so Settings would open behind other apps (or not at
-                // all). Bring the app back first, then open Settings on top.
-                AppDelegate.showInDock()
-                openWindow(id: "main")
-                NSApp.activate(ignoringOtherApps: true)
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: .showGeneralSettings, object: nil)
-                    openSettings()
-                    NSApp.activate(ignoringOtherApps: true)
-                }
-            }
-            Divider()
-            Button("Quit") { NSApp.terminate(nil) }.keyboardShortcut("q")
+            MenuBarMenu(session: model.session)
         } label: {
             Image(nsImage: MenuBarIcon.image)
         }
+    }
+}
+
+/// The menu under the menu bar icon. A View of its own because openWindow and
+/// openSettings only work when read from a view's environment; read in the
+/// App struct they silently do nothing.
+private struct MenuBarMenu: View {
+    let session: VoiceSession
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Button("Show Ilan Voice") { showMainWindow() }
+        Button("Play Next Unheard Reply") { session.playNextUnheard() }
+        Button("Settings…") {
+            // With the window closed the app is out of the Dock and not
+            // active, so bring it back first; Settings opens once the app is
+            // in front, otherwise it stays hidden behind other apps.
+            showMainWindow()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                NotificationCenter.default.post(name: .showGeneralSettings, object: nil)
+                openSettings()
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
+        Divider()
+        Button("Quit") { NSApp.terminate(nil) }.keyboardShortcut("q")
+    }
+
+    private func showMainWindow() {
+        AppDelegate.showInDock()
+        openWindow(id: "main")
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
