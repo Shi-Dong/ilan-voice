@@ -609,28 +609,28 @@ final class VoiceSession: ObservableObject {
         if settings.shellEnabled { tools += [ShellTool.definition, ShellTool.closeDefinition] }
         if settings.webSearchAvailable { tools.append(WebSearchTool.definition) }
         tools.append(FileTools.readDefinition)
-        if settings.fileEditEnabled { tools.append(FileTools.editDefinition) }
-        if settings.fileWriteEnabled { tools.append(FileTools.writeDefinition) }
+        if settings.fileChangesEnabled { tools += [FileTools.editDefinition, FileTools.writeDefinition] }
         return tools
     }
 
-    /// read_file always; edit_file / write_file only when turned on in Settings.
+    /// read_file always; edit_file / write_file only when changes are turned on in Settings.
     private func runFileTool(_ name: String, arguments: String) -> String {
         let args = (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] ?? [:]
         guard let path = (args["path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else {
             return "Error: no path given."
         }
         let base = settings.shellDirectory
-        let folders = FileTools.allowedFolders(settings.fileWriteFolders)
+        let blocked = FileTools.blockedPaths(settings.fileBlockList)
+        if name != FileTools.readName, !settings.fileChangesEnabled {
+            return "Error: changing files is turned off in Settings."
+        }
         switch name {
         case FileTools.editName:
-            guard settings.fileEditEnabled else { return "Error: editing files is turned off in Settings." }
             return FileTools.edit(path: path, oldText: args["old_text"] as? String ?? "",
                                   newText: args["new_text"] as? String ?? "",
-                                  replaceAll: args["replace_all"] as? Bool ?? false, base: base, folders: folders)
+                                  replaceAll: args["replace_all"] as? Bool ?? false, base: base, blocked: blocked)
         case FileTools.writeName:
-            guard settings.fileWriteEnabled else { return "Error: writing files is turned off in Settings." }
-            return FileTools.write(path: path, content: args["content"] as? String ?? "", base: base, folders: folders)
+            return FileTools.write(path: path, content: args["content"] as? String ?? "", base: base, blocked: blocked)
         default:
             return FileTools.read(path: path, offset: (args["offset"] as? NSNumber)?.intValue,
                                   limit: (args["limit"] as? NSNumber)?.intValue, base: base)

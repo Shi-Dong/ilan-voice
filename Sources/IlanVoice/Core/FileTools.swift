@@ -4,8 +4,8 @@ import Foundation
 ///
 /// - `read_file` is always available.
 /// - `edit_file` (replace an exact piece of text) and `write_file` (create or
-///   replace a whole file) are each turned on separately in Settings, and only
-///   touch files inside the folders listed there.
+///   replace a whole file) are turned on together by one switch in Settings,
+///   and may touch any file except those on the block list there.
 ///
 /// A few places that hold credentials are never read or written. Before any
 /// change, the old file is copied to `~/Library/Application Support/Ilan
@@ -50,7 +50,7 @@ enum FileTools {
             Edit a text file by replacing an exact piece of text. old_text must \
             match the file exactly (including spaces and line breaks) and appear \
             exactly once, unless replace_all is true. Read the file first so the \
-            text is exact. Only files inside the user's allowed folders can be edited.
+            text is exact. Files on the user's block list can't be edited.
             """,
             "parameters": [
                 "type": "object",
@@ -72,7 +72,7 @@ enum FileTools {
             "description": """
             Create a text file, or replace a whole file, with the given content. \
             Missing parent folders are created. Prefer edit_file for small changes \
-            to an existing file. Only files inside the user's allowed folders can be written.
+            to an existing file. Files on the user's block list can't be written.
             """,
             "parameters": [
                 "type": "object",
@@ -123,8 +123,11 @@ enum FileTools {
         protectedPaths.contains { isInside(url, $0) }
     }
 
-    /// Allowed folders from Settings (one per line), resolved.
-    static func allowedFolders(_ text: String) -> [String] {
+    /// The block list a fresh install starts with: macOS's own folders.
+    static let defaultBlockList = "/System\n/Library\n/usr\n/bin\n/sbin\n/Applications"
+
+    /// Blocked files and folders from Settings (one per line), resolved.
+    static func blockedPaths(_ text: String) -> [String] {
         text.split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
@@ -160,9 +163,9 @@ enum FileTools {
     }
 
     static func edit(path: String, oldText: String, newText: String, replaceAll: Bool,
-                     base: String, folders: [String]) -> String {
+                     base: String, blocked: [String]) -> String {
         let url = resolve(path, relativeTo: base)
-        if let refusal = writeRefusal(url, folders: folders) { return refusal }
+        if let refusal = writeRefusal(url, blocked: blocked) { return refusal }
         guard let data = FileManager.default.contents(atPath: url.path) else { return "Error: no such file: \(url.path)" }
         guard let text = String(data: data, encoding: .utf8) else { return "Error: \(url.path) is not a UTF-8 text file." }
         guard !oldText.isEmpty else { return "Error: old_text is empty." }
@@ -179,9 +182,9 @@ enum FileTools {
         return header + "\n" + diff(old: oldText, new: newText)
     }
 
-    static func write(path: String, content: String, base: String, folders: [String]) -> String {
+    static func write(path: String, content: String, base: String, blocked: [String]) -> String {
         let url = resolve(path, relativeTo: base)
-        if let refusal = writeRefusal(url, folders: folders) { return refusal }
+        if let refusal = writeRefusal(url, blocked: blocked) { return refusal }
         var isDir: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
         if exists && isDir.boolValue { return "Error: \(url.path) is a folder." }
@@ -191,11 +194,10 @@ enum FileTools {
         return "\(exists ? "Replaced" : "Created") \(url.path) (\(lines) lines, \(content.utf8.count) bytes)."
     }
 
-    private static func writeRefusal(_ url: URL, folders: [String]) -> String? {
+    private static func writeRefusal(_ url: URL, blocked: [String]) -> String? {
         if isProtected(url) { return "Not changed: \(url.path) holds credentials and can't be modified." }
-        guard folders.contains(where: { isInside(url, $0) }) else {
-            let list = folders.isEmpty ? "none" : folders.joined(separator: ", ")
-            return "Not changed: \(url.path) is outside the allowed folders (\(list)). The user can add folders in Settings → Shell → Files."
+        if let entry = blocked.first(where: { isInside(url, $0) }) {
+            return "Not changed: \(url.path) is on the user's block list (\(entry)). The user can change the list in Settings → Shell → Files."
         }
         return nil
     }
