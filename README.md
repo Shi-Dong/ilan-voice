@@ -16,7 +16,7 @@ Conversations name themselves: after every reply, a small text model (GPT-6 Luna
 
 **Web search.** Settings → Web Search: paste a Gemini API key and Ilan gets a built-in `web_search` tool. Gemini (`gemini-3.8-flash` by default) answers each query with Grounding with Google Search, and the answer and its sources appear in the transcript. The key is stored as `GEMINI_API_KEY` with your other API keys (see below); `GEMINI_API_KEY` in the environment also works.
 
-**Dictionary.** Settings → Dictionary holds your own words (names, jargon, acronyms), one per line. They are sent to the transcription model as a hint and to Ilan as a vocabulary list, so both recognise and spell them your way. Stored in `dictionary.txt` next to `agent.md`.
+**Dictionary.** Settings → Dictionary is a list of your own words (names, jargon, acronyms): type one to add it, click the trash icon to delete it, or **Import…** a text file with one word or phrase per line (duplicates are skipped). They are sent to the transcription model as a hint and to Ilan as a vocabulary list, so both recognise and spell them your way. Stored in `dictionary.txt` next to `agent.md`.
 
 ## Two ways to hear replies
 
