@@ -300,7 +300,8 @@ final class VoiceSession: ObservableObject {
             return
         }
         pressEnded.send(.sent)
-        NSSound(named: "Pop")?.play()
+        // Breeze where macOS ships it; Bottle, a similar soft sound, elsewhere.
+        (NSSound(named: "Breeze") ?? NSSound(named: "Bottle"))?.play()
         pendingUserAudio = recording
         phase = .thinking
         if sessionReady { commit() } else { commitWhenReady = true }
