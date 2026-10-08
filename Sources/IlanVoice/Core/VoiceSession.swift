@@ -300,8 +300,8 @@ final class VoiceSession: ObservableObject {
             return
         }
         pressEnded.send(.sent)
-        // Breeze where macOS ships it; Bottle, a similar soft sound, elsewhere.
-        (NSSound(named: "Breeze") ?? NSSound(named: "Bottle"))?.play()
+        // "Breeze" in System Settings → Sound; the file is still Blow.aiff.
+        NSSound(named: "Blow")?.play()
         pendingUserAudio = recording
         phase = .thinking
         if sessionReady { commit() } else { commitWhenReady = true }
