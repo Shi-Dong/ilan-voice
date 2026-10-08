@@ -123,7 +123,19 @@ struct IlanVoiceApp: App {
                 NSApp.activate(ignoringOtherApps: true)
             }
             Button("Play Next Unheard Reply") { model.session.playNextUnheard() }
-            GeneralSettingsButton { Text("Settings…") }
+            Button("Settings…") {
+                // With the window closed the app is out of the Dock and not
+                // active, so Settings would open behind other apps (or not at
+                // all). Bring the app back first, then open Settings on top.
+                AppDelegate.showInDock()
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .showGeneralSettings, object: nil)
+                    openSettings()
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
             Divider()
             Button("Quit") { NSApp.terminate(nil) }.keyboardShortcut("q")
         } label: {
