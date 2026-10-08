@@ -16,6 +16,8 @@ Conversations name themselves: after every reply, a small text model (GPT-6 Luna
 
 **Files.** Ilan can always read text files with its `read_file` tool. In Settings → Shell → Files one switch also lets it edit files (`edit_file`, which replaces an exact piece of text) and create or overwrite files (`write_file`) anywhere except the files and folders on its block list (macOS's own folders by default). Every change is backed up first to `file-backups/` next to `agent.md`, and SSH/AWS/GnuPG keys, the Keychain and Ilan's own secrets are never read or changed.
 
+**Dock.** Closing the window hides Ilan Voice from the Dock; it keeps running in the menu bar, so the talk key still works. **Show Ilan Voice** in the menu bar icon brings both back. Turn this off in Settings → General → App.
+
 **Web search.** Settings → General → Web Search: click **Set API Key…** next to *Gemini API key*, paste the key (it is checked with Google before it is saved), and Ilan gets a built-in `web_search` tool. Gemini (`gemini-3.8-flash` by default) answers each query with Grounding with Google Search, and the answer and its sources appear in the transcript. The key is stored as `GEMINI_API_KEY` with your other API keys (see below); `GEMINI_API_KEY` in the environment also works.
 
 **Dictionary.** Settings → Dictionary is a list of your own words (names, jargon, acronyms): type one to add it, click the trash icon to delete it, or **Import…** a text file with one word or phrase per line (duplicates are skipped). They are sent to the transcription model as a hint and to Ilan as a vocabulary list, so both recognise and spell them your way. Stored in `dictionary.txt` next to `agent.md`.
