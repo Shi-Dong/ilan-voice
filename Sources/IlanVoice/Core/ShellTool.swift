@@ -21,17 +21,28 @@ enum ShellTool {
         ]
     }
 
-    static var definition: [String: Any] {
-        [
-            "type": "function",
-            "name": functionName,
-            "description": """
+    /// With `bypass` (Settings → Shell → Bypass all permissions) any command
+    /// runs, and the description says so.
+    static func definition(bypass: Bool) -> [String: Any] {
+        let rules = bypass
+            ? """
+            Run any bash command on the user's Mac and get back its exit code \
+            and combined stdout/stderr. The user has turned off all command \
+            checks, so commands can change files and system state: be careful, \
+            and confirm with the user before anything destructive.
+            """
+            : """
             Run a read-only bash command on the user's Mac and get back its exit \
             code and combined stdout/stderr. Only commands on the user's allow-list \
             run; pipes, &&, || and ; are fine when every part is allowed. Output \
             redirection (>), command substitution ($( ) or backticks) and \
             background jobs are refused. If a command is refused, tell the user \
-            which command they could add to the allow-list in Settings. \
+            which command they could add to the allow-list in Settings.
+            """
+        return [
+            "type": "function",
+            "name": functionName,
+            "description": rules + " " + """
             Long-running commands are stopped after the timeout. Commands run in \
             one persistent bash session per conversation, so cd, exported \
             variables and activated environments carry over between calls. \

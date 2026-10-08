@@ -446,6 +446,13 @@ private struct MicrophonePicker: View {
 /// the allow-list of commands Ilan may run without asking.
 private struct ShellSettings: View {
     @ObservedObject var settings = AppSettings.shared
+    @Local private var confirmBypass = false
+
+    /// Turning bypass on goes through a warning; turning it off is immediate.
+    private var bypassBinding: Binding<Bool> {
+        Binding(get: { settings.shellBypassPermissions },
+                set: { on in if on { confirmBypass = true } else { settings.shellBypassPermissions = false } })
+    }
 
     var body: some View {
         Form {
@@ -453,10 +460,30 @@ private struct ShellSettings: View {
                 Toggle("Let Ilan run bash commands on this Mac", isOn: $settings.shellEnabled)
                 Text("Ilan never asks: commands on the allow-list run straight away, anything else is refused and Ilan tells you what to add. Changes apply to the next conversation (or Voice → Reconnect). Command output is sent to OpenAI as part of the conversation.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle(isOn: bypassBinding) {
+                    Text("Bypass all permissions").foregroundStyle(.red).fontWeight(.medium)
+                }
+                .disabled(!settings.shellEnabled)
+                Text("Not bypassed: the file tools still never read or change SSH, AWS and GnuPG keys, the Keychain or Ilan's own secrets. Shell commands themselves are not limited.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if settings.bypassActive {
+                    Label("Any command runs, including ones that delete or change files, and Ilan can change any file. The file block list and the allow-list below are ignored.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.red)
+                }
+            }
+            .alert("Bypass all permissions?", isPresented: $confirmBypass) {
+                Button("Turn On", role: .destructive) { settings.shellBypassPermissions = true }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Ilan will be able to run any bash command and change any file on this Mac without checks, including commands that delete files, change system settings, install software or send your data elsewhere. A misheard request or a mistake by the model can cause damage that can't be undone. Only turn this on if you understand the risk.")
             }
             Section {
                 LabeledContent("Read files") { Text("Always on").foregroundStyle(.secondary) }
-                Toggle("Let Ilan edit, create and overwrite files", isOn: $settings.fileChangesEnabled)
+                // Shown on while bypass is on, since bypass allows file changes too.
+                Toggle("Let Ilan edit, create and overwrite files", isOn: Binding(
+                    get: { settings.fileChangesAllowed },
+                    set: { settings.fileChangesEnabled = $0 }))
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Never change these files or folders, one per line").font(.caption)
                     TextEditor(text: $settings.fileBlockList)
@@ -471,6 +498,8 @@ private struct ShellSettings: View {
                 Text("Every change is backed up first to Ilan Voice's file-backups folder. SSH, AWS and GnuPG keys, the Keychain and Ilan's own secrets are never read or changed. File contents are sent to OpenAI as part of the conversation.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            .disabled(settings.bypassActive)
+            .opacity(settings.bypassActive ? 0.45 : 1)
             Section("Running") {
                 TextField("Working directory", text: $settings.shellDirectory)
                 LabeledContent("Timeout") {
@@ -505,7 +534,8 @@ private struct ShellSettings: View {
                         .buttonStyle(.link).font(.caption)
                 }
             }
-            .disabled(!settings.shellEnabled)
+            .disabled(!settings.shellEnabled || settings.bypassActive)
+            .opacity(settings.bypassActive ? 0.45 : 1)
         }
         .formStyle(.grouped)
     }
