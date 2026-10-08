@@ -15,6 +15,9 @@ enum ConversationTitler {
 
     /// Returns nil when there is nothing to name or the request fails; the
     /// caller then keeps the current title.
+    /// How many times Luna is asked for a shorter title before the app trims it.
+    static let shortenAttempts = 2
+
     static func title(for messages: [Message], apiKey: String, model: String) async -> String? {
         let turns = messages
             .filter { $0.role != .tool && !$0.pending && !$0.text.isEmpty }
@@ -24,6 +27,26 @@ enum ConversationTitler {
             .map { "\($0.role == .user ? "User" : "Assistant"): \($0.text)" }
             .joined(separator: "\n")
 
+        guard var title = await ask(transcript, apiKey: apiKey, model: model).flatMap(normalize) else { return nil }
+        // Too long: ask Luna to rephrase it shorter rather than chopping words off.
+        var attempt = 0
+        while title.count > maxLength && attempt < shortenAttempts {
+            attempt += 1
+            let followUp = """
+            \(transcript)
+
+            Your title "\(title)" is \(title.count) characters, over the limit of \(maxLength). \
+            Write a different, shorter title of at most \(maxLength) characters. Don't cut \
+            words off; rephrase or use fewer words.
+            """
+            guard let shorter = await ask(followUp, apiKey: apiKey, model: model).flatMap(normalize) else { break }
+            title = shorter
+        }
+        return clean(title)
+    }
+
+    /// One Responses API call; returns the model's text or nil on failure.
+    private static func ask(_ input: String, apiKey: String, model: String) async -> String? {
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/responses")!, timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -31,7 +54,7 @@ enum ConversationTitler {
         let body: [String: Any] = [
             "model": model,
             "instructions": instructions,
-            "input": transcript,
+            "input": input,
             "reasoning": ["effort": "none"],
             "max_output_tokens": 40,
             "store": false,
@@ -42,7 +65,7 @@ enum ConversationTitler {
         guard let (reply, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let obj = try? JSONSerialization.jsonObject(with: reply) as? [String: Any] else { return nil }
-        return clean(outputText(obj))
+        return outputText(obj)
     }
 
     private static func outputText(_ response: [String: Any]) -> String {
@@ -55,8 +78,9 @@ enum ConversationTitler {
             .joined()
     }
 
-    /// Trims quotes and punctuation, and enforces the length cap on a word boundary.
-    static func clean(_ raw: String) -> String? {
+    /// First line only, without quotes, markdown, a "Title:" prefix or
+    /// trailing punctuation. Length is not touched.
+    static func normalize(_ raw: String) -> String? {
         var title = raw.split(separator: "\n").first.map(String.init) ?? ""
         title = title.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”‘’`*#"))
@@ -64,7 +88,13 @@ enum ConversationTitler {
         if title.lowercased().hasPrefix("title:") {
             title = String(title.dropFirst(6)).trimmingCharacters(in: .whitespaces)
         }
-        guard !title.isEmpty else { return nil }
+        return title.isEmpty ? nil : title
+    }
+
+    /// `normalize`, then the hard length cap on a word boundary: only a last
+    /// resort, after Luna has been asked to shorten the title itself.
+    static func clean(_ raw: String) -> String? {
+        guard var title = normalize(raw) else { return nil }
         if title.count > maxLength {
             let cut = String(title.prefix(maxLength))
             title = cut.lastIndex(of: " ").map { String(cut[..<$0]) } ?? cut
