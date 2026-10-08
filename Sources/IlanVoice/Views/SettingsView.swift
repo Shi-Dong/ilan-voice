@@ -464,6 +464,8 @@ private struct ShellSettings: View {
                     Text("Bypass all permissions").foregroundStyle(.red).fontWeight(.medium)
                 }
                 .disabled(!settings.shellEnabled)
+                Text("Not bypassed: the file tools still never read or change SSH, AWS and GnuPG keys, the Keychain or Ilan's own secrets. Shell commands themselves are not limited.")
+                    .font(.caption).foregroundStyle(.secondary)
                 if settings.bypassActive {
                     Label("Any command runs, including ones that delete or change files, and Ilan can change any file. The file block list and the allow-list below are ignored.",
                           systemImage: "exclamationmark.triangle.fill")
