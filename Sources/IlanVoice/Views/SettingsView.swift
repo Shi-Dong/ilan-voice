@@ -5,7 +5,7 @@ struct SettingsView: View {
     @ObservedObject var updater: Updater
     @ObservedObject var ptt: PushToTalk
 
-    enum Tab: Hashable { case general, keys, agent, mcp, shell, webSearch, dictionary }
+    enum Tab: Hashable { case general, keys, agent, mcp, shell, dictionary }
 
     /// Settings always opens on General. The window is kept alive between
     /// openings, so the tab is reset whenever it appears and disappears;
@@ -18,7 +18,6 @@ struct SettingsView: View {
             AgentSettings().tabItem { Label("Agent", systemImage: "person.text.rectangle") }.tag(Tab.agent)
             MCPSettings(mcp: mcp).tabItem { Label("MCP Tools", systemImage: "wrench.and.screwdriver") }.tag(Tab.mcp)
             ShellSettings().tabItem { Label("Shell", systemImage: "terminal") }.tag(Tab.shell)
-            WebSearchSettings().tabItem { Label("Web Search", systemImage: "globe") }.tag(Tab.webSearch)
             APIKeySettings().tabItem { Label("API Keys", systemImage: "key") }.tag(Tab.keys)
             DictionarySettings().tabItem { Label("Dictionary", systemImage: "character.book.closed") }.tag(Tab.dictionary)
         }
@@ -38,6 +37,7 @@ private struct GeneralSettings: View {
 
     var body: some View {
         Form {
+            UpdatesSection(updater: updater)
             Section("OpenAI") {
                 HStack {
                     if reveal {
@@ -70,7 +70,7 @@ private struct GeneralSettings: View {
                 Text("Real-time plays a reply as it is generated. Cached saves it and waits for you to press play (or Space). Transcripts and audio are always saved.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            UpdatesSection(updater: updater)
+            WebSearchSection()
             Section("Data") {
                 LabeledContent("Folder") {
                     Button("Open in Finder") { NSWorkspace.shared.open(Paths.root) }
@@ -436,17 +436,15 @@ private struct APIKeySettings: View {
 }
 
 /// The built-in web_search tool: provider, key and model.
-private struct WebSearchSettings: View {
+/// The built-in web_search tool, shown as one section of the General tab.
+private struct WebSearchSection: View {
     @ObservedObject var settings = AppSettings.shared
     @Local private var reveal = false
 
     var body: some View {
-        Form {
-            Section {
-                Toggle("Let Ilan search the web", isOn: $settings.webSearchEnabled)
-                Text(status).font(.caption).foregroundStyle(settings.webSearchAvailable ? Theme.mint : Theme.orange)
-            }
-            Section("Provider") {
+        Section {
+            Toggle("Let Ilan search the web", isOn: $settings.webSearchEnabled)
+            Group {
                 Picker("Search with", selection: $settings.webSearchProvider) {
                     ForEach(WebSearchProvider.allCases) { Text($0.label).tag($0) }
                 }
@@ -460,20 +458,26 @@ private struct WebSearchSettings: View {
                         .buttonStyle(.borderless)
                 }
                 TextField("Gemini model", text: $settings.geminiModel)
+            }
+            .disabled(!settings.webSearchEnabled)
+        } header: {
+            HStack {
+                Text("Web Search")
+                Spacer()
+                Text(status).font(.caption).foregroundStyle(settings.webSearchAvailable ? Theme.mint : Theme.orange)
+            }
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("When a question needs fresh or factual information, Ilan calls the web_search tool. Gemini answers it with Google Search, and the answer and its sources appear in the transcript. Changes apply to the next conversation (or Reconnect).")
+                    .font(.caption).foregroundStyle(.secondary)
                 Link("Get a Gemini API key", destination: URL(string: "https://aistudio.google.com/apikey")!)
                     .font(.caption)
             }
-            .disabled(!settings.webSearchEnabled)
-            Section {
-                Text("When a question needs fresh or factual information, Ilan calls the web_search tool. Gemini answers it with Google Search and the answer, with its sources, appears in the transcript. The key is stored as GEMINI_API_KEY in Settings → API Keys. Changes apply to the next conversation (or Reconnect).")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
         }
-        .formStyle(.grouped)
     }
 
     private var status: String {
         if !settings.webSearchEnabled { return "Off" }
-        return settings.webSearchAvailable ? "Ready: Ilan can search the web." : "Add a Gemini API key to turn web search on."
+        return settings.webSearchAvailable ? "Ready" : "Needs a Gemini API key"
     }
 }

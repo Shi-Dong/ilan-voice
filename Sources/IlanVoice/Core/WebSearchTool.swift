@@ -40,7 +40,7 @@ enum WebSearchTool {
 
     static func search(_ query: String, provider: WebSearchProvider, apiKey: String, model: String) async -> String {
         guard !apiKey.isEmpty else {
-            return "Error: no web search API key. The user can add a Gemini API key in Settings → Web Search."
+            return "Error: no web search API key. The user can add a Gemini API key in Settings → General → Web Search."
         }
         switch provider {
         case .gemini: return await gemini(query, apiKey: apiKey, model: model)
