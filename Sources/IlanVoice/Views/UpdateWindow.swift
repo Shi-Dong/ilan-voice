@@ -41,7 +41,12 @@ private struct UpdateProgressView: View {
                         .progressViewStyle(.linear)
                         .tint(Theme.mint)
                     Text(step).font(.caption).foregroundStyle(.secondary)
-                    buttons { Button("Hide", action: close) }
+                    // Shown greyed out until the build finishes.
+                    buttons {
+                        Button("Restart Now") {}
+                            .buttonStyle(.borderedProminent)
+                            .disabled(true)
+                    }
                 case .readyToRestart:
                     ProgressView(value: 1).progressViewStyle(.linear).tint(Theme.mint)
                     Text("The new version is installed. Restart Ilan Voice to start using it. If you choose Later, it is used the next time the app opens.")
