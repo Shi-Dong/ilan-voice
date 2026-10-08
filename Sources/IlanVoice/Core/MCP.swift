@@ -194,6 +194,15 @@ struct ToolBinding: Identifiable {
     let schema: [String: Any]
 }
 
+/// One server from `mcp.json`, in Swift-native values a connect task can hold.
+struct ServerSpec: Sendable {
+    let url: String?
+    let headers: [String: String]
+    let command: String?
+    let args: [String]
+    let env: [String: String]
+}
+
 struct ServerStatus: Identifiable {
     var id: String { name }
     let name: String
@@ -225,44 +234,56 @@ final class MCPManager: ObservableObject {
         }
         servers = config.keys.sorted().map { ServerStatus(name: $0, state: "Connecting…", toolCount: 0, ok: false) }
 
-        await withTaskGroup(of: (String, Result<(MCPTransport, [ToolBinding]), Error>).self) { group in
-            for (name, spec) in config {
-                group.addTask { @MainActor in
-                    do { return (name, .success(try await Self.connect(name: name, spec: spec))) }
-                    catch { return (name, .failure(error)) }
-                }
-            }
-            for await (name, result) in group {
-                guard let i = servers.firstIndex(where: { $0.name == name }) else { continue }
-                switch result {
-                case .success(let (transport, found)):
-                    transports[name] = transport
-                    tools.append(contentsOf: found)
-                    servers[i] = ServerStatus(name: name, state: "\(found.count) tools", toolCount: found.count, ok: true)
-                case .failure(let error):
-                    servers[i] = ServerStatus(name: name, state: error.localizedDescription, toolCount: 0, ok: false)
-                }
+        // Sequential on purpose. Connecting in a task group ran several
+        // `connect` calls at once, and their JSON-RPC replies are bridged
+        // `NSDictionary`s: casting them to `[String: Any]` from two threads at
+        // the same time crashed the app in the runtime's bridging code (an
+        // EXC_BAD_ACCESS under `swift_dynamicCast`). Servers answer in a few
+        // hundred milliseconds each, so doing them in turn is cheap and safe.
+        for name in config.keys.sorted() {
+            guard let spec = config[name],
+                  let i = servers.firstIndex(where: { $0.name == name }) else { continue }
+            do {
+                let (transport, found) = try await Self.connect(name: name, spec: spec)
+                transports[name] = transport
+                tools.append(contentsOf: found)
+                servers[i] = ServerStatus(name: name, state: "\(found.count) tools", toolCount: found.count, ok: true)
+            } catch {
+                servers[i] = ServerStatus(name: name, state: error.localizedDescription, toolCount: 0, ok: false)
             }
         }
+
         tools.sort { $0.functionName < $1.functionName }
     }
 
-    static func readConfig() -> [String: [String: Any]]? {
+    /// Reads every server up front into Swift-native values. The casts have to
+    /// happen here, on one thread: `JSONSerialization` hands back lazily bridged
+    /// `NSDictionary`s, and bridging the same one from several connect tasks at
+    /// once crashed the app inside the runtime's dictionary bridge.
+    static func readConfig() -> [String: ServerSpec]? {
         guard let data = try? Data(contentsOf: Paths.mcpFile),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let servers = obj["mcpServers"] as? [String: [String: Any]] else { return nil }
-        return servers.filter { ($0.value["disabled"] as? Bool) != true }
+        return servers.compactMapValues { spec in
+            guard (spec["disabled"] as? Bool) != true else { return nil }
+            return ServerSpec(
+                url: spec["url"] as? String,
+                headers: spec["headers"] as? [String: String] ?? [:],
+                command: spec["command"] as? String,
+                args: spec["args"] as? [String] ?? [],
+                env: spec["env"] as? [String: String] ?? [:])
+        }
     }
 
-    private static func connect(name: String, spec: [String: Any]) async throws -> (MCPTransport, [ToolBinding]) {
+    private static func connect(name: String, spec: ServerSpec) async throws -> (MCPTransport, [ToolBinding]) {
         let transport: MCPTransport
         // "${NAME}" anywhere in a server's settings is filled from the secret store.
         let expand = SecretStore.expand
-        if let urlString = (spec["url"] as? String).map(expand), let url = URL(string: urlString) {
-            transport = HTTPTransport(url: url, headers: (spec["headers"] as? [String: String] ?? [:]).mapValues(expand))
-        } else if let command = (spec["command"] as? String).map(expand) {
-            transport = try StdioTransport(command: command, args: (spec["args"] as? [String] ?? []).map(expand),
-                                           env: (spec["env"] as? [String: String] ?? [:]).mapValues(expand))
+        if let urlString = spec.url.map(expand), let url = URL(string: urlString) {
+            transport = HTTPTransport(url: url, headers: spec.headers.mapValues(expand))
+        } else if let command = spec.command.map(expand) {
+            transport = try StdioTransport(command: command, args: spec.args.map(expand),
+                                           env: spec.env.mapValues(expand))
         } else {
             throw MCPError.protocolError("Needs a \"url\" or a \"command\"")
         }
