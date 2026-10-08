@@ -206,8 +206,8 @@ final class VoiceSession: ObservableObject {
         guard phase != .recording else { return }
         errorMessage = nil
         // Stop Ilan the instant the key goes down, even for a quick tap that
-        // never becomes a recording.
-        interrupt()
+        // never becomes a recording. Remembered so the pill can say so.
+        interruptedThisPress = interrupt()
         talkKeyHeld = true
         Task {
             guard await MicrophoneCapture.requestPermission() else {
