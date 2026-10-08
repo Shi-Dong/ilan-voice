@@ -302,7 +302,7 @@ final class VoiceSession: ObservableObject {
             return
         }
         pressEnded.send(.sent)
-        NSSound(named: "Pop")?.play()
+        if !settings.sentSound.isEmpty { NSSound(named: settings.sentSound)?.play() }
         pendingUserAudio = recording
         phase = .thinking
         if sessionReady { commit() } else { commitWhenReady = true }

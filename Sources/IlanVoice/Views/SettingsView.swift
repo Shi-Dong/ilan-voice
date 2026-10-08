@@ -76,6 +76,14 @@ private struct GeneralSettings: View {
             Section("Talking") {
                 MicrophonePicker()
                 TalkTriggerRecorder(ptt: ptt)
+                Picker("Sent sound", selection: $settings.sentSound) {
+                    Text("None").tag("")
+                    Divider()
+                    ForEach(AppSettings.systemSounds, id: \.self) { Text($0).tag($0) }
+                }
+                .onChange(of: settings.sentSound) { _, name in
+                    if !name.isEmpty { NSSound(named: name)?.play() }
+                }
                 Picker("Replies", selection: $settings.outputMode) {
                     ForEach(OutputMode.allCases) { Text($0.label).tag($0) }
                 }

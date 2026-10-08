@@ -96,6 +96,10 @@ final class AppSettings: ObservableObject {
     }
     @Published var reasoningEffort: String { didSet { defaults.set(reasoningEffort, forKey: "reasoningEffort") } }
     @Published var outputMode: OutputMode { didSet { defaults.set(outputMode.rawValue, forKey: "outputMode") } }
+    /// macOS system sound played when a message is sent; "" plays nothing.
+    @Published var sentSound: String { didSet { defaults.set(sentSound, forKey: "sentSound") } }
+    static let systemSounds = ["Basso", "Blow", "Bottle", "Frog", "Funk", "Glass", "Hero", "Morse",
+                               "Ping", "Pop", "Purr", "Sosumi", "Submarine", "Tink"]
     @Published var talkTrigger: TalkTrigger { didSet { defaults.set(try? JSONEncoder().encode(talkTrigger), forKey: "talkTrigger") } }
 
     private init() {
@@ -116,6 +120,7 @@ final class AppSettings: ObservableObject {
         shellAllowList = defaults.string(forKey: "shellAllowList") ?? ShellTool.defaultAllowList
         reasoningEffort = defaults.string(forKey: "reasoningEffort") ?? "default"
         outputMode = OutputMode(rawValue: defaults.string(forKey: "outputMode") ?? "") ?? .realtime
+        sentSound = defaults.string(forKey: "sentSound") ?? "Bottle"
         talkTrigger = defaults.data(forKey: "talkTrigger").flatMap { try? JSONDecoder().decode(TalkTrigger.self, from: $0) }
             ?? TalkTrigger.migrating(defaults.string(forKey: "pushToTalkKey"))
     }
