@@ -64,12 +64,23 @@ final class VoiceSession: ObservableObject {
 
     static let missingKeyMessage = "Add your OpenAI API key in Settings (⌘,)."
     private var keyWatcher: AnyCancellable?
+    private var speedWatcher: AnyCancellable?
 
     init(store: ConversationStore, mcp: MCPManager) {
         self.store = store
         self.mcp = mcp
         // Once a key is entered, drop the "add your key" warning and dial in.
         // Debounced so typing or pasting the key doesn't connect per keystroke.
+        // A new speed applies from the next reply, without reconnecting.
+        speedWatcher = settings.$voiceSpeed
+            .dropFirst()
+            .removeDuplicates()
+            .debounce(for: .seconds(0.5), scheduler: DispatchQueue.main)
+            .sink { [weak self] speed in
+                guard let self, self.sessionReady else { return }
+                self.client?.send(["type": "session.update",
+                                   "session": ["type": "realtime", "audio": ["output": ["speed": speed]]]])
+            }
         keyWatcher = settings.$apiKey
             .dropFirst()
             .debounce(for: .seconds(0.8), scheduler: DispatchQueue.main)
@@ -174,6 +185,7 @@ final class VoiceSession: ObservableObject {
                 "output": [
                     "format": ["type": "audio/pcm", "rate": 24000],
                     "voice": settings.voice,
+                    "speed": settings.voiceSpeed,
                 ],
             ],
             "tools": mcp.realtimeTools

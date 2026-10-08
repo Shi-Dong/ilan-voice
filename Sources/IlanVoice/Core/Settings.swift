@@ -42,6 +42,18 @@ final class AppSettings: ObservableObject {
     }
     @Published var model: String { didSet { defaults.set(model, forKey: "model") } }
     @Published var voiceGender: VoiceGender { didSet { defaults.set(voiceGender.rawValue, forKey: "voiceGender") } }
+    /// How fast Ilan speaks, as a multiple of normal (OpenAI allows 0.25–1.5).
+    @Published var voiceSpeed: Double {
+        didSet {
+            let clamped = Self.clampSpeed(voiceSpeed)
+            if clamped != voiceSpeed { voiceSpeed = clamped; return }
+            defaults.set(voiceSpeed, forKey: "voiceSpeed")
+        }
+    }
+    static let speedRange = 0.25...1.5
+    static func clampSpeed(_ value: Double) -> Double {
+        min(max(value, speedRange.lowerBound), speedRange.upperBound)
+    }
 
     /// The Realtime voice name: OpenAI recommends marin and cedar for quality.
     var voice: String { voiceGender == .female ? "marin" : "cedar" }
@@ -53,7 +65,14 @@ final class AppSettings: ObservableObject {
     /// The built-in run_shell tool. Off until the user turns it on.
     @Published var shellEnabled: Bool { didSet { defaults.set(shellEnabled, forKey: "shellEnabled") } }
     @Published var shellDirectory: String { didSet { defaults.set(shellDirectory, forKey: "shellDirectory") } }
-    @Published var shellTimeout: Int { didSet { defaults.set(shellTimeout, forKey: "shellTimeout") } }
+    /// Seconds before a shell command is stopped; typed in, so kept to 5…3600.
+    @Published var shellTimeout: Int {
+        didSet {
+            let clamped = min(max(shellTimeout, 5), 3600)
+            if clamped != shellTimeout { shellTimeout = clamped; return }
+            defaults.set(shellTimeout, forKey: "shellTimeout")
+        }
+    }
     /// One command prefix per line; only these commands may run.
     @Published var shellAllowList: String { didSet { defaults.set(shellAllowList, forKey: "shellAllowList") } }
 
@@ -68,6 +87,7 @@ final class AppSettings: ObservableObject {
         apiKey = SecretStore.get(SecretStore.openAI) ?? ""
         model = defaults.string(forKey: "model") ?? "gpt-realtime-2.1"
         voiceGender = VoiceGender(rawValue: defaults.string(forKey: "voiceGender") ?? "") ?? .female
+        voiceSpeed = Self.clampSpeed(defaults.object(forKey: "voiceSpeed") as? Double ?? 1.0)
         microphone = defaults.string(forKey: "microphone") ?? MicrophoneChoice.builtIn
         transcriptionModel = defaults.string(forKey: "transcriptionModel") ?? "gpt-transcribe"
         titleModel = defaults.string(forKey: "titleModel") ?? "gpt-6-luna"

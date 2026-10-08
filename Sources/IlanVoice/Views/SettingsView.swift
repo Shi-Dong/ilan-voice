@@ -60,6 +60,15 @@ private struct GeneralSettings: View {
                     ForEach(VoiceGender.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                LabeledContent("Speaking speed") {
+                    HStack(spacing: 6) {
+                        TextField("", value: $settings.voiceSpeed,
+                                  format: .number.precision(.fractionLength(0...2)))
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 60)
+                        Text("× normal (0.25–1.5)").foregroundStyle(.secondary)
+                    }
+                }
                 Picker("Reasoning effort", selection: $settings.reasoningEffort) {
                     ForEach(AppSettings.reasoningEfforts, id: \.self) { Text($0.capitalized).tag($0) }
                 }
@@ -301,7 +310,14 @@ private struct ShellSettings: View {
             }
             Section("Running") {
                 TextField("Working directory", text: $settings.shellDirectory)
-                Stepper("Timeout: \(settings.shellTimeout) s", value: $settings.shellTimeout, in: 5...600, step: 5)
+                LabeledContent("Timeout") {
+                    HStack(spacing: 6) {
+                        TextField("", value: $settings.shellTimeout, format: .number.grouping(.never))
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 70)
+                        Text("seconds").foregroundStyle(.secondary)
+                    }
+                }
             }
             .disabled(!settings.shellEnabled)
             Section {
