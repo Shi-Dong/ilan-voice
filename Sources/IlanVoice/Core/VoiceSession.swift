@@ -131,14 +131,20 @@ final class VoiceSession: ObservableObject {
     }
 
     /// Grounds speech recognition with the user's dictionary: a prompt for
-    /// every model, plus `keywords` for the live-transcribe models that take them.
+    /// every model, plus `keywords` for the models that take them. Both
+    /// gpt-transcribe and gpt-live-transcribe accept keyword hints; older ones
+    /// (gpt-4o-transcribe, whisper-1) would reject the field.
     private func transcriptionConfig(_ dictionary: [String]) -> [String: Any] {
         var config: [String: Any] = ["model": settings.transcriptionModel]
         if let prompt = UserDictionary.transcriptionPrompt(dictionary) { config["prompt"] = prompt }
-        if settings.transcriptionModel.contains("live-transcribe"), !dictionary.isEmpty {
+        if Self.acceptsKeywords(settings.transcriptionModel), !dictionary.isEmpty {
             config["keywords"] = Array(dictionary.prefix(100))
         }
         return config
+    }
+
+    static func acceptsKeywords(_ model: String) -> Bool {
+        model.hasPrefix("gpt-transcribe") || model.contains("live-transcribe")
     }
 
     private func sessionConfig() -> [String: Any] {
