@@ -80,11 +80,12 @@ final class AppSettings: ObservableObject {
     /// The built-in run_shell tool. Off until the user turns it on.
     @Published var shellEnabled: Bool { didSet { defaults.set(shellEnabled, forKey: "shellEnabled") } }
     @Published var shellDirectory: String { didSet { defaults.set(shellDirectory, forKey: "shellDirectory") } }
-    /// File tools: read_file is always on; these two are opt-in.
-    @Published var fileEditEnabled: Bool { didSet { defaults.set(fileEditEnabled, forKey: "fileEditEnabled") } }
-    @Published var fileWriteEnabled: Bool { didSet { defaults.set(fileWriteEnabled, forKey: "fileWriteEnabled") } }
-    /// Folders edit_file / write_file may touch, one per line.
-    @Published var fileWriteFolders: String { didSet { defaults.set(fileWriteFolders, forKey: "fileWriteFolders") } }
+    /// File tools: read_file is always on; edit_file and write_file share
+    /// this one opt-in switch.
+    @Published var fileChangesEnabled: Bool { didSet { defaults.set(fileChangesEnabled, forKey: "fileChangesEnabled") } }
+    /// Files and folders edit_file / write_file must never touch, one per line.
+    /// Everywhere else is allowed.
+    @Published var fileBlockList: String { didSet { defaults.set(fileBlockList, forKey: "fileBlockList") } }
     /// Seconds before a shell command is stopped; typed in, so kept to 5…3600.
     @Published var shellTimeout: Int {
         didSet {
@@ -117,9 +118,10 @@ final class AppSettings: ObservableObject {
         geminiAPIKey = SecretStore.get(SecretStore.gemini) ?? ""
         geminiModel = defaults.string(forKey: "geminiModel") ?? WebSearchTool.defaultGeminiModel
         shellDirectory = defaults.string(forKey: "shellDirectory") ?? "~"
-        fileEditEnabled = defaults.bool(forKey: "fileEditEnabled")
-        fileWriteEnabled = defaults.bool(forKey: "fileWriteEnabled")
-        fileWriteFolders = defaults.string(forKey: "fileWriteFolders") ?? "~"
+        // Carried over from the two earlier switches: on if either was on.
+        fileChangesEnabled = defaults.object(forKey: "fileChangesEnabled") as? Bool
+            ?? (defaults.bool(forKey: "fileEditEnabled") || defaults.bool(forKey: "fileWriteEnabled"))
+        fileBlockList = defaults.string(forKey: "fileBlockList") ?? FileTools.defaultBlockList
         shellTimeout = defaults.object(forKey: "shellTimeout") as? Int ?? 60
         shellAllowList = defaults.string(forKey: "shellAllowList") ?? ShellTool.defaultAllowList
         reasoningEffort = defaults.string(forKey: "reasoningEffort") ?? "default"
@@ -130,7 +132,7 @@ final class AppSettings: ObservableObject {
 
     /// Fields that only take effect on a fresh Realtime session.
     var sessionFingerprint: String {
-        [apiKey, model, voice, transcriptionModel, reasoningEffort, String(shellEnabled), String(webSearchAvailable), String(fileEditEnabled), String(fileWriteEnabled)].joined(separator: "|")
+        [apiKey, model, voice, transcriptionModel, reasoningEffort, String(shellEnabled), String(webSearchAvailable), String(fileChangesEnabled)].joined(separator: "|")
     }
 }
 

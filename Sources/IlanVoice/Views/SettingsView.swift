@@ -379,16 +379,15 @@ private struct ShellSettings: View {
             }
             Section {
                 LabeledContent("Read files") { Text("Always on").foregroundStyle(.secondary) }
-                Toggle("Let Ilan edit files (replace exact text)", isOn: $settings.fileEditEnabled)
-                Toggle("Let Ilan create or overwrite files", isOn: $settings.fileWriteEnabled)
+                Toggle("Let Ilan edit, create and overwrite files", isOn: $settings.fileChangesEnabled)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Folders Ilan may change, one per line").font(.caption)
-                    TextEditor(text: $settings.fileWriteFolders)
+                    Text("Never change these files or folders, one per line").font(.caption)
+                    TextEditor(text: $settings.fileBlockList)
                         .font(.system(size: 12, design: .monospaced))
                         .frame(minHeight: 50)
                         .scrollContentBackground(.hidden)
                 }
-                .disabled(!settings.fileEditEnabled && !settings.fileWriteEnabled)
+                .disabled(!settings.fileChangesEnabled)
             } header: {
                 Text("Files")
             } footer: {
