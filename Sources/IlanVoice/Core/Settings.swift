@@ -42,7 +42,7 @@ final class AppSettings: ObservableObject {
     }
     @Published var model: String { didSet { defaults.set(model, forKey: "model") } }
     @Published var voiceGender: VoiceGender { didSet { defaults.set(voiceGender.rawValue, forKey: "voiceGender") } }
-    /// How fast Ilan speaks, as a multiple of normal (OpenAI allows 0.25–1.5).
+    /// How fast Ilan speaks, as a multiple of normal (OpenAI allows 0.25–1.5; the slider offers 0.5–1.5).
     @Published var voiceSpeed: Double {
         didSet {
             let clamped = Self.clampSpeed(voiceSpeed)
@@ -50,7 +50,7 @@ final class AppSettings: ObservableObject {
             defaults.set(voiceSpeed, forKey: "voiceSpeed")
         }
     }
-    static let speedRange = 0.25...1.5
+    static let speedRange = 0.5...1.5
     static func clampSpeed(_ value: Double) -> Double {
         min(max(value, speedRange.lowerBound), speedRange.upperBound)
     }

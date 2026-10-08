@@ -61,12 +61,18 @@ private struct GeneralSettings: View {
                 }
                 .pickerStyle(.segmented)
                 LabeledContent("Speaking speed") {
-                    HStack(spacing: 6) {
-                        TextField("", value: $settings.voiceSpeed,
-                                  format: .number.precision(.fractionLength(0...2)))
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 60)
-                        Text("× normal (0.25–1.5)").foregroundStyle(.secondary)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        TickSlider(value: $settings.voiceSpeed, range: 0.5...1.5, step: 0.1)
+                            .frame(width: 220)
+                        HStack {
+                            Text("Slower")
+                            Spacer()
+                            Text(String(format: "%.1f×", settings.voiceSpeed)).monospacedDigit()
+                            Spacer()
+                            Text("Faster")
+                        }
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(width: 220)
                     }
                 }
                 Picker("Reasoning effort", selection: $settings.reasoningEffort) {
@@ -516,5 +522,41 @@ private struct WindowReader: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async { onWindow(nsView.window) }
+    }
+}
+
+/// A native macOS slider with tick marks that snaps to them, like the
+/// sliders in System Settings (e.g. mouse tracking speed).
+private struct TickSlider: NSViewRepresentable {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+
+    func makeNSView(context: Context) -> NSSlider {
+        let slider = NSSlider(value: value, minValue: range.lowerBound, maxValue: range.upperBound,
+                              target: context.coordinator, action: #selector(Coordinator.changed(_:)))
+        slider.numberOfTickMarks = Int(((range.upperBound - range.lowerBound) / step).rounded()) + 1
+        slider.allowsTickMarkValuesOnly = true
+        slider.tickMarkPosition = .below
+        slider.isContinuous = true
+        return slider
+    }
+
+    func updateNSView(_ slider: NSSlider, context: Context) {
+        context.coordinator.parent = self
+        if abs(slider.doubleValue - value) > 0.0001 { slider.doubleValue = value }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject {
+        var parent: TickSlider
+        init(_ parent: TickSlider) { self.parent = parent }
+
+        @objc func changed(_ sender: NSSlider) {
+            // Snap away floating-point noise (0.9000000001 → 0.9).
+            let snapped = (sender.doubleValue / parent.step).rounded() * parent.step
+            parent.value = (snapped * 100).rounded() / 100
+        }
     }
 }
