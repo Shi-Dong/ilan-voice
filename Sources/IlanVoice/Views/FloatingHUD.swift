@@ -12,7 +12,7 @@ final class FloatingHUD {
     private var cancellables: Set<AnyCancellable> = []
     private var hideWork: DispatchWorkItem?
     private var showWork: DispatchWorkItem?
-    private static let listeningDelay: TimeInterval = 0.3
+    private static let listeningDelay: TimeInterval = VoiceSession.minRecordingSeconds
 
     init(session: VoiceSession) {
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 44),
@@ -42,7 +42,7 @@ final class FloatingHUD {
     }
 
     /// Recording starts the moment the key goes down, but the pill waits
-    /// 0.3 s, the same cutoff below which a recording is never sent: a quick
+    /// as long as the cutoff below which a recording is never sent: a quick
     /// tap is almost always meant to cut Ilan off, so it goes straight to
     /// "Stopped assistant speech" without flashing "Listening".
     private func update(_ phase: VoiceSession.Phase) {

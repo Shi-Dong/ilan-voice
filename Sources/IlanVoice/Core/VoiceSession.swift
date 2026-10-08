@@ -50,6 +50,9 @@ final class VoiceSession: ObservableObject {
 
     /// What a press of the talk key turned out to be, for the floating pill.
     enum PressOutcome { case sent, stoppedSpeech, discarded }
+    /// Shorter recordings are taps, never sent; the floating pill also waits
+    /// this long before it shows "Listening".
+    static let minRecordingSeconds = 0.2
     let pressEnded = PassthroughSubject<PressOutcome, Never>()
     private var finishingRecording = false
     private var currentResponseID: String?
@@ -293,7 +296,7 @@ final class VoiceSession: ObservableObject {
         // Ignore accidental taps: the API rejects buffers under ~100 ms anyway.
         // Silence (a press with nothing said) is dropped the same way, so it
         // never shows up in the conversation or reaches the model.
-        guard PCM.seconds(recording) >= 0.3, PCM.containsSpeech(recording) else {
+        guard PCM.seconds(recording) >= Self.minRecordingSeconds, PCM.containsSpeech(recording) else {
             if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
             pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded)
             phase = sessionReady ? .ready : (client == nil ? .offline : .connecting)
