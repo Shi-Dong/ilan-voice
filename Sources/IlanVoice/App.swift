@@ -56,6 +56,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Opening the app while it runs with no window (from Raycast, Spotlight,
+    /// Finder or the Dock) brings the main window back, like Wispr Flow does,
+    /// instead of only making the app active.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard !flag else { return true }
+        Self.showMainWindow()
+        return false
+    }
+
+    /// SwiftUI only reopens a closed window through openWindow, which lives in
+    /// a view's environment; MenuBarLabel (always on screen) does it on request.
+    static func showMainWindow() {
+        showInDock()
+        NotificationCenter.default.post(name: .openMainWindow, object: nil)
+        NSApp.activate(ignoringOtherApps: true)
+        // Fallback if SwiftUI kept the window object around but hidden.
+        DispatchQueue.main.async {
+            let main = NSApp.windows.first { $0.identifier?.rawValue == "main" }
+            if let main, !main.isVisible { main.makeKeyAndOrderFront(nil) }
+        }
+    }
+
     private static func isMain(_ window: Any?) -> Bool {
         (window as? NSWindow)?.identifier?.rawValue == "main"
     }
@@ -142,7 +164,24 @@ struct IlanVoiceApp: App {
             Divider()
             Button("Quit") { NSApp.terminate(nil) }.keyboardShortcut("q")
         } label: {
-            Image(nsImage: MenuBarIcon.image)
+            MenuBarLabel()
         }
+    }
+}
+
+extension Notification.Name {
+    static let openMainWindow = Notification.Name("IlanVoice.openMainWindow")
+}
+
+/// The menu bar icon. It is always on screen, so it also carries openWindow
+/// for AppDelegate, which has no SwiftUI environment of its own.
+private struct MenuBarLabel: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Image(nsImage: MenuBarIcon.image)
+            .onReceive(NotificationCenter.default.publisher(for: .openMainWindow)) { _ in
+                openWindow(id: "main")
+            }
     }
 }
