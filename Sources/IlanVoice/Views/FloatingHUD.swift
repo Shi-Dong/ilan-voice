@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import os
 import SwiftUI
 
 /// A small pill near the bottom of the screen that shows, over any app, that
@@ -11,6 +12,9 @@ final class FloatingHUD {
     private let model = HUDModel()
     private var cancellables: Set<AnyCancellable> = []
     private var hideWork: DispatchWorkItem?
+    /// `log show --predicate 'subsystem == "me.dongshi.ilan-voice"'` shows
+    /// each time the pill is asked to appear, in case it ever doesn't.
+    private let log = Logger(subsystem: "me.dongshi.ilan-voice", category: "pill")
     private var showWork: DispatchWorkItem?
     private static let listeningDelay: TimeInterval = VoiceSession.minRecordingSeconds
 
@@ -85,17 +89,21 @@ final class FloatingHUD {
             let size = panel.frame.size
             panel.setFrameOrigin(NSPoint(x: visible.midX - size.width / 2, y: visible.minY + 28))
         }
-        panel.alphaValue = 0
+        // The fade lives in SwiftUI, not in the window's alpha: AppKit window
+        // fades don't run while Ilan Voice isn't the active app (always the
+        // case once its window is closed), which left the pill on screen but
+        // fully transparent.
+        panel.alphaValue = 1
         panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { $0.duration = 0.12; panel.animator().alphaValue = 1 }
+        log.info("show: mode=\(String(describing: self.model.mode), privacy: .public) screen=\(String(describing: self.panel.screen?.localizedName), privacy: .public) active=\(NSApp.isActive)")
+        DispatchQueue.main.async { [weak self] in self?.model.shown = true }
     }
 
     private func hide() {
-        NSAnimationContext.runAnimationGroup({ $0.duration = 0.25; panel.animator().alphaValue = 0 }) { [weak self] in
-            Task { @MainActor in
-                guard let self, self.model.mode != .listening else { return }
-                self.panel.orderOut(nil)
-            }
+        model.shown = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, !self.model.shown else { return }
+            self.panel.orderOut(nil)
         }
     }
 }
@@ -106,6 +114,8 @@ final class HUDModel: ObservableObject {
     static let barCount = 14
 
     @Published var mode: Mode = .listening
+    /// Fades the pill in and out.
+    @Published var shown = false
     @Published private(set) var levels = Array(repeating: Float(0), count: barCount)
 
     func push(_ level: Float) {
@@ -121,6 +131,12 @@ private struct HUDView: View {
     @ObservedObject var model: HUDModel
 
     var body: some View {
+        pill
+            .opacity(model.shown ? 1 : 0)
+            .animation(.easeOut(duration: model.shown ? 0.12 : 0.25), value: model.shown)
+    }
+
+    private var pill: some View {
         HStack(spacing: 9) {
             AppIcon(size: 22)
             if model.mode == .listening {
