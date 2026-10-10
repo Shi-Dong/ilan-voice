@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 @testable import IlanVoice
 
@@ -35,6 +36,26 @@ func registerTextInputTests() {
             let message = Message(id: "u", role: .user, text: "hi", typed: true)
             let decoded = try JSONDecoder().decode(Message.self, from: JSONEncoder().encode(message))
             expectEqual(decoded.typed, true)
+        }
+    }
+}
+
+/// Where the "Add to Message" pill is anchored.
+@MainActor
+func registerSelectionButtonTests() {
+    suite("Add to Message button") { test in
+        let bounds = NSRect(x: 0, y: 0, width: 300, height: 100)
+        test("anchored at the release point, one line tall") {
+            let r = MessageNSTextView.anchorRect(at: NSPoint(x: 120, y: 50), in: bounds, lineHeight: 18)
+            expectEqual(r.midX, 120)
+            expectEqual(r.minY, 41)
+            expectEqual(r.height, 18)
+        }
+        test("kept inside the message when the mouse ends outside it") {
+            let r = MessageNSTextView.anchorRect(at: NSPoint(x: 900, y: -40), in: bounds, lineHeight: 18)
+            expect(r.midX <= bounds.maxX && r.minY >= bounds.minY, "\(r)")
+            let below = MessageNSTextView.anchorRect(at: NSPoint(x: -20, y: 400), in: bounds, lineHeight: 18)
+            expect(below.midX >= bounds.minX && below.maxY <= bounds.maxY, "\(below)")
         }
     }
 }
