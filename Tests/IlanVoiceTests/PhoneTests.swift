@@ -83,6 +83,11 @@ func registerPhoneTests() {
             expect(css.contains("line-height: 24px"), "title needs a whole-pixel line height")
             expect(css.contains("padding: 2px 0"), "title needs padding so overflow: hidden never cuts the letters")
         }
+        test("the page has a Reconnect button that asks the Mac for a fresh session") {
+            let html = PhoneWebApp.html
+            expect(html.contains(#"<button id="reconnect""#), "reconnect button missing")
+            expect(html.contains(#"send({ type: "reconnect" })"#), "reconnect button should send a reconnect command")
+        }
         test("serves the page, manifest and icons; unknown paths are 404") {
             let server = MiniHTTPServer()
             server.route = { PhoneServer.file(for: $0) }
