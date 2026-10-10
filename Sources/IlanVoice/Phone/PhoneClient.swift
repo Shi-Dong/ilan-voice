@@ -86,6 +86,7 @@ final class PhoneClient {
         case "press": session.pressToTalk()
         case "release": session.releaseToTalk()
         case "cancel": session.cancelRecording()
+        case "reconnect": reconnect()
         case "stop": session.interrupt()
         case "replay": replayLast()
         case "new_phone": _ = PhoneServer.number(for: device)  // "This is a new iPhone"
@@ -100,6 +101,13 @@ final class PhoneClient {
         if let id = conversationID, store.conversations.contains(where: { $0.id == id }) { return id }
         conversationID = store.iPhoneConversation(device: device, create: create)
         return conversationID
+    }
+
+    /// The page's Reconnect button: a fresh OpenAI session for this phone's
+    /// conversation, like Voice → Reconnect on the Mac. Ignored mid-recording.
+    func reconnect() {
+        guard session.phase != .recording else { return }
+        session.connect()
     }
 
     /// Plays Ilan's latest reply again on this phone.

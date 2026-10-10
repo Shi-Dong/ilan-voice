@@ -62,6 +62,10 @@ enum PhoneWebApp {
       header .title { font-weight: 600; font-size: 17px; line-height: 24px; padding: 2px 0; margin: -2px 0;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       header .status { font-size: 12.5px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+      #reconnect { margin-left: auto; flex: none; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--hair);
+        background: var(--card); color: var(--dim); display: flex; align-items: center; justify-content: center; }
+      #reconnect svg { width: 17px; height: 17px; transition: transform .6s ease; }
+      #reconnect.spin svg { transform: rotate(180deg); }
       .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
       .dot.ok { background: var(--mint); } .dot.busy { background: var(--orange); } .dot.rec { background: var(--red); }
       main { flex: 1; overflow-y: auto; padding: 16px 16px 24px; display: flex; flex-direction: column; gap: 10px;
@@ -123,6 +127,11 @@ enum PhoneWebApp {
         <div class="title" id="title">Ilan Voice</div>
         <div class="status"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
       </div>
+      <button id="reconnect" aria-label="Reconnect">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4.5 10a8 8 0 0 1 14.2-3.5"/><path d="M19.5 3v4h-4"/>
+          <path d="M19.5 14a8 8 0 0 1-14.2 3.5"/><path d="M4.5 21v-4h4"/></svg>
+      </button>
     </header>
     <div class="banner" id="banner"></div>
     <div class="sheet" id="sheet"><div class="panel">
@@ -134,10 +143,7 @@ enum PhoneWebApp {
     <main id="list"><div class="empty"><b>Hold to talk</b>Let go to send. Ilan answers out loud.</div></main>
     <footer>
       <div class="hint" id="hint">Hold the button and speak</div>
-      <button class="side" id="replay" aria-label="Replay last reply" disabled>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
-      </button>
+      <span></span>
       <div class="talkwrap"><canvas id="halo"></canvas>
       <button id="talk" aria-label="Hold to talk">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/>
@@ -160,7 +166,7 @@ enum PhoneWebApp {
     }
     let replaced = false;
 
-    let ws = null, ctx = null, playHead = 0, sources = [], hasReply = false;
+    let ws = null, ctx = null, playHead = 0, sources = [];
     let micStream = null, micNode = null, micSource = null, held = false, sending = false, phase = "Offline";
 
     // ---- Connection ----
@@ -273,8 +279,6 @@ enum PhoneWebApp {
         d.textContent = it.role === "tool" ? "⚙︎ " + it.text : (it.text || "…");
         list.appendChild(d);
       }
-      hasReply = m.items.some(it => it.role === "assistant" && !it.pending);
-      $("replay").disabled = !hasReply;
       if (atBottom || m.items.length) list.scrollTop = list.scrollHeight;
     }
 
@@ -529,7 +533,17 @@ enum PhoneWebApp {
     talk.addEventListener("pointerup", release);
     talk.addEventListener("pointercancel", release);
     talk.addEventListener("contextmenu", e => e.preventDefault());
-    $("replay").addEventListener("click", () => { audioContext(); send({ type: "replay" }); });
+    // Reconnect, like the Mac's button: a fresh session for this phone's
+    // conversation (the conversation itself is kept). If the page has lost
+    // the Mac, it reconnects to the Mac first.
+    $("reconnect").addEventListener("click", () => {
+      const b = $("reconnect");
+      b.classList.remove("spin"); void b.offsetWidth; b.classList.add("spin");
+      setTimeout(() => b.classList.remove("spin"), 650);
+      if (held) return;
+      if (ws && ws.readyState === 1) send({ type: "reconnect" });
+      else { replaced = false; if (!ws) connect(); }
+    });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) { if (held) release(); }
       else if (!ws && !replaced) connect();
