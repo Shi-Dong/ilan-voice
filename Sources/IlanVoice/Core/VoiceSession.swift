@@ -256,6 +256,22 @@ final class VoiceSession: ObservableObject {
         }
     }
 
+    /// How much audio of a reply has arrived so far, in milliseconds: still
+    /// streaming (in `replyAudio`) or already saved with the message.
+    private func receivedAudioMs(_ itemID: String) -> Int? {
+        if let pcm = replyAudio[itemID] { return Int(PCM.seconds(pcm) * 1000) }
+        guard let convID = conversationID, let seconds = store.message(convID, itemID)?.audioSeconds else { return nil }
+        return Int(seconds * 1000)
+    }
+
+    /// Where to cut a reply the user interrupted, or nil when there is nothing
+    /// to cut: if everything that arrived was already heard, OpenAI rejects
+    /// the request ("Audio content of N ms is already shorter than M ms").
+    static func truncationPoint(heardMs: Int, itemMs: Int?) -> Int? {
+        guard let itemMs else { return heardMs }
+        return heardMs < itemMs ? heardMs : nil
+    }
+
     /// Silences Ilan right away: stops the speaker and any replayed clip,
     /// cancels the reply being generated, drops audio from it that is still on
     /// its way, skips the follow-up to any running tool call, and tells the
@@ -269,8 +285,10 @@ final class VoiceSession: ObservableObject {
         guard wasSpeaking else { return wasReplaying }
         if let itemID = speakingItemID, let start = speakingItemStartFrame, client != nil {
             let heardMs = max(0, (speaker.playedFrames - start) * 1000 / Int(PCM.sampleRate))
-            client?.send(["type": "conversation.item.truncate", "item_id": itemID,
-                          "content_index": 0, "audio_end_ms": heardMs])
+            if let end = Self.truncationPoint(heardMs: heardMs, itemMs: receivedAudioMs(itemID)) {
+                client?.send(["type": "conversation.item.truncate", "item_id": itemID,
+                              "content_index": 0, "audio_end_ms": end])
+            }
         }
         speaker.stop()
         if responseActive {
@@ -567,6 +585,8 @@ final class VoiceSession: ObservableObject {
             let message = error?["message"] as? String ?? "Unknown error"
             // Cancelling when nothing is running is harmless.
             if (error?["code"] as? String) == "response_cancel_not_active" { return }
+            // Cutting a reply at a point it already ended at is harmless too.
+            if message.contains("is already shorter than") { return }
             errorMessage = message
             if phase == .thinking || phase == .connecting { phase = sessionReady ? .ready : .offline }
 
