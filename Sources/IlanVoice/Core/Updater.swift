@@ -35,6 +35,47 @@ final class Updater: ObservableObject {
     static var repoURL: URL { URL(string: "https://github.com/\(repo)")! }
 
     @Published private(set) var state: State = .idle
+    /// When GitHub last answered a check.
+    @Published private(set) var lastChecked: Date?
+
+    /// Background checks: every 10 minutes, and when the app comes to the
+    /// front if the last check is over 3 minutes old. Unauthenticated GitHub
+    /// API calls are limited to 60 an hour, which this stays well under.
+    static let periodicCheckInterval: TimeInterval = 10 * 60
+    static let activationCheckAge: TimeInterval = 3 * 60
+    private var autoCheckTimer: Timer?
+    private var activationObserver: NSObjectProtocol?
+
+    /// Checks now, then keeps "Up to date" honest without being asked.
+    func startAutoCheck() {
+        Task { await check() }
+        autoCheckTimer?.invalidate()
+        let timer = Timer(timeInterval: Self.periodicCheckInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.checkIfStale(maxAge: Self.periodicCheckInterval - 30) }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        autoCheckTimer = timer
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.checkIfStale(maxAge: Self.activationCheckAge) }
+        }
+    }
+
+    func checkIfStale(maxAge: TimeInterval) async {
+        guard Self.needsCheck(state: state, lastChecked: lastChecked, now: Date(), maxAge: maxAge) else { return }
+        await check()
+    }
+
+    /// Whether a background check should run. Never while checking, installing
+    /// or waiting to restart, and not again while an update is already known.
+    static func needsCheck(state: State, lastChecked: Date?, now: Date, maxAge: TimeInterval) -> Bool {
+        switch state {
+        case .checking, .installing, .readyToRestart, .available: return false
+        case .idle, .upToDate, .failed: break
+        }
+        guard let lastChecked else { return true }
+        return now.timeIntervalSince(lastChecked) >= maxAge
+    }
 
     static var sourceDir: URL { Paths.root.appendingPathComponent("source", isDirectory: true) }
     static var logFile: URL { Paths.root.appendingPathComponent("update.log") }
@@ -78,6 +119,7 @@ final class Updater: ObservableObject {
                 state = .failed("GitHub did not return the latest commit.")
                 return
             }
+            lastChecked = Date()
             if sha == currentCommit {
                 state = .upToDate
                 return

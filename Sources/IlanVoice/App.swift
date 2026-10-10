@@ -35,7 +35,7 @@ final class AppModel: ObservableObject {
         }
         ptt.start()
         hud = FloatingHUD(session: session)
-        Task { await updater.check() }
+        updater.startAutoCheck()
         Task {
             await mcp.reload()
             session.connect()

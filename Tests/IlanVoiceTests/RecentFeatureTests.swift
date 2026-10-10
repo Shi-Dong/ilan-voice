@@ -79,3 +79,30 @@ func registerRecentFeatureTests() {
         }
     }
 }
+
+/// "Up to date" stays honest: the app re-checks GitHub on its own.
+@MainActor
+func registerUpdateCheckTests() {
+    suite("Automatic update checks") { test in
+        let now = Date()
+        test("checks when it never has, or the last check is old") {
+            expect(Updater.needsCheck(state: .idle, lastChecked: nil, now: now, maxAge: 180))
+            expect(Updater.needsCheck(state: .upToDate, lastChecked: now.addingTimeInterval(-600), now: now, maxAge: 180))
+            expect(Updater.needsCheck(state: .failed("offline"), lastChecked: now.addingTimeInterval(-200), now: now, maxAge: 180))
+        }
+        test("does not re-check right after a check") {
+            expect(!Updater.needsCheck(state: .upToDate, lastChecked: now.addingTimeInterval(-60), now: now, maxAge: 180))
+        }
+        test("never interrupts a check, an install or a known update") {
+            let old = now.addingTimeInterval(-3_600)
+            for state: Updater.State in [.checking, .installing("x"), .readyToRestart,
+                                         .available(commit: "a", summary: "s", date: nil)] {
+                expect(!Updater.needsCheck(state: state, lastChecked: old, now: now, maxAge: 180), state.sidebarTitle)
+            }
+        }
+        test("background checks stay under GitHub's 60-an-hour limit") {
+            expect(Updater.periodicCheckInterval <= 15 * 60)
+            expect(3_600 / Updater.periodicCheckInterval + 3_600 / Updater.activationCheckAge < 60)
+        }
+    }
+}
