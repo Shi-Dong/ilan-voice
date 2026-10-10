@@ -330,7 +330,9 @@ private struct SidebarFooter: View {
         switch updater.state {
         case .available(_, let summary, _): "Install the newest version from GitHub: \(summary)"
         case .readyToRestart: "The new version is built. Click to restart into it."
-        default: "Check GitHub for a newer version and install it (\(updater.currentDescription))"
+        default:
+            "Check GitHub for a newer version and install it (\(updater.currentDescription))"
+                + (updater.lastChecked.map { ". Last checked \($0.formatted(date: .omitted, time: .shortened)); checks again every 10 minutes" } ?? "")
         }
     }
 }
