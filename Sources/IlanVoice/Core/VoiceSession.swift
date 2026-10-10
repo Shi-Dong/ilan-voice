@@ -49,6 +49,10 @@ final class VoiceSession: ObservableObject {
     private var conversationID: UUID?
     private var sessionReady = false
     private var connectedFingerprint = ""
+    /// When the current Realtime session was opened. OpenAI ends every
+    /// session after 60 minutes, so an old one is replaced before a new turn.
+    private var sessionStartedAt = Date()
+    static let sessionRefreshAge: TimeInterval = 50 * 60
     private var bufferedAudio: [Data] = []
     private var recording = Data()
     private var recordStart = Date()
@@ -150,12 +154,18 @@ final class VoiceSession: ObservableObject {
         }
         self.client = client
         connectedFingerprint = settings.sessionFingerprint
+        sessionStartedAt = Date()
         client.connect(apiKey: settings.apiKey, model: settings.model)
     }
 
     /// The last connection error shown, so it can be cleared once a new
     /// session is up.
     private var connectionError: String?
+
+    /// OpenAI's "Your session hit the maximum duration of 60 minutes" error.
+    static func isSessionExpiry(code: String?, message: String) -> Bool {
+        code == "session_expired" || message.localizedCaseInsensitiveContains("maximum duration")
+    }
 
     /// Whether a dropped connection is worth a warning. OpenAI and the network
     /// close idle sessions all the time ("Socket is not connected", "The
@@ -179,6 +189,7 @@ final class VoiceSession: ObservableObject {
     /// Re-dial if the conversation or a session-level setting changed.
     func ensureSession() {
         let stale = connectedFingerprint != settings.sessionFingerprint || conversationID != target()
+            || Date().timeIntervalSince(sessionStartedAt) > Self.sessionRefreshAge
             || someoneElseSpoke
         if client == nil || stale { connect() }
     }
@@ -608,6 +619,16 @@ final class VoiceSession: ObservableObject {
             if (error?["code"] as? String) == "response_cancel_not_active" { return }
             // Cutting a reply at a point it already ended at is harmless too.
             if message.contains("is already shorter than") { return }
+            // OpenAI ends every session after 60 minutes. That is routine: start
+            // a fresh one quietly (the conversation is carried over as text),
+            // unless a reply was on its way, which the user should hear about.
+            if Self.isSessionExpiry(code: error?["code"] as? String, message: message) {
+                let busy = responseActive || phase == .thinking || phase == .working || phase == .speaking
+                if !busy {
+                    if phase != .recording { connect() }
+                    return
+                }
+            }
             errorMessage = message
             if phase == .thinking || phase == .connecting { phase = sessionReady ? .ready : .offline }
 

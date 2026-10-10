@@ -22,5 +22,14 @@ func registerConnectionTests() {
             expect(!VoiceSession.shouldReport(closeReason: nil, phase: .thinking, responseActive: true))
             expect(!VoiceSession.shouldReport(closeReason: "", phase: .speaking, responseActive: true))
         }
+        test("the 60-minute session limit is recognised") {
+            expect(VoiceSession.isSessionExpiry(code: "session_expired", message: ""))
+            expect(VoiceSession.isSessionExpiry(code: nil, message: "Your session hit the maximum duration of 60 minutes."))
+            expect(!VoiceSession.isSessionExpiry(code: "invalid_value", message: "Invalid value for speed"))
+        }
+        test("old sessions are replaced before OpenAI's 60-minute limit") {
+            expect(VoiceSession.sessionRefreshAge < 60 * 60)
+            expect(VoiceSession.sessionRefreshAge >= 30 * 60)  // not needlessly often
+        }
     }
 }
