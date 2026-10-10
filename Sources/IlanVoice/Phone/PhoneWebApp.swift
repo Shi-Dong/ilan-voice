@@ -11,7 +11,7 @@ enum PhoneWebApp {
       "short_name": "Ilan",
       "display": "standalone",
       "background_color": "#0E1213",
-      "theme_color": "#0E1213",
+      "theme_color": "#161D1C",
       "icons": [
         { "src": "/icon-180.png", "sizes": "180x180", "type": "image/png" },
         { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
@@ -29,7 +29,7 @@ enum PhoneWebApp {
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Ilan">
-    <meta name="theme-color" content="#0E1213">
+    <meta name="theme-color" content="#161D1C">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icon-180.png">
     <title>Ilan Voice</title>
@@ -41,11 +41,17 @@ enum PhoneWebApp {
       * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
       html, body { margin: 0; height: 100%; background: var(--ink); color: var(--text);
         font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
-      body { display: flex; flex-direction: column; overflow: hidden;
-        background: radial-gradient(120% 60% at 50% 0%, #15211F 0%, var(--ink) 60%); }
-      header { padding: calc(env(safe-area-inset-top) + 14px) 20px 12px; display: flex; align-items: center; gap: 12px;
-        border-bottom: 1px solid var(--hair); }
-      header img { width: 34px; height: 34px; border-radius: 9px; }
+      /* The page runs full-screen under the iPhone's status bar (clock,
+         battery). Its height follows the real visible screen (100dvh; iOS
+         home-screen apps get 100% wrong), and the header is solid and starts
+         at the very top, so the status bar sits on a crisp, even band rather
+         than on the soft background gradient. */
+      body { display: flex; flex-direction: column; overflow: hidden; height: 100vh; height: 100dvh;
+        background: radial-gradient(120% 60% at 50% 30%, #15211F 0%, var(--ink) 60%); }
+      header { padding: calc(env(safe-area-inset-top) + 12px) 20px 12px; display: flex; align-items: center; gap: 12px;
+        flex: none; position: relative; z-index: 2; background: var(--raised);
+        border-bottom: 1px solid var(--hair); box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+      header img { width: 34px; height: 34px; border-radius: 9px; flex: none; }
       header .title { font-weight: 600; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       header .status { font-size: 12.5px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
       .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }

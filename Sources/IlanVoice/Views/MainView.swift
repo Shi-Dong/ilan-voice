@@ -10,7 +10,7 @@ struct MainView: View {
 
     var body: some View {
         NavigationSplitView {
-            Sidebar(store: store)
+            Sidebar(store: store, updater: updater)
                 .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 320)
         } detail: {
             ChatView(store: store, session: session, ptt: ptt, mcp: mcp, updater: updater)
@@ -27,6 +27,7 @@ struct MainView: View {
 
 struct Sidebar: View {
     @ObservedObject var store: ConversationStore
+    @ObservedObject var updater: Updater
     @ObservedObject var shells = ShellSessions.shared
     @Local private var renaming: UUID?
     @Local private var draft = ""
@@ -92,7 +93,7 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom, spacing: 0) { SidebarSettingsRow() }
+        .safeAreaInset(edge: .bottom, spacing: 0) { SidebarFooter(updater: updater) }
         .toolbar {
             ToolbarItem {
                 Button { store.newConversation() } label: { Image(systemName: "square.and.pencil") }
@@ -271,30 +272,104 @@ struct ChatView: View {
     }
 }
 
-/// A quiet footer row under the conversation list: a hairline, then a small
-/// gear and label in the sidebar's dim text, lit only on hover.
-private struct SidebarSettingsRow: View {
-    @Local private var hovering = false
+/// Quiet footer rows under the conversation list: a hairline, then Settings
+/// and Update as small icon-and-label rows in the sidebar's dim text, lit
+/// only on hover.
+private struct SidebarFooter: View {
+    @ObservedObject var updater: Updater
 
     var body: some View {
         VStack(spacing: 0) {
             Rectangle().fill(Theme.hairline).frame(height: 1)
-            GeneralSettingsButton {
-                HStack(spacing: 7) {
-                    Image(systemName: "gearshape").font(.system(size: 12, weight: .medium))
-                    Text("Settings").font(.system(size: 12, weight: .medium))
-                    Spacer()
-                    Text("⌘,").font(.system(size: 11)).opacity(hovering ? 0.8 : 0)
+            VStack(spacing: 2) {
+                GeneralSettingsButton {
+                    SidebarFooterRow(icon: "gearshape", title: "Settings", trailing: .shortcut("⌘,"))
                 }
-                .foregroundStyle(hovering ? Color.primary : Theme.textDim)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(hovering ? Theme.card : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                Button(action: update) {
+                    SidebarFooterRow(icon: updateIcon, title: updateTitle, trailing: updateTrailing,
+                                     highlighted: updater.updateAvailable || updater.state == .readyToRestart)
+                }
+                .buttonStyle(.plain)
+                .disabled(updater.isBusy)
+                .help(updateHelp)
             }
-            .buttonStyle(.plain)
-            .onHover { hovering = $0 }
-            .animation(.easeOut(duration: 0.12), value: hovering)
             .padding(.horizontal, 8).padding(.vertical, 8)
         }
+    }
+
+    /// One click does the whole job: check if needed, then build and install
+    /// (the progress window opens), or restart into an update that is ready.
+    private func update() {
+        Task {
+            if updater.state == .readyToRestart { updater.restartNow(); return }
+            if !updater.updateAvailable { await updater.check() }
+            if updater.updateAvailable { await updater.install() }
+        }
+    }
+
+    private var updateTitle: String {
+        switch updater.state {
+        case .checking: "Checking for updates…"
+        case .installing: "Updating…"
+        case .available: "Install update"
+        case .readyToRestart: "Restart to update"
+        case .upToDate: "Up to date"
+        case .failed: "Update failed – try again"
+        case .idle: "Check for updates"
+        }
+    }
+
+    private var updateIcon: String {
+        switch updater.state {
+        case .available: "arrow.down.circle.fill"
+        case .readyToRestart: "arrow.clockwise.circle.fill"
+        case .upToDate: "checkmark.circle"
+        case .failed: "exclamationmark.circle"
+        default: "arrow.down.circle"
+        }
+    }
+
+    private var updateTrailing: SidebarFooterRow.Trailing {
+        updater.isBusy ? .spinner : .none
+    }
+
+    private var updateHelp: String {
+        switch updater.state {
+        case .available(_, let summary, _): "Install the newest version from GitHub: \(summary)"
+        case .readyToRestart: "The new version is built. Click to restart into it."
+        default: "Check GitHub for a newer version and install it (\(updater.currentDescription))"
+        }
+    }
+}
+
+private struct SidebarFooterRow: View {
+    enum Trailing { case none, shortcut(String), spinner }
+
+    let icon: String
+    let title: String
+    var trailing: Trailing = .none
+    /// Orange when there is something to install.
+    var highlighted = false
+    @Local private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon).font(.system(size: 12, weight: .medium))
+                .frame(width: 14)
+            Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1)
+            Spacer()
+            switch trailing {
+            case .none: EmptyView()
+            case .shortcut(let keys): Text(keys).font(.system(size: 11)).opacity(hovering ? 0.8 : 0)
+            case .spinner: ProgressView().controlSize(.mini)
+            }
+        }
+        .foregroundStyle(highlighted ? Theme.orange : (hovering ? Color.primary : Theme.textDim))
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(hovering ? Theme.card : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
