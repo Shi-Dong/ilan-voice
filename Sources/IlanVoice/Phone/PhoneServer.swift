@@ -201,82 +201,21 @@ final class PhoneServer: ObservableObject {
         }
     }
 
-    /// The app icon with Ilan on the phone, so the iPhone web app is told
-    /// apart from other Ilan icons on the home screen.
+    /// The iPhone web app's icon: the portrait with a toothy smile
+    /// (Resources/icon-phone.svg), so it is told apart from the Mac app.
     private static func icon(_ size: Int) -> MiniHTTPServer.Response? {
-        // The square artwork itself, not the Mac's rounded icon (iOS rounds it).
-        let source = Bundle.main.url(forResource: "AppIcon", withExtension: "icns").flatMap(NSImage.init(contentsOf:))
+        let source = Bundle.main.url(forResource: "icon-phone-512", withExtension: "png").flatMap(NSImage.init(contentsOf:))
             ?? NSApp.applicationIconImage ?? NSImage()
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size, bitsPerSample: 8,
                                          samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
                                          bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
         source.draw(in: NSRect(x: 0, y: 0, width: size, height: size))
-        drawHandset(CGFloat(size))
         NSGraphicsContext.restoreGraphicsState()
         guard let png = rep.representation(using: .png, properties: [:]) else { return nil }
         return .init(contentType: "image/png", body: png)
-    }
-
-    /// A classic red telephone handset held to his ear, with a curly cord.
-    /// Drawn on a 512-point square (y up) scaled to `s`.
-    private static func drawHandset(_ s: CGFloat) {
-        let k = s / 512
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        ctx.saveGState()
-        ctx.scaleBy(x: k, y: k)
-        let red = NSColor(red: 0.89, green: 0.33, blue: 0.24, alpha: 1)
-        let redDark = NSColor(red: 0.72, green: 0.22, blue: 0.16, alpha: 1)
-        let highlight = NSColor.white.withAlphaComponent(0.28)
-
-        let ear = CGPoint(x: 408, y: 262), mouth = CGPoint(x: 318, y: 150)
-
-        // Curly cord from the mouthpiece down past the edge.
-        let cord = NSBezierPath()
-        var p = CGPoint(x: mouth.x + 18, y: mouth.y - 22)
-        cord.move(to: p)
-        for i in 0..<9 {
-            let t = CGFloat(i)
-            let next = CGPoint(x: p.x + 11 + t * 1.5, y: p.y - 17)
-            cord.curve(to: next, controlPoint1: CGPoint(x: p.x + 26, y: p.y + 2), controlPoint2: CGPoint(x: next.x + 16, y: next.y + 18))
-            p = next
-        }
-        cord.lineWidth = 7
-        cord.lineCapStyle = .round
-        redDark.setStroke()
-        cord.stroke()
-
-        ctx.setShadow(offset: CGSize(width: 3, height: -6), blur: 14, color: NSColor.black.withAlphaComponent(0.25).cgColor)
-        // Grip: a thick curve bowing away from the face.
-        let grip = NSBezierPath()
-        grip.move(to: ear)
-        grip.curve(to: mouth, controlPoint1: CGPoint(x: 452, y: 226), controlPoint2: CGPoint(x: 392, y: 128))
-        grip.lineWidth = 40
-        grip.lineCapStyle = .round
-        red.setStroke()
-        grip.stroke()
-        // Ear and mouth cups.
-        func cup(_ c: CGPoint, _ angle: CGFloat, _ w: CGFloat, _ h: CGFloat) {
-            ctx.saveGState()
-            ctx.translateBy(x: c.x, y: c.y)
-            ctx.rotate(by: angle)
-            red.setFill()
-            NSBezierPath(roundedRect: NSRect(x: -w / 2, y: -h / 2, width: w, height: h), xRadius: h / 2, yRadius: h / 2).fill()
-            ctx.restoreGState()
-        }
-        cup(ear, -0.62, 84, 48)
-        cup(mouth, -1.05, 84, 48)
-        ctx.setShadow(offset: .zero, blur: 0, color: nil)
-        // Shine along the grip.
-        let shine = NSBezierPath()
-        shine.move(to: CGPoint(x: 428, y: 232))
-        shine.curve(to: CGPoint(x: 366, y: 150), controlPoint1: CGPoint(x: 450, y: 208), controlPoint2: CGPoint(x: 418, y: 154))
-        shine.lineWidth = 7
-        shine.lineCapStyle = .round
-        highlight.setStroke()
-        shine.stroke()
-        ctx.restoreGState()
     }
 
     /// A QR code for the pairing link, to scan with the iPhone camera.
