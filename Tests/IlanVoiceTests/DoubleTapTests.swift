@@ -23,6 +23,9 @@ func registerDoubleTapTests() {
             expect(!run([(true, 0), (false, 1.5), (true, 1.6), (false, 1.7)]).contains(true))
             expect(!run([(true, 0), (false, 0.1), (true, 0.2), (false, 1.4)]).contains(true))
         }
+        test("a tap is anything under the recording cutoff") {
+            expectEqual(DoubleTapDetector().maxTap, VoiceSession.minRecordingSeconds)
+        }
         test("a third quick tap starts a new pair") {
             let r = run([(true, 0), (false, 0.05), (true, 0.15), (false, 0.2), (true, 0.3), (false, 0.35)])
             expectEqual(r.filter { $0 }.count, 1)

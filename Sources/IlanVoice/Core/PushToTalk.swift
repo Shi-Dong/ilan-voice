@@ -226,7 +226,7 @@ final class PushToTalk: ObservableObject {
 struct DoubleTapDetector {
     /// A press shorter than this is a tap (the same cutoff below which a
     /// recording is never sent).
-    var maxTap: TimeInterval = VoiceSession.minRecordingSeconds
+    var maxTap: TimeInterval = 0.2  // = VoiceSession.minRecordingSeconds (checked by a test)
     /// The second tap must start within this long after the first ends.
     var maxGap: TimeInterval = 0.35
 
