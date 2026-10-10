@@ -29,6 +29,10 @@ final class AppModel: ObservableObject {
             reason: "Listening for the talk key and streaming voice to OpenAI")
         ptt.onPress = { [weak self] in self?.session.pressToTalk() }
         ptt.onRelease = { [weak self] in self?.session.releaseToTalk() }
+        ptt.onReplay = { [weak self] in
+            guard let self, self.session.phase != .recording else { return }
+            self.session.replayLast()
+        }
         ptt.start()
         hud = FloatingHUD(session: session)
         Task { await updater.check() }
