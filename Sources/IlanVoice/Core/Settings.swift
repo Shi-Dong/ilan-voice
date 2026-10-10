@@ -114,6 +114,10 @@ final class AppSettings: ObservableObject {
     /// The iPhone web server; started again at launch if it was running.
     @Published var phoneServerEnabled: Bool { didSet { defaults.set(phoneServerEnabled, forKey: "phoneServerEnabled") } }
     @Published var talkTrigger: TalkTrigger { didSet { defaults.set(try? JSONEncoder().encode(talkTrigger), forKey: "talkTrigger") } }
+    /// Optional global key or mouse button that replays Ilan's last reply.
+    @Published var replayTrigger: TalkTrigger? {
+        didSet { defaults.set(replayTrigger.flatMap { try? JSONEncoder().encode($0) }, forKey: "replayTrigger") }
+    }
 
     private init() {
         apiKey = SecretStore.get(SecretStore.openAI) ?? ""
@@ -140,6 +144,7 @@ final class AppSettings: ObservableObject {
         outputMode = OutputMode(rawValue: defaults.string(forKey: "outputMode") ?? "") ?? .realtime
         hideDockWhenClosed = defaults.object(forKey: "hideDockWhenClosed") as? Bool ?? true
         phoneServerEnabled = defaults.bool(forKey: "phoneServerEnabled")
+        replayTrigger = defaults.data(forKey: "replayTrigger").flatMap { try? JSONDecoder().decode(TalkTrigger.self, from: $0) }
         talkTrigger = defaults.data(forKey: "talkTrigger").flatMap { try? JSONDecoder().decode(TalkTrigger.self, from: $0) }
             ?? TalkTrigger.migrating(defaults.string(forKey: "pushToTalkKey"))
     }

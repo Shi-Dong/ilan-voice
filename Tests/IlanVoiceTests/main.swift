@@ -21,6 +21,7 @@ MainActor.assumeIsolated {
     registerRecentFeatureTests()
     registerTruncateTests()
     registerConnectionTests()
+    registerReplayHotkeyTests()
     let failed = runAll()
     UserDefaults.standard.removePersistentDomain(forName: ProcessInfo.processInfo.processName)
     exit(failed == 0 ? 0 : 1)

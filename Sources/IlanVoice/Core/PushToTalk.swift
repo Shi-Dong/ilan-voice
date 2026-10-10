@@ -16,13 +16,19 @@ import Carbon.HIToolbox
 final class PushToTalk: ObservableObject {
     @Published private(set) var trusted = AXIsProcessTrusted()
     /// True while Settings is waiting for the user to press a new trigger.
-    @Published private(set) var isRecording = false
+    /// Which trigger Settings is waiting for the user to press, if any.
+    enum Target { case talk, replay }
+    @Published private(set) var recording: Target?
+    var isRecording: Bool { recording != nil }
     var onPress: (() -> Void)?
     var onRelease: (() -> Void)?
+    /// The replay trigger went down (fires once per press, never on repeats).
+    var onReplay: (() -> Void)?
 
     private var monitors: [Any] = []
     private var tap: CFMachPort?
     private var isDown = false
+    private var replayDown = false
     private let settings = AppSettings.shared
 
     func start() {
@@ -69,16 +75,43 @@ final class PushToTalk: ObservableObject {
 
     // MARK: Recording a new trigger
 
-    func beginRecording() {
+    func beginRecording(_ target: Target = .talk) {
         if isDown { setDown(false) }
-        isRecording = true
+        recording = target
     }
 
-    func cancelRecording() { isRecording = false }
+    func cancelRecording() { recording = nil }
 
     private func record(_ trigger: TalkTrigger) {
-        settings.talkTrigger = trigger
-        isRecording = false
+        let (talk, replay) = Self.assign(trigger, to: recording ?? .talk,
+                                         talk: settings.talkTrigger, replay: settings.replayTrigger)
+        settings.talkTrigger = talk
+        settings.replayTrigger = replay
+        recording = nil
+    }
+
+    /// The two triggers after recording `trigger` for `target`. One key can't
+    /// do both jobs: giving the talk key to replay is refused, and taking the
+    /// replay key for talking clears replay.
+    static func assign(_ trigger: TalkTrigger, to target: Target, talk: TalkTrigger,
+                       replay: TalkTrigger?) -> (talk: TalkTrigger, replay: TalkTrigger?) {
+        switch target {
+        case .talk: return (trigger, replay == trigger ? nil : replay)
+        case .replay: return (talk, trigger == talk ? replay : trigger)
+        }
+    }
+
+    /// Whether an event of `kind` with `code` is `trigger`.
+    static func matches(_ trigger: TalkTrigger?, kind: TalkTrigger.Kind, code: Int) -> Bool {
+        guard let trigger else { return false }
+        return trigger.kind == kind && trigger.code == code
+    }
+
+    /// Replay fires on the press only; holding the key or its repeats do nothing more.
+    private func setReplayDown(_ down: Bool) {
+        guard down != replayDown else { return }
+        replayDown = down
+        if down { onReplay?() }
     }
 
     // MARK: Event handling. Each returns true when the event should be swallowed.
@@ -93,6 +126,10 @@ final class PushToTalk: ObservableObject {
             }
             return
         }
+        if Self.matches(settings.replayTrigger, kind: .modifier, code: code), let flag = settings.replayTrigger?.modifierFlag {
+            setReplayDown(event.modifierFlags.contains(flag))
+            return
+        }
         let trigger = settings.talkTrigger
         guard trigger.kind == .modifier, trigger.code == code, let flag = trigger.modifierFlag else { return }
         setDown(event.modifierFlags.contains(flag))
@@ -102,6 +139,10 @@ final class PushToTalk: ObservableObject {
         if isRecording {
             guard down else { return true }
             if code == kVK_Escape { cancelRecording() } else { record(.key(keyCode: code, characters: characters)) }
+            return true
+        }
+        if Self.matches(settings.replayTrigger, kind: .key, code: code) {
+            setReplayDown(down)
             return true
         }
         let trigger = settings.talkTrigger
@@ -114,6 +155,10 @@ final class PushToTalk: ObservableObject {
         if isRecording {
             guard down, let trigger = TalkTrigger.mouse(button: button) else { return false }
             record(trigger)
+            return true
+        }
+        if Self.matches(settings.replayTrigger, kind: .mouse, code: button) {
+            setReplayDown(down)
             return true
         }
         let trigger = settings.talkTrigger

@@ -78,6 +78,7 @@ private struct GeneralSettings: View {
             Section("Talking") {
                 MicrophonePicker()
                 TalkTriggerRecorder(ptt: ptt)
+                TalkTriggerRecorder(ptt: ptt, target: .replay)
                 Picker("Replies", selection: $settings.outputMode) {
                     ForEach(OutputMode.allCases) { Text($0.label).tag($0) }
                 }
@@ -386,36 +387,53 @@ private struct UpdatesSection: View {
 }
 
 /// Click "Change", then press the key or mouse button you want to hold.
+/// Records a trigger by pressing it: the talk key, or the optional key that
+/// replays Ilan's last reply.
 private struct TalkTriggerRecorder: View {
     @ObservedObject var ptt: PushToTalk
+    var target: PushToTalk.Target = .talk
     @ObservedObject var settings = AppSettings.shared
 
+    private var recordingThis: Bool { ptt.recording == target }
+    private var current: TalkTrigger? { target == .talk ? settings.talkTrigger : settings.replayTrigger }
+
     var body: some View {
-        LabeledContent("Hold to talk") {
+        LabeledContent(target == .talk ? "Hold to talk" : "Replay last reply") {
             HStack(spacing: 10) {
-                Text(ptt.isRecording ? "Press a key or mouse button…" : settings.talkTrigger.name)
-                    .font(.system(size: 12.5, weight: .semibold, design: ptt.isRecording ? .default : .rounded))
-                    .foregroundStyle(ptt.isRecording ? Theme.orange : .primary)
+                Text(recordingThis ? "Press a key or mouse button…" : current?.name ?? "None")
+                    .font(.system(size: 12.5, weight: .semibold, design: recordingThis ? .default : .rounded))
+                    .foregroundStyle(recordingThis ? Theme.orange : (current == nil ? .secondary : .primary))
                     .padding(.horizontal, 10).padding(.vertical, 4)
                     .frame(minWidth: 150)
                     .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.08)))
                     .overlay(RoundedRectangle(cornerRadius: 7)
-                        .stroke(ptt.isRecording ? Theme.orange : Color.white.opacity(0.18), lineWidth: 1))
-                if ptt.isRecording {
+                        .stroke(recordingThis ? Theme.orange : Color.white.opacity(0.18), lineWidth: 1))
+                if recordingThis {
                     Button("Cancel") { ptt.cancelRecording() }
                 } else {
-                    Button("Change…") { ptt.beginRecording() }
+                    Button(current == nil ? "Set…" : "Change…") { ptt.beginRecording(target) }
+                    if target == .replay, current != nil {
+                        Button { settings.replayTrigger = nil } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.secondary)
+                            .help("No replay key")
+                    }
                 }
             }
         }
-        .onDisappear { ptt.cancelRecording() }
+        .onDisappear { if recordingThis { ptt.cancelRecording() } }
         Text(note)
             .font(.caption).foregroundStyle(.secondary)
     }
 
     private var note: String {
-        if ptt.isRecording {
+        if recordingThis {
             return "Press any key (a modifier like right ⌥ on its own works too) or a mouse button other than left/right. Esc cancels."
+        }
+        if target == .replay {
+            return current == nil
+                ? "Optional: a key or mouse button that replays Ilan's last reply from any app. It cuts off whatever Ilan is saying; tapping the talk key stops the replay."
+                : "Press it anywhere to hear Ilan's last reply again. It cuts off whatever Ilan is saying; tapping \(settings.talkTrigger.shortLabel) stops the replay."
         }
         switch settings.talkTrigger.kind {
         case .modifier: return "Hold it anywhere to talk, let go to send. Allow Accessibility so it works in every app."

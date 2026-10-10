@@ -5,6 +5,7 @@
 A native macOS voice assistant built on OpenAI's **GPT-Realtime** (`gpt-realtime-2.1` by default). It works like ChatGPT Voice, with three differences:
 
 - **Push to talk.** Hold a key or mouse button, speak, and let go. Right ⌥ is the default; to change it, click **Change…** in Settings → General and press the key or mouse button you want. Releasing the key ends your message, so the assistant never cuts in while you pause. Tapping the key while Ilan is talking stops it immediately. While you talk, a small floating pill near the bottom of the screen shows live voice bars, over any app.
+- **Replay key (optional).** Set **Replay last reply** in Settings → General to a key or mouse button, and pressing it in any app plays Ilan's last reply again from the start. It cuts off whatever Ilan is saying at that moment, and tapping the talk key stops the replay. The same action is in the menu bar icon and under Voice → Replay Last Reply (⇧⌘L).
 - **Your own agent.** Its instructions come from an `agent.md` file you write.
 - **Your MCP tools.** It can call any MCP server you configure. It reads the same `mcpServers` format as Claude Code and can import that config in one click.
 
