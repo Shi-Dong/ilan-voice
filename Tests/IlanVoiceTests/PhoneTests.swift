@@ -87,6 +87,7 @@ func registerPhoneTests() {
             let html = PhoneWebApp.html
             expect(html.contains(#"<button id="reconnect""#), "reconnect button missing")
             expect(html.contains(#"send({ type: "reconnect" })"#), "reconnect button should send a reconnect command")
+            expect(!html.contains(#"id="replay""#), "the replay button was removed")
         }
         test("serves the page, manifest and icons; unknown paths are 404") {
             let server = MiniHTTPServer()
