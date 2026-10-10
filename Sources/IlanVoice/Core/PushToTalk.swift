@@ -171,7 +171,13 @@ final class PushToTalk: ObservableObject {
         guard down != isDown else { return }
         isDown = down
         down ? onPress?() : onRelease?()
+        if doubleTap.record(down: down, at: Date()) { onDoubleTap?() }
     }
+
+    /// Two quick taps of the talk key. Each tap still does what a single tap
+    /// does (it stops Ilan speaking); the second one also fires this.
+    var onDoubleTap: (() -> Void)?
+    private var doubleTap = DoubleTapDetector()
 
     // MARK: Event tap
 
@@ -212,5 +218,41 @@ final class PushToTalk: ObservableObject {
             }
             return swallowed ? nil : Unmanaged.passUnretained(event)
         }
+    }
+}
+
+/// Spots a double tap of the talk key: two short presses, the second starting
+/// soon after the first ended. Pure timing, so it can be tested.
+struct DoubleTapDetector {
+    /// A press shorter than this is a tap (the same cutoff below which a
+    /// recording is never sent).
+    var maxTap: TimeInterval = 0.2  // = VoiceSession.minRecordingSeconds (checked by a test)
+    /// The second tap must start within this long after the first ends.
+    var maxGap: TimeInterval = 0.35
+
+    private var pressedAt: Date?
+    private var lastTapEnd: Date?
+    private var secondPress = false
+
+    /// Feed every press and release; returns true on the release that
+    /// completes a double tap.
+    mutating func record(down: Bool, at time: Date) -> Bool {
+        if down {
+            secondPress = lastTapEnd.map { time.timeIntervalSince($0) <= maxGap } ?? false
+            pressedAt = time
+            return false
+        }
+        guard let start = pressedAt else { return false }
+        pressedAt = nil
+        let isTap = time.timeIntervalSince(start) < maxTap
+        defer { if !isTap { lastTapEnd = nil } }
+        guard isTap else { return false }
+        if secondPress {
+            secondPress = false
+            lastTapEnd = nil  // a third tap starts over
+            return true
+        }
+        lastTapEnd = time
+        return false
     }
 }

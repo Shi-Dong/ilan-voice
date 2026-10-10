@@ -29,6 +29,12 @@ final class AppModel: ObservableObject {
             reason: "Listening for the talk key and streaming voice to OpenAI")
         ptt.onPress = { [weak self] in self?.session.pressToTalk() }
         ptt.onRelease = { [weak self] in self?.session.releaseToTalk() }
+        // Double-tap: each tap already stopped Ilan; now bring the window
+        // forward with the cursor in the message box.
+        ptt.onDoubleTap = {
+            AppDelegate.showMainWindow()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { ComposerModel.shared.focusRequests.send() }
+        }
         ptt.onReplay = { [weak self] in
             guard let self, self.session.phase != .recording else { return }
             self.session.replayLast()
