@@ -80,6 +80,11 @@ enum PhoneWebApp {
       #halo { position: absolute; left: 50%; top: 50%; width: 240px; height: 240px; margin: -120px 0 0 -120px;
         pointer-events: none; z-index: 0; }
       #talk.held svg { color: #2A0B0B; }
+      /* Swiped up far enough: letting go now cancels. */
+      #talk.held.cancel { transform: scale(0.92); background: radial-gradient(circle at 35% 30%, #d9dedd, #8b9593 60%, #5f6866);
+        box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+      #talk.held.cancel svg { color: #1c2221; }
+      .hint.cancel { color: var(--red); font-weight: 600; }
       #talk:disabled { filter: grayscale(1) brightness(.6); }
       .sheet { position: fixed; inset: 0; background: rgba(5,8,8,.72); display: none; align-items: flex-end; z-index: 5;
         -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
@@ -225,7 +230,7 @@ enum PhoneWebApp {
       } else {
         const cls = m.phase === "Listening" ? "rec" : m.busy ? "busy" : m.phase === "Offline" ? "" : "ok";
         setStatus(m.phase, cls);
-        $("hint").textContent = held ? "Listening — let go to send"
+        $("hint").textContent = held ? (cancelArmed ? "Release to cancel" : "Listening — let go to send · swipe up to cancel")
           : m.phase === "Speaking" ? "Tap to stop · hold to interrupt"
           : m.phase === "Thinking" || m.phase === "Using tools" ? m.phase + "…" : "Hold the button and speak";
       }
@@ -451,30 +456,62 @@ enum PhoneWebApp {
     }
     requestAnimationFrame(drawHalo);
 
+    // Swipe up to cancel: while holding, sliding the finger up past
+    // CANCEL_PX arms a cancel (the button greys out, "Release to cancel");
+    // letting go there drops the recording instead of sending it. Sliding
+    // back down disarms it.
+    const CANCEL_PX = 70;
+    let startY = 0, cancelArmed = false;
+    function setCancelArmed(on) {
+      if (on === cancelArmed) return;
+      cancelArmed = on;
+      $("talk").classList.toggle("cancel", on);
+      $("hint").classList.toggle("cancel", on);
+      $("hint").textContent = on ? "Release to cancel" : "Listening — let go to send · swipe up to cancel";
+      if (navigator.vibrate) navigator.vibrate(on ? 18 : 8);
+    }
+
     function press(e) {
       e.preventDefault();
       if (held || !ws || ws.readyState !== 1) return;
       held = true; sending = true;
+      startY = e.clientY; cancelArmed = false;
+      try { $("talk").setPointerCapture(e.pointerId); } catch (err) {}
       audioContext();  // unlocks reply playback; iOS only allows that inside a touch
       $("talk").classList.add("held");
       stopAudio();
       send({ type: "press" });
-      $("hint").textContent = "Listening — let go to send";
+      $("hint").textContent = "Listening — let go to send · swipe up to cancel";
       if (navigator.vibrate) navigator.vibrate(10);
       startMic().catch(err => { banner("Microphone unavailable: " + err.message); release(e); });
+    }
+    function move(e) {
+      if (!held) return;
+      setCancelArmed(startY - e.clientY > CANCEL_PX);
     }
     function release(e) {
       if (e) e.preventDefault();
       if (!held) return;
       held = false;
+      const cancel = cancelArmed;
+      setCancelArmed(false);
       $("talk").classList.remove("held");
       audioContext();  // letting go is a touch, so iOS allows resuming playback here
+      if (cancel) {
+        sending = false;
+        send({ type: "cancel" });
+        stopMic();
+        $("hint").textContent = "Cancelled";
+        setTimeout(() => { if (!held) showState(); }, 900);
+        return;
+      }
       // Let the last few milliseconds of audio through before closing the mic.
       setTimeout(() => { sending = false; send({ type: "release" }); stopMic(); audioContext(); }, 120);
     }
 
     const talk = $("talk");
     talk.addEventListener("pointerdown", press);
+    talk.addEventListener("pointermove", move);
     talk.addEventListener("pointerup", release);
     talk.addEventListener("pointercancel", release);
     talk.addEventListener("contextmenu", e => e.preventDefault());

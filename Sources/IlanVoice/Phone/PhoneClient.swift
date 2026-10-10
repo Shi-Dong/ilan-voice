@@ -85,6 +85,7 @@ final class PhoneClient {
         switch type {
         case "press": session.pressToTalk()
         case "release": session.releaseToTalk()
+        case "cancel": session.cancelRecording()
         case "stop": session.interrupt()
         case "replay": replayLast()
         case "new_phone": _ = PhoneServer.number(for: device)  // "This is a new iPhone"

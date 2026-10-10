@@ -305,6 +305,23 @@ final class VoiceSession: ObservableObject {
         }
     }
 
+    /// Drops the recording in progress without sending it (the iPhone page's
+    /// swipe up to cancel). Nothing reaches the model or the conversation.
+    func cancelRecording() {
+        talkKeyHeld = false
+        guard phase == .recording else { return }
+        mic.stop()
+        finishingRecording = false
+        recording = Data()
+        bufferedAudio.removeAll()
+        pendingUserAudio = nil
+        commitWhenReady = false
+        inputLevel = 0
+        if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
+        pressEnded.send(.discarded)
+        phase = sessionReady ? .ready : (client == nil ? .offline : .connecting)
+    }
+
     func releaseToTalk() {
         talkKeyHeld = false
         guard phase == .recording, !finishingRecording else { return }
