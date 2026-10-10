@@ -277,6 +277,51 @@ final class VoiceSession: ObservableObject {
         return ["type": "session.update", "session": session]
     }
 
+    // MARK: Typed messages
+
+    /// A typed message waiting for the session to become ready.
+    private var pendingTextItem: [String: Any]?
+
+    /// Sends a typed message; Ilan answers out loud like a spoken one.
+    /// Returns false (and sends nothing) while the user is recording.
+    @discardableResult
+    func sendText(_ raw: String) -> Bool {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, phase != .recording, let convID = target() else { return false }
+        errorMessage = nil
+        interrupt()
+        ensureSession()
+        guard conversationID == convID else { return false }
+        let itemID = Self.newItemID()
+        store.update(convID) {
+            $0.messages.append(Message(id: itemID, role: .user, text: text, typed: true))
+        }
+        noteOwnMessages()
+        let item: [String: Any] = [
+            "type": "conversation.item.create",
+            "item": ["id": itemID, "type": "message", "role": "user",
+                     "content": [["type": "input_text", "text": text]]],
+        ]
+        phase = .thinking
+        if sessionReady {
+            sendTextItem(item)
+        } else {
+            pendingTextItem = item
+        }
+        return true
+    }
+
+    private func sendTextItem(_ item: [String: Any]) {
+        client?.send(item)
+        client?.send(["type": "response.create"])
+        armWatchdog()
+    }
+
+    /// Realtime item ids may be chosen by the client (at most 32 characters).
+    static func newItemID() -> String {
+        "msg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(24)
+    }
+
     // MARK: Push to talk
 
     func pressToTalk() {
@@ -527,7 +572,10 @@ final class VoiceSession: ObservableObject {
             connectionError = nil
             bufferedAudio.forEach(sendAudio)
             bufferedAudio.removeAll()
-            if commitWhenReady {
+            if let item = pendingTextItem {
+                pendingTextItem = nil
+                sendTextItem(item)
+            } else if commitWhenReady {
                 commitWhenReady = false
                 commit()
             } else if phase == .connecting {

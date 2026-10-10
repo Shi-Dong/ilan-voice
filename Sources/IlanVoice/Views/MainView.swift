@@ -218,46 +218,46 @@ struct ChatView: View {
 
     /// A slim bar under the conversation: notices on the left, and in the
     /// bottom-right corner the hint, the "play new" button and a small talk button.
+    /// Notices, then the message box with the "play new" button and a small
+    /// talk button beside it.
     private func footer(_ conv: Conversation?) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                if let err = session.errorMessage, !(err == VoiceSession.missingKeyMessage && !settings.apiKey.isEmpty) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.orange)
-                        Text(err).font(.system(size: 12)).lineLimit(2)
-                        Button { session.errorMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(Theme.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+        VStack(alignment: .leading, spacing: 6) {
+            if let err = session.errorMessage, !(err == VoiceSession.missingKeyMessage && !settings.apiKey.isEmpty) {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.orange)
+                    Text(err).font(.system(size: 12)).lineLimit(2)
+                    Button { session.errorMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
                 }
-                if !ptt.trusted {
-                    Button { ptt.requestAccessibility() } label: {
-                        Label("Allow Accessibility so \(settings.talkTrigger.shortLabel) works in every app", systemImage: "hand.raised.fill")
-                            .font(.system(size: 11.5))
-                    }
-                    .buttonStyle(.plain).foregroundStyle(Theme.textDim)
-                }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(Theme.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
             }
-            Spacer(minLength: 12)
-            Text(hint)
-                .font(.system(size: 11)).foregroundStyle(Theme.textDim)
-                .lineLimit(1)
-            if let unheard = conv?.unheardCount, unheard > 0 {
-                Button { session.playNextUnheard() } label: {
-                    Label("Play \(unheard) new", systemImage: "play.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .padding(.horizontal, 11).padding(.vertical, 6)
-                        .background(Theme.orange, in: Capsule())
-                        .foregroundStyle(Theme.ink)
+            if !ptt.trusted {
+                Button { ptt.requestAccessibility() } label: {
+                    Label("Allow Accessibility so \(settings.talkTrigger.shortLabel) works in every app", systemImage: "hand.raised.fill")
+                        .font(.system(size: 11.5))
                 }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.space, modifiers: [])
-                .transition(.scale.combined(with: .opacity))
+                .buttonStyle(.plain).foregroundStyle(Theme.textDim)
             }
-            // The orb is drawn at 150 pt; scaled down to a ~56 pt corner button.
-            TalkOrb(session: session)
-                .scaleEffect(0.4)
-                .frame(width: 60, height: 60)
+            HStack(alignment: .center, spacing: 10) {
+                ComposerBar(session: session, talkKey: settings.talkTrigger.shortLabel)
+                if let unheard = conv?.unheardCount, unheard > 0 {
+                    Button { session.playNextUnheard() } label: {
+                        Label("Play \(unheard) new", systemImage: "play.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .padding(.horizontal, 11).padding(.vertical, 6)
+                            .background(Theme.orange, in: Capsule())
+                            .foregroundStyle(Theme.ink)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Play the next new reply (⇧⌘P)")
+                    .transition(.scale.combined(with: .opacity))
+                }
+                // The orb is drawn at 150 pt; scaled down to a ~56 pt corner button.
+                TalkOrb(session: session)
+                    .scaleEffect(0.4)
+                    .frame(width: 60, height: 60)
+                    .help(hint)
+            }
         }
         .animation(.spring(response: 0.3), value: conv?.unheardCount)
         .padding(.leading, 20).padding(.trailing, 14).padding(.vertical, 8)
