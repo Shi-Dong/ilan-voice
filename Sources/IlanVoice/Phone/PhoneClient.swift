@@ -121,7 +121,12 @@ final class PhoneClient {
 
     private func sendState() {
         guard let peer else { return }
-        var state: [String: Any] = ["type": "state", "phase": session.phase.label,
+        // The phone's voice session only dials OpenAI on the first press, so
+        // until then it is "offline" while everything is in fact connected and
+        // a press works right away: show that as Ready. (If the phone loses
+        // the Mac, the page itself shows Reconnecting.)
+        let label = session.phase == .offline ? VoiceSession.Phase.ready.label : session.phase.label
+        var state: [String: Any] = ["type": "state", "phase": label,
                                     "busy": session.phase != .ready && session.phase != .offline]
         if let error = session.errorMessage { state["error"] = error }
         peer.send(json: state)
