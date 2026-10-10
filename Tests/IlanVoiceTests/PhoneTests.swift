@@ -76,6 +76,13 @@ func registerPhoneTests() {
             expect(html.contains(#"name="apple-mobile-web-app-status-bar-style" content="black">"#), "status bar should be opaque")
             expect(!html.contains("black-translucent"), "a translucent status bar puts the page under iOS's blur")
         }
+        test("the conversation title has room above its letters (no clipped top)") {
+            let html = PhoneWebApp.html
+            guard let rule = html.range(of: "header .title {") else { return expect(false, "title rule missing") }
+            let css = String(html[rule.lowerBound...].prefix(240))
+            expect(css.contains("line-height: 24px"), "title needs a whole-pixel line height")
+            expect(css.contains("padding: 2px 0"), "title needs padding so overflow: hidden never cuts the letters")
+        }
         test("serves the page, manifest and icons; unknown paths are 404") {
             let server = MiniHTTPServer()
             server.route = { PhoneServer.file(for: $0) }
