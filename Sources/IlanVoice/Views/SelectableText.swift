@@ -133,8 +133,8 @@ struct AddToMessagePill: View {
             Label("Add to Message", systemImage: "text.quote")
                 .font(.system(size: 11.5, weight: .semibold))
                 .padding(.horizontal, 9).padding(.vertical, 5)
-                .background(Theme.inkRaised, in: Capsule())
-                .overlay(Capsule().stroke(Theme.mint.opacity(0.5)))
+                .background(Theme.inkRaised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Theme.mint.opacity(0.5)))
                 .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
         }
         .buttonStyle(.plain)
