@@ -199,7 +199,8 @@ func registerPhoneTests() {
             guard let open = html.range(of: "<script>"), let close = html.range(of: "</script>", range: open.upperBound..<html.endIndex) else {
                 expect(false, "no <script> in the page"); return
             }
-            guard let node = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"]
+            let path = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init)
+            guard let node = (path + ["/opt/homebrew/bin", "/usr/local/bin"]).map({ $0 + "/node" })
                 .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
                 print("  (skipped: Node.js not installed)"); return
             }
