@@ -44,18 +44,15 @@ func registerTextInputTests() {
 @MainActor
 func registerSelectionButtonTests() {
     suite("Add to Message button") { test in
-        let bounds = NSRect(x: 0, y: 0, width: 300, height: 100)
-        test("anchored at the release point, one line tall") {
-            let r = MessageNSTextView.anchorRect(at: NSPoint(x: 120, y: 50), in: bounds, lineHeight: 18)
+        test("centred on the pointer, one line tall") {
+            let (r, _) = MessageNSTextView.anchor(at: NSPoint(x: 120, y: 50), lineHeight: 18, flipped: true)
             expectEqual(r.midX, 120)
-            expectEqual(r.minY, 41)
+            expectEqual(r.midY, 50)
             expectEqual(r.height, 18)
         }
-        test("kept inside the message when the mouse ends outside it") {
-            let r = MessageNSTextView.anchorRect(at: NSPoint(x: 900, y: -40), in: bounds, lineHeight: 18)
-            expect(r.midX <= bounds.maxX && r.minY >= bounds.minY, "\(r)")
-            let below = MessageNSTextView.anchorRect(at: NSPoint(x: -20, y: 400), in: bounds, lineHeight: 18)
-            expect(below.midX >= bounds.minX && below.maxY <= bounds.maxY, "\(below)")
+        test("the pill goes above the line in flipped and unflipped views") {
+            expectEqual(MessageNSTextView.anchor(at: .zero, lineHeight: 18, flipped: true).1, NSRectEdge.minY)
+            expectEqual(MessageNSTextView.anchor(at: .zero, lineHeight: 18, flipped: false).1, NSRectEdge.maxY)
         }
     }
 }
