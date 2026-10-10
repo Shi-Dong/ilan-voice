@@ -45,7 +45,7 @@ struct Sidebar: View {
                                 Image(systemName: "iphone")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(Theme.mint)
-                                    .help("Started on the iPhone. You can continue it here.")
+                                    .help("Started on \(conv.deviceName ?? "an iPhone"). You can continue it here.")
                             }
                             Text(conv.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
                             Spacer()

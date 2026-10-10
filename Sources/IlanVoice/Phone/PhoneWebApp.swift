@@ -108,6 +108,13 @@ enum PhoneWebApp {
     const params = new URLSearchParams(location.search);
     const token = params.get("t") || localStorage.getItem("ilanToken") || "";
     if (params.get("t")) localStorage.setItem("ilanToken", params.get("t"));
+    // Tells this phone apart from others, so each gets its own conversation.
+    let device = localStorage.getItem("ilanDevice");
+    if (!device) {
+      device = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, "0")).join("");
+      localStorage.setItem("ilanDevice", device);
+    }
+    let replaced = false;
 
     let ws = null, ctx = null, playHead = 0, sources = [], hasReply = false;
     let micStream = null, micNode = null, micSource = null, held = false, sending = false, phase = "Offline";
@@ -117,14 +124,20 @@ enum PhoneWebApp {
       if (!token) { banner("Open the link shown in Ilan Voice on your Mac (Settings → General → iPhone)."); return; }
       ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
       ws.binaryType = "arraybuffer";
-      ws.onopen = () => ws.send(JSON.stringify({ type: "hello", token }));
+      ws.onopen = () => ws.send(JSON.stringify({ type: "hello", token, device }));
       ws.onmessage = e => typeof e.data === "string" ? onJSON(JSON.parse(e.data)) : playPCM(e.data);
-      ws.onclose = () => { setStatus("Reconnecting…", ""); ws = null; setTimeout(connect, 1500); };
+      ws.onclose = () => {
+        ws = null;
+        if (replaced) { setStatus("Open in another window", ""); return; }
+        setStatus("Reconnecting…", ""); setTimeout(connect, 1500);
+      };
     }
     function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 
     function onJSON(m) {
-      if (m.type === "hello_ok") { banner(""); }
+      if (m.type === "hello_ok") { replaced = false; banner(""); }
+      else if (m.type === "replaced") { replaced = true;
+        banner("Ilan was opened in another window on this phone. Tap here to use it in this one."); }
       else if (m.type === "auth_failed") { localStorage.removeItem("ilanToken");
         banner("This link is no longer paired. Open the current link from Ilan Voice on your Mac."); }
       else if (m.type === "state") {
@@ -142,6 +155,7 @@ enum PhoneWebApp {
 
     function setStatus(text, cls) { $("status").textContent = text; $("dot").className = "dot " + cls; }
     function banner(text) { const b = $("banner"); b.textContent = text; b.style.display = text ? "block" : "none"; }
+    $("banner").addEventListener("click", () => { if (replaced && !ws) { replaced = false; connect(); } });
 
     function render(m) {
       if (m.title) $("title").textContent = m.title;
@@ -253,7 +267,7 @@ enum PhoneWebApp {
     $("replay").addEventListener("click", () => { audioContext(); send({ type: "replay" }); });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) { if (held) release(); }
-      else if (!ws) connect();
+      else if (!ws && !replaced) connect();
     });
     connect();
     </script>

@@ -907,7 +907,7 @@ private struct PhoneSection: View {
         } header: {
             Text("iPhone")
         } footer: {
-            Text("Talk to Ilan from your iPhone's home screen. The iPhone has one conversation of its own (marked with an iPhone in the sidebar) and uses the same instructions, tools and settings as this Mac. Only your devices on Tailscale can reach the server, and only with the pairing code in the link.")
+            Text("Talk to Ilan from your iPhone's home screen. Each iPhone has a conversation of its own (marked with an iPhone in the sidebar) and uses the same instructions, tools and settings as this Mac. Only your devices on Tailscale can reach the server, and only with the pairing code in the link.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .confirmationDialog("Make a new pairing code?", isPresented: $confirmReset) {
@@ -919,7 +919,7 @@ private struct PhoneSection: View {
 
     private var statusDot: some View {
         let color: Color = switch phone.status {
-        case .running: phone.phoneConnected ? Theme.mint : Theme.mintDeep
+        case .running: phone.connectedCount > 0 ? Theme.mint : Theme.mintDeep
         case .failed: Theme.orange
         default: Color.secondary.opacity(0.5)
         }
@@ -930,7 +930,8 @@ private struct PhoneSection: View {
         switch phone.status {
         case .stopped: "Web server is off"
         case .starting: "Starting…"
-        case .running: phone.phoneConnected ? "iPhone connected" : "Web server is running"
+        case .running: phone.connectedCount == 0 ? "Web server is running"
+            : phone.connectedCount == 1 ? "1 iPhone connected" : "\(phone.connectedCount) iPhones connected"
         case .failed: "Couldn't start the web server"
         }
     }
@@ -939,7 +940,7 @@ private struct PhoneSection: View {
         switch phone.status {
         case .stopped: "Needs Tailscale on this Mac and on the iPhone."
         case .starting: "Publishing it on your tailnet."
-        case .running: phone.phoneConnected ? "Hold the button on the iPhone to talk." : "Waiting for the iPhone."
+        case .running: phone.connectedCount > 0 ? "Hold the button on the iPhone to talk." : "Waiting for an iPhone."
         case .failed(let problem): problem
         }
     }

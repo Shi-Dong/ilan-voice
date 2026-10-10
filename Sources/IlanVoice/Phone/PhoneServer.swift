@@ -3,8 +3,8 @@ import Combine
 import CoreImage
 import Foundation
 
-/// "Start Web Server": serves the iPhone web app and connects it to a voice
-/// session of its own, which talks in the iPhone's conversation with the same
+/// "Start Web Server": serves the iPhone web app. Each iPhone gets a voice
+/// session and a conversation of its own (see PhoneClient), with the same
 /// agent.md, tools and settings as the Mac.
 ///
 /// The server listens on 127.0.0.1 only. Tailscale Serve publishes it on this
@@ -23,44 +23,25 @@ final class PhoneServer: ObservableObject {
     static let localPort: UInt16 = 47_823
     static let httpsPort = 8767
     private static let tokenName = "ILAN_VOICE_PHONE_TOKEN"
+    private static let devicesKey = "phoneDeviceNumbers"
 
     @Published private(set) var status: Status = .stopped
-    @Published private(set) var phoneConnected = false
+    /// How many iPhones are connected right now.
+    @Published private(set) var connectedCount = 0
 
-    let session: VoiceSession
     private let store: ConversationStore
-    private let input = RemoteMicrophone()
-    private let output = RemoteSpeaker()
+    private let mcp: MCPManager
     private let http = MiniHTTPServer()
-    private var peer: WebSocketPeer?
+    /// One client per iPhone, by the device ID the page keeps in its storage.
+    private var clients: [String: PhoneClient] = [:]
     /// Connections that haven't sent the pairing code yet; held so they stay alive.
     private var pending: [ObjectIdentifier: WebSocketPeer] = [:]
-    private var conversationID: UUID?
-    private var cancellables: Set<AnyCancellable> = []
-    private var lastSentMessages: [[String: Any]] = []
 
     init(store: ConversationStore, mcp: MCPManager) {
         self.store = store
-        var target: (() -> UUID?)?
-        session = VoiceSession(store: store, mcp: mcp, input: input, output: output, isRemote: true,
-                               target: { target?() })
-        target = { [weak self] in self?.currentConversation() }
-
-        output.sendAudio = { [weak self] pcm in self?.peer?.send(binary: pcm) }
-        output.sendStop = { [weak self] in self?.peer?.send(json: ["type": "audio_stop"]) }
+        self.mcp = mcp
         http.route = { Self.file(for: $0) }
         http.onSocket = { [weak self] in self?.adopt($0) }
-
-        session.$phase.removeDuplicates()
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.sendState() } }
-            .store(in: &cancellables)
-        session.$errorMessage.removeDuplicates()
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.sendState() } }
-            .store(in: &cancellables)
-        store.$conversations
-            .debounce(for: .milliseconds(120), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in self?.sendMessages() }
-            .store(in: &cancellables)
     }
 
     // MARK: Pairing
@@ -76,7 +57,7 @@ final class PhoneServer: ObservableObject {
     /// Makes old links (and phones paired with them) stop working.
     func resetPairing() {
         SecretStore.set(Self.tokenName, Self.newToken())
-        peer?.close()
+        clients.values.forEach { $0.disconnect() }
         if case .running = status { Task { await refreshURL() } }
     }
 
@@ -88,6 +69,17 @@ final class PhoneServer: ObservableObject {
     var pairingURL: String? {
         guard case .running(let url) = status else { return nil }
         return url
+    }
+
+    /// "iPhone 1", "iPhone 2", … in the order the phones first connected.
+    static func number(for device: String) -> Int {
+        let defaults = UserDefaults.standard
+        var numbers = defaults.dictionary(forKey: devicesKey) as? [String: Int] ?? [:]
+        if let n = numbers[device] { return n }
+        let n = (numbers.values.max() ?? 0) + 1
+        numbers[device] = n
+        defaults.set(numbers, forKey: devicesKey)
+        return n
     }
 
     // MARK: Start / stop
@@ -117,10 +109,9 @@ final class PhoneServer: ObservableObject {
 
     func stop() {
         AppSettings.shared.phoneServerEnabled = false
-        peer?.close()
-        peer = nil
-        phoneConnected = false
-        session.disconnect()
+        clients.values.forEach { $0.shutDown() }
+        clients = [:]
+        connectedCount = 0
         http.stop()
         status = .stopped
         Task { await Tailscale.stopServing(httpsPort: Self.httpsPort) }
@@ -134,113 +125,34 @@ final class PhoneServer: ObservableObject {
         status = .running(url: "https://\(host):\(Self.httpsPort)/?t=\(token)")
     }
 
-    // MARK: The phone's connection
+    // MARK: Connections
 
-    private func adopt(_ newPeer: WebSocketPeer) {
-        var authorised = false
-        let key = ObjectIdentifier(newPeer)
-        pending[key] = newPeer
-        newPeer.onText = { [weak self, weak newPeer] text in
-            guard let self, let newPeer,
-                  let obj = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
-                  let type = obj["type"] as? String else { return }
-            if !authorised {
-                guard type == "hello", (obj["token"] as? String) == self.token else {
-                    newPeer.send(json: ["type": "auth_failed"])
-                    newPeer.close()
-                    return
-                }
-                authorised = true
-                self.pending[key] = nil
-                self.connected(newPeer)
+    private func adopt(_ peer: WebSocketPeer) {
+        let key = ObjectIdentifier(peer)
+        pending[key] = peer
+        peer.onClose = { [weak self] in self?.pending[key] = nil }
+        peer.onText = { [weak self, weak peer] text in
+            guard let self, let peer,
+                  let obj = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else { return }
+            self.pending[key] = nil
+            guard obj["type"] as? String == "hello", (obj["token"] as? String) == self.token,
+                  let device = obj["device"] as? String, !device.isEmpty, device.count <= 64 else {
+                peer.send(json: ["type": "auth_failed"])
+                peer.close()
                 return
             }
-            self.command(type)
-        }
-        newPeer.onBinary = { [weak self, weak newPeer] data in
-            guard authorised, let self, newPeer === self.peer else { return }
-            self.input.deliver(data)
-        }
-        newPeer.onClose = { [weak self, weak newPeer] in
-            guard let self else { return }
-            self.pending[key] = nil
-            guard newPeer === self.peer else { return }
-            self.peer = nil
-            self.phoneConnected = false
-            if self.session.phase == .recording { self.session.releaseToTalk() }
+            let client = self.clients[device] ?? {
+                let c = PhoneClient(device: device, store: self.store, mcp: self.mcp)
+                c.onConnectionChange = { [weak self] in self?.recount() }
+                self.clients[device] = c
+                return c
+            }()
+            client.attach(peer)
         }
     }
 
-    /// Only one phone at a time: a new one replaces the old.
-    private func connected(_ newPeer: WebSocketPeer) {
-        if let old = peer, old !== newPeer { old.close() }
-        peer = newPeer
-        phoneConnected = true
-        lastSentMessages = []
-        newPeer.send(json: ["type": "hello_ok"])
-        sendMessages()
-        sendState()
-        if session.phase == .offline { session.connect() }
-    }
-
-    private func command(_ type: String) {
-        switch type {
-        case "press": session.pressToTalk()
-        case "release": session.releaseToTalk()
-        case "stop": session.interrupt()
-        case "replay": replayLast()
-        default: break
-        }
-    }
-
-    /// The iPhone's conversation, created on first use. Deleting it on the Mac
-    /// just means the next press starts a fresh one.
-    private func currentConversation() -> UUID {
-        if let id = conversationID, store.conversations.contains(where: { $0.id == id }) { return id }
-        let id = store.iPhoneConversation()
-        conversationID = id
-        return id
-    }
-
-    /// Plays Ilan's latest reply again on the phone.
-    private func replayLast() {
-        let convID = currentConversation()
-        guard let conv = store.conversations.first(where: { $0.id == convID }),
-              let last = conv.messages.last(where: { $0.role == .assistant && $0.audioFile != nil }),
-              let wav = try? Data(contentsOf: store.audioURL(convID, last.audioFile!)), wav.count > 44 else { return }
-        session.interrupt()
-        peer?.send(json: ["type": "audio_stop"])
-        let pcm = wav.dropFirst(44)
-        let chunk = 48_000  // half a second
-        var offset = pcm.startIndex
-        while offset < pcm.endIndex {
-            let end = min(offset + chunk, pcm.endIndex)
-            peer?.send(binary: Data(pcm[offset..<end]))
-            offset = end
-        }
-    }
-
-    private func sendState() {
-        guard let peer else { return }
-        var state: [String: Any] = ["type": "state", "phase": session.phase.label, "busy": session.phase != .ready && session.phase != .offline]
-        if let error = session.errorMessage { state["error"] = error }
-        peer.send(json: state)
-    }
-
-    private func sendMessages() {
-        guard let peer, let convID = conversationID ?? store.conversations.first(where: \.isFromIPhone)?.id,
-              let conv = store.conversations.first(where: { $0.id == convID }) else { return }
-        let items: [[String: Any]] = conv.messages.suffix(80).compactMap { m in
-            switch m.role {
-            case .user, .assistant:
-                return ["id": m.id, "role": m.role == .user ? "user" : "assistant", "text": m.text, "pending": m.pending]
-            case .tool:
-                return ["id": m.id, "role": "tool", "text": m.toolName ?? "tool", "pending": m.pending]
-            }
-        }
-        guard !NSArray(array: items).isEqual(to: lastSentMessages) else { return }
-        lastSentMessages = items
-        peer.send(json: ["type": "messages", "title": conv.title, "items": items])
+    private func recount() {
+        connectedCount = clients.values.filter(\.isConnected).count
     }
 
     // MARK: Files
