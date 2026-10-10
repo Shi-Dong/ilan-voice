@@ -19,7 +19,7 @@ final class ComposerModel: ObservableObject {
         draft = UserDefaults.standard.string(forKey: Self.draftKey) ?? ""
     }
 
-    /// "Add to Message" on a text selection in the conversation.
+    /// "Ask about this" on a text selection in the conversation.
     func addContext(_ selection: String) {
         draft = Self.appendingQuote(selection, to: draft)
         focusRequests.send()
