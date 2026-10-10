@@ -5,6 +5,7 @@ struct SettingsView: View {
     @ObservedObject var mcp: MCPManager
     @ObservedObject var updater: Updater
     @ObservedObject var ptt: PushToTalk
+    let phone: PhoneServer
 
     enum Tab: Hashable { case general, agent, mcp, shell, dictionary }
 
@@ -18,7 +19,7 @@ struct SettingsView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            GeneralSettings(updater: updater, ptt: ptt).tabItem { Label("General", systemImage: "gearshape") }.tag(Tab.general)
+            GeneralSettings(updater: updater, ptt: ptt, phone: phone).tabItem { Label("General", systemImage: "gearshape") }.tag(Tab.general)
             AgentSettings().tabItem { Label("Agent", systemImage: "person.text.rectangle") }.tag(Tab.agent)
             MCPSettings(mcp: mcp).tabItem { Label("MCP Tools", systemImage: "wrench.and.screwdriver") }.tag(Tab.mcp)
             ShellSettings().tabItem { Label("Shell", systemImage: "terminal") }.tag(Tab.shell)
@@ -39,6 +40,7 @@ struct SettingsView: View {
 private struct GeneralSettings: View {
     @ObservedObject var updater: Updater
     @ObservedObject var ptt: PushToTalk
+    let phone: PhoneServer
     @ObservedObject var settings = AppSettings.shared
 
     var body: some View {
@@ -84,6 +86,7 @@ private struct GeneralSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             WebSearchSection()
+            PhoneSection(phone: phone)
             Section("App") {
                 Toggle("Hide from Dock when the window is closed", isOn: $settings.hideDockWhenClosed)
                     .onChange(of: settings.hideDockWhenClosed) { _, hide in
@@ -839,6 +842,106 @@ private struct SetAPIKeySheet: View {
             case .invalid(let message):
                 error = message
             }
+        }
+    }
+}
+
+/// Settings → General → iPhone: start the web server and pair the phone.
+private struct PhoneSection: View {
+    @ObservedObject var phone: PhoneServer
+    @Local private var copied = false
+    @Local private var confirmReset = false
+
+    var body: some View {
+        Section {
+            HStack(spacing: 10) {
+                statusDot
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 13, weight: .medium))
+                    Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                switch phone.status {
+                case .stopped, .failed:
+                    Button("Start Web Server") { phone.start() }.buttonStyle(.borderedProminent)
+                case .starting:
+                    ProgressView().controlSize(.small)
+                case .running:
+                    Button("Stop") { phone.stop() }
+                }
+            }
+            if let url = phone.pairingURL {
+                HStack(alignment: .top, spacing: 16) {
+                    if let qr = PhoneServer.qrCode(for: url) {
+                        Image(nsImage: qr)
+                            .interpolation(.none)
+                            .resizable()
+                            .frame(width: 132, height: 132)
+                            .padding(8)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Scan with the iPhone camera, open the page, then Share → Add to Home Screen.")
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(url)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2).truncationMode(.middle)
+                            .textSelection(.enabled)
+                        HStack(spacing: 12) {
+                            Button(copied ? "Copied" : "Copy Link") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(url, forType: .string)
+                                copied = true
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                            }
+                            Button("New Pairing Code…") { confirmReset = true }
+                                .buttonStyle(.link)
+                        }
+                        .font(.caption)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        } header: {
+            Text("iPhone")
+        } footer: {
+            Text("Talk to Ilan from your iPhone's home screen. Each iPhone has a conversation of its own (marked with an iPhone in the sidebar) and uses the same instructions, tools and settings as this Mac. Only your devices on Tailscale can reach the server, and only with the pairing code in the link.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .confirmationDialog("Make a new pairing code?", isPresented: $confirmReset) {
+            Button("New Pairing Code", role: .destructive) { phone.resetPairing() }
+        } message: {
+            Text("The current link stops working. Open the new link on your iPhone and add it to the home screen again.")
+        }
+    }
+
+    private var statusDot: some View {
+        let color: Color = switch phone.status {
+        case .running: phone.connectedCount > 0 ? Theme.mint : Theme.mintDeep
+        case .failed: Theme.orange
+        default: Color.secondary.opacity(0.5)
+        }
+        return Circle().fill(color).frame(width: 8, height: 8)
+    }
+
+    private var title: String {
+        switch phone.status {
+        case .stopped: "Web server is off"
+        case .starting: "Starting…"
+        case .running: phone.connectedCount == 0 ? "Web server is running"
+            : phone.connectedCount == 1 ? "1 iPhone connected" : "\(phone.connectedCount) iPhones connected"
+        case .failed: "Couldn't start the web server"
+        }
+    }
+
+    private var detail: String {
+        switch phone.status {
+        case .stopped: "Needs Tailscale on this Mac and on the iPhone."
+        case .starting: "Publishing it on your tailnet."
+        case .running: phone.connectedCount > 0 ? "Hold the button on the iPhone to talk." : "Waiting for an iPhone."
+        case .failed(let problem): problem
         }
     }
 }

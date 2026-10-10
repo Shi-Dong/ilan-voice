@@ -7,6 +7,7 @@ final class AppModel: ObservableObject {
     let ptt = PushToTalk()
     let updater = Updater()
     lazy var session = VoiceSession(store: store, mcp: mcp)
+    lazy var phone = PhoneServer(store: store, mcp: mcp)
     private var hud: FloatingHUD?
     /// Opts out of App Nap. Ilan Voice spends most of its life in the
     /// background waiting for the talk key; App Nap throttled its timers and
@@ -34,6 +35,7 @@ final class AppModel: ObservableObject {
         Task {
             await mcp.reload()
             session.connect()
+            if AppSettings.shared.phoneServerEnabled { phone.start() }
         }
     }
 }
@@ -137,7 +139,7 @@ struct IlanVoiceApp: App {
         }
 
         Settings {
-            SettingsView(mcp: model.mcp, updater: model.updater, ptt: model.ptt)
+            SettingsView(mcp: model.mcp, updater: model.updater, ptt: model.ptt, phone: model.phone)
         }
 
         MenuBarExtra {

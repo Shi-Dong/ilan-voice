@@ -41,6 +41,12 @@ struct Sidebar: View {
                             .onSubmit { store.rename(conv.id, to: draft); renaming = nil }
                     } else {
                         HStack {
+                            if conv.isFromIPhone {
+                                Image(systemName: "iphone")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Theme.mint)
+                                    .help("Started on \(conv.deviceName ?? "an iPhone"). You can continue it here.")
+                            }
                             Text(conv.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
                             Spacer()
                             if shells.isOpen(conv.id) {

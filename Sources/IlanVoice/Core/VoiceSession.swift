@@ -32,8 +32,18 @@ final class VoiceSession: ObservableObject {
     let mcp: MCPManager
     let clips = ClipPlayer()
     private let settings = AppSettings.shared
-    private let mic = MicrophoneCapture()
-    private let speaker = StreamPlayer()
+    private let mic: VoiceInput
+    private let speaker: VoiceOutput
+    /// The conversation this session talks in: the one selected on the Mac,
+    /// or the iPhone's own conversation (see PhoneServer).
+    private let target: () -> UUID?
+    /// True for the session that serves the iPhone web app: always real-time,
+    /// and no Mac sounds or Mac replay bookkeeping.
+    let isRemote: Bool
+    /// Messages this session has seen. One it hasn't seen means the other
+    /// session (Mac or iPhone) spoke in this conversation, so the next turn
+    /// starts a fresh session that includes it.
+    private var knownMessageIDs: Set<String> = []
     private var client: RealtimeClient?
 
     private var conversationID: UUID?
@@ -69,9 +79,15 @@ final class VoiceSession: ObservableObject {
     private var keyWatcher: AnyCancellable?
     private var speedWatcher: AnyCancellable?
 
-    init(store: ConversationStore, mcp: MCPManager) {
+    init(store: ConversationStore, mcp: MCPManager,
+         input: VoiceInput = MacMicrophone(), output: VoiceOutput = StreamPlayer(),
+         isRemote: Bool = false, target: (() -> UUID?)? = nil) {
         self.store = store
         self.mcp = mcp
+        self.mic = input
+        self.speaker = output
+        self.isRemote = isRemote
+        self.target = target ?? { [weak store] in store?.selectedID }
         // Once a key is entered, drop the "add your key" warning and dial in.
         // Debounced so typing or pasting the key doesn't connect per keystroke.
         // A new speed applies from the next reply, without reconnecting.
@@ -108,13 +124,14 @@ final class VoiceSession: ObservableObject {
     // MARK: Connection
 
     func connect() {
-        guard let conv = store.selected else { return }
+        guard let id = target(), let conv = store.conversations.first(where: { $0.id == id }) else { return }
         guard !settings.apiKey.isEmpty else {
             errorMessage = Self.missingKeyMessage
             return
         }
         disconnect()
         conversationID = conv.id
+        knownMessageIDs = Set(conv.messages.map(\.id))
         phase = .connecting
         let client = RealtimeClient()
         client.onEvent = { [weak self] in self?.handle($0) }
@@ -143,8 +160,20 @@ final class VoiceSession: ObservableObject {
 
     /// Re-dial if the conversation or a session-level setting changed.
     func ensureSession() {
-        let stale = connectedFingerprint != settings.sessionFingerprint || conversationID != store.selectedID
+        let stale = connectedFingerprint != settings.sessionFingerprint || conversationID != target()
+            || someoneElseSpoke
         if client == nil || stale { connect() }
+    }
+
+    private var someoneElseSpoke: Bool {
+        guard let id = conversationID, let conv = store.conversations.first(where: { $0.id == id }) else { return false }
+        return conv.messages.contains { !knownMessageIDs.contains($0.id) }
+    }
+
+    /// Records the messages this session wrote, after each of its own changes.
+    private func noteOwnMessages() {
+        guard let id = conversationID, let conv = store.conversations.first(where: { $0.id == id }) else { return }
+        knownMessageIDs.formUnion(conv.messages.map(\.id))
     }
 
     /// Grounds speech recognition with the user's dictionary: a prompt for
@@ -213,7 +242,7 @@ final class VoiceSession: ObservableObject {
         interruptedThisPress = interrupt()
         talkKeyHeld = true
         Task {
-            guard await MicrophoneCapture.requestPermission() else {
+            guard await mic.requestPermission() else {
                 errorMessage = "Ilan Voice needs microphone access (System Settings → Privacy & Security → Microphone)."
                 return
             }
@@ -269,7 +298,7 @@ final class VoiceSession: ObservableObject {
         recordStart = Date()
         commitWhenReady = false
         do {
-            try mic.start(deviceUID: AudioDevices.resolveUID(settings.microphone))
+            try mic.start()
             phase = .recording
         } catch {
             errorMessage = error.localizedDescription
@@ -304,7 +333,7 @@ final class VoiceSession: ObservableObject {
         }
         pressEnded.send(.sent)
         // "Breeze" in System Settings → Sound; the file is still Blow.aiff.
-        NSSound(named: "Blow")?.play()
+        if !isRemote { NSSound(named: "Blow")?.play() }
         pendingUserAudio = recording
         phase = .thinking
         if sessionReady { commit() } else { commitWhenReady = true }
@@ -402,6 +431,7 @@ final class VoiceSession: ObservableObject {
     private func handle(_ event: [String: Any]) {
         guard let type = event["type"] as? String, let convID = conversationID else { return }
         if type != "session.created" && type != "session.updated" { cancelWatchdog() }
+        defer { noteOwnMessages() }
         switch type {
         case "session.created":
             client?.send(sessionConfig())
@@ -459,7 +489,7 @@ final class VoiceSession: ObservableObject {
         case "response.output_item.added":
             guard let item = event["item"] as? [String: Any], let itemID = item["id"] as? String,
                   item["type"] as? String == "message" else { return }
-            let cached = settings.outputMode == .cached
+            let cached = !isRemote && settings.outputMode == .cached
             store.update(convID) {
                 $0.messages.append(Message(id: itemID, role: .assistant, text: "", pending: true, listened: !cached))
             }
@@ -473,7 +503,7 @@ final class VoiceSession: ObservableObject {
                   let pcm = Data(base64Encoded: b64) else { return }
             replyAudio[itemID, default: Data()].append(pcm)
             let muted = mutedResponseID != nil && event["response_id"] as? String == mutedResponseID
-            if settings.outputMode == .realtime && !muted {
+            if (isRemote || settings.outputMode == .realtime) && !muted {
                 if speakingItemID != itemID {
                     speakingItemID = itemID
                     speakingItemStartFrame = speaker.enqueuedFrames
@@ -554,7 +584,9 @@ final class VoiceSession: ObservableObject {
             $0.audioFile = file
             $0.audioSeconds = PCM.seconds(pcm)
         }
-        if settings.outputMode == .cached {
+        if isRemote {
+            return
+        } else if settings.outputMode == .cached {
             NSSound(named: "Glass")?.play()
         } else {
             clips.markPlayed(id: itemID, url: store.audioURL(convID, file))
@@ -574,6 +606,7 @@ final class VoiceSession: ObservableObject {
                         $0.messages.append(Message(id: callID, role: .tool, text: "", pending: true,
                                                    toolName: name, toolArguments: args))
                     }
+                    noteOwnMessages()
                     group.addTask { @MainActor in
                         let output: String
                         switch name {
@@ -587,6 +620,7 @@ final class VoiceSession: ObservableObject {
                         default: output = await self.mcp.call(functionName: name, arguments: args)
                         }
                         self.store.updateMessage(convID, callID) { $0.text = output; $0.pending = false }
+                        self.noteOwnMessages()
                         guard self.conversationID == convID else { return }
                         self.client?.send(["type": "conversation.item.create",
                                            "item": ["type": "function_call_output", "call_id": callID, "output": output]])
