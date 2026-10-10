@@ -172,7 +172,7 @@ enum PhoneWebApp {
         phase = m.phase;
         const cls = m.phase === "Listening" ? "rec" : m.busy ? "busy" : m.phase === "Offline" ? "" : "ok";
         setStatus(m.phase, cls);
-        banner(m.error || "");
+        if (m.error || !soundBanner) banner(m.error || "");
         $("hint").textContent = held ? "Listening — let go to send"
           : m.phase === "Speaking" ? "Tap to stop · hold to interrupt"
           : m.phase === "Thinking" || m.phase === "Using tools" ? m.phase + "…" : "Hold the button and speak";
@@ -205,7 +205,10 @@ enum PhoneWebApp {
 
     function setStatus(text, cls) { $("status").textContent = text; $("dot").className = "dot " + cls; }
     function banner(text) { const b = $("banner"); b.textContent = text; b.style.display = text ? "block" : "none"; }
-    $("banner").addEventListener("click", () => { if (replaced && !ws) { replaced = false; connect(); } });
+    $("banner").addEventListener("click", () => {
+      if (soundBanner) { soundBanner = false; audioContext(); banner(""); return; }
+      if (replaced && !ws) { replaced = false; connect(); }
+    });
 
     function render(m) {
       if (m.title) $("title").textContent = m.title;
@@ -240,13 +243,28 @@ enum PhoneWebApp {
     setAudioSession("playback");
 
     // ---- Playback ----
+    // Switching the audio session for the microphone and back leaves the
+    // playback context "interrupted" on iOS (not just "suspended"), and it
+    // stays silent until it is resumed. So: resume whenever it isn't running,
+    // after every press, and on every reply; and if iOS still won't let it
+    // play, ask for one tap.
     function audioContext() {
-      if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
-      if (ctx.state === "suspended") ctx.resume();
+      if (!ctx || ctx.state === "closed") {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        ctx.onstatechange = () => { if (ctx.state !== "running" && !held) ctx.resume().catch(() => {}); };
+      }
+      if (ctx.state !== "running") ctx.resume().catch(() => {});
       return ctx;
     }
+    function needSoundTap() {
+      if (soundBanner) return;
+      soundBanner = true;
+      banner("Tap here to turn on sound");
+    }
+    let soundBanner = false;
     function playPCM(buf) {
       const c = audioContext(), pcm = new Int16Array(buf);
+      if (c.state !== "running") setTimeout(() => { if (c.state !== "running") needSoundTap(); }, 400);
       if (!pcm.length) return;
       const b = c.createBuffer(1, pcm.length, RATE), ch = b.getChannelData(0);
       for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768;
@@ -346,8 +364,9 @@ enum PhoneWebApp {
       if (!held) return;
       held = false;
       $("talk").classList.remove("held");
+      audioContext();  // letting go is a touch, so iOS allows resuming playback here
       // Let the last few milliseconds of audio through before closing the mic.
-      setTimeout(() => { sending = false; send({ type: "release" }); stopMic(); }, 120);
+      setTimeout(() => { sending = false; send({ type: "release" }); stopMic(); audioContext(); }, 120);
     }
 
     const talk = $("talk");
