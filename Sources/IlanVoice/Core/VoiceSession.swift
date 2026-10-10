@@ -137,16 +137,34 @@ final class VoiceSession: ObservableObject {
         client.onEvent = { [weak self] in self?.handle($0) }
         client.onClose = { [weak self, weak client] reason in
             guard let self, self.client === client else { return }
+            let report = Self.shouldReport(closeReason: reason, phase: self.phase, responseActive: self.responseActive)
             self.client = nil
             self.sessionReady = false
             self.cancelWatchdog()
             if self.retryUnsentTurn() { return }
             if self.phase != .recording { self.phase = .offline }
-            if let reason, reason != "Connection closed" { self.errorMessage = reason }
+            if report, let reason {
+                self.errorMessage = reason
+                self.connectionError = reason
+            }
         }
         self.client = client
         connectedFingerprint = settings.sessionFingerprint
         client.connect(apiKey: settings.apiKey, model: settings.model)
+    }
+
+    /// The last connection error shown, so it can be cleared once a new
+    /// session is up.
+    private var connectionError: String?
+
+    /// Whether a dropped connection is worth a warning. OpenAI and the network
+    /// close idle sessions all the time ("Socket is not connected", "The
+    /// socket is closed"); the next press simply reconnects, so a warning then
+    /// is a false alarm. It is only shown when a reply was on its way and the
+    /// one automatic retry could not save it.
+    static func shouldReport(closeReason reason: String?, phase: Phase, responseActive: Bool) -> Bool {
+        guard let reason, !reason.isEmpty, reason != "Connection closed" else { return false }
+        return responseActive || phase == .thinking || phase == .working || phase == .speaking
     }
 
     func disconnect() {
@@ -474,6 +492,9 @@ final class VoiceSession: ObservableObject {
         case "session.updated":
             guard !sessionReady else { return }
             sessionReady = true
+            // Connected again: an earlier connection warning no longer applies.
+            if let shown = connectionError, errorMessage == shown { errorMessage = nil }
+            connectionError = nil
             bufferedAudio.forEach(sendAudio)
             bufferedAudio.removeAll()
             if commitWhenReady {
