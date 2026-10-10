@@ -26,6 +26,11 @@ struct Conversation: Codable, Identifiable, Equatable {
     var messages: [Message] = []
     /// Set when the user renames the conversation; automatic titles then stop.
     var titleLocked: Bool?
+    /// "iphone" for the conversation the iPhone web app talks in.
+    var origin: String?
+
+    static let iPhoneOrigin = "iphone"
+    var isFromIPhone: Bool { origin == Self.iPhoneOrigin }
 
     var unheardCount: Int { messages.filter { !$0.listened }.count }
 }
@@ -66,7 +71,7 @@ final class ConversationStore: ObservableObject {
 
     @discardableResult
     func newConversation() -> Conversation {
-        if let empty = conversations.first(where: { $0.messages.isEmpty }) {
+        if let empty = conversations.first(where: { $0.messages.isEmpty && !$0.isFromIPhone }) {
             selectedID = empty.id
             return empty
         }
@@ -75,6 +80,17 @@ final class ConversationStore: ObservableObject {
         selectedID = conv.id
         saveNow(conv)
         return conv
+    }
+
+    /// The iPhone's conversation: the most recent one it started, or a new one
+    /// (created without changing what the Mac has selected).
+    func iPhoneConversation() -> UUID {
+        if let conv = conversations.filter(\.isFromIPhone).max(by: { $0.updatedAt < $1.updatedAt }) { return conv.id }
+        var conv = Conversation()
+        conv.origin = Conversation.iPhoneOrigin
+        conversations.insert(conv, at: 0)
+        saveNow(conv)
+        return conv.id
     }
 
     func update(_ id: UUID, _ mutate: (inout Conversation) -> Void) {
