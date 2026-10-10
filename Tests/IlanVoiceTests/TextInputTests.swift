@@ -40,19 +40,21 @@ func registerTextInputTests() {
     }
 }
 
-/// Where the "Add to Message" pill is anchored.
+/// What counts as a selection worth offering "Add to Message" for.
 @MainActor
 func registerSelectionButtonTests() {
     suite("Add to Message button") { test in
-        test("centred on the pointer, one line tall") {
-            let (r, _) = MessageNSTextView.anchor(at: NSPoint(x: 120, y: 50), lineHeight: 18, flipped: true)
-            expectEqual(r.midX, 120)
-            expectEqual(r.midY, 50)
-            expectEqual(r.height, 18)
+        let text = "Hello world, this is Ilan."
+        test("a real selection is reported with its text") {
+            expectEqual(MessageNSTextView.selectedText(in: text, range: NSRange(location: 6, length: 5)), "world")
         }
-        test("the pill goes above the line in flipped and unflipped views") {
-            expectEqual(MessageNSTextView.anchor(at: .zero, lineHeight: 18, flipped: true).1, NSRectEdge.minY)
-            expectEqual(MessageNSTextView.anchor(at: .zero, lineHeight: 18, flipped: false).1, NSRectEdge.maxY)
+        test("no button for an empty or whitespace-only selection") {
+            expect(MessageNSTextView.selectedText(in: text, range: NSRange(location: 3, length: 0)) == nil)
+            expect(MessageNSTextView.selectedText(in: text, range: NSRange(location: 5, length: 1)) == nil)
+        }
+        test("an out-of-range selection is ignored, not a crash") {
+            expect(MessageNSTextView.selectedText(in: text, range: NSRange(location: 20, length: 40)) == nil)
+            expect(MessageNSTextView.selectedText(in: text, range: NSRange(location: NSNotFound, length: 3)) == nil)
         }
     }
 }

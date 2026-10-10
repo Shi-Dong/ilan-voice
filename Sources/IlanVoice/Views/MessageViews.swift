@@ -4,6 +4,8 @@ struct MessageRow: View {
     let message: Message
     @ObservedObject var session: VoiceSession
     @ObservedObject var clips: ClipPlayer
+    /// Text selected in this message, if any: shows "Add to Message" on the bubble.
+    @Local private var selection: String?
 
     var body: some View {
         switch message.role {
@@ -13,18 +15,31 @@ struct MessageRow: View {
         }
     }
 
+    /// Sits on the top edge of the bubble whose text is selected.
+    @ViewBuilder private var addToMessageButton: some View {
+        if let selection {
+            AddToMessagePill {
+                ComposerModel.shared.addContext(selection)
+                self.selection = nil
+            }
+            .transition(.opacity.combined(with: .scale(scale: 0.9)))
+        }
+    }
+
     private var userBubble: some View {
         HStack(alignment: .bottom) {
             Spacer(minLength: 80)
             VStack(alignment: .trailing, spacing: 6) {
                 SelectableText(text: message.text.isEmpty ? "Transcribing…" : message.text,
-                               color: NSColor(message.pending ? Theme.ink.opacity(0.55) : Theme.ink))
+                               color: NSColor(message.pending ? Theme.ink.opacity(0.55) : Theme.ink),
+                               onSelection: { selection = $0 })
                 if message.audioFile != nil {
                     PlayChip(message: message, session: session, clips: clips, dark: true)
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
             .background(Theme.mint, in: BubbleShape(mine: true))
+            .overlay(alignment: .topLeading) { addToMessageButton.offset(y: -14) }
         }
     }
 
@@ -35,7 +50,8 @@ struct MessageRow: View {
                 if message.text.isEmpty && message.pending {
                     TypingDots()
                 } else {
-                    SelectableText(text: message.text, color: NSColor(white: 1, alpha: 0.92), lineSpacing: 3)
+                    SelectableText(text: message.text, color: NSColor(white: 1, alpha: 0.92), lineSpacing: 3,
+                                   onSelection: { selection = $0 })
                 }
                 if message.audioFile != nil {
                     PlayChip(message: message, session: session, clips: clips, dark: false)
@@ -44,6 +60,7 @@ struct MessageRow: View {
             .padding(.horizontal, 14).padding(.vertical, 11)
             .background(Theme.card, in: BubbleShape(mine: false))
             .overlay(BubbleShape(mine: false).stroke(message.listened ? Theme.hairline : Theme.orange.opacity(0.6)))
+            .overlay(alignment: .topTrailing) { addToMessageButton.offset(y: -14) }
             Spacer(minLength: 80)
         }
     }
