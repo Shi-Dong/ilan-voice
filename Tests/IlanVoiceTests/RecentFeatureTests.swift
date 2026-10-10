@@ -37,6 +37,19 @@ func registerRecentFeatureTests() {
         }
     }
 
+    suite("Sidebar links") { test in
+        test("GitHub row opens the repository page") {
+            expectEqual(Updater.repoURL.absoluteString, "https://github.com/Shi-Dong/ilan-voice")
+            expectEqual(Updater.repoURL.host, "github.com")
+        }
+        test("data folder row opens the folder that holds agent.md") {
+            expectEqual(Paths.agentFile.deletingLastPathComponent().standardizedFileURL.path,
+                        Paths.root.standardizedFileURL.path)
+            expectEqual(Paths.mcpFile.deletingLastPathComponent().standardizedFileURL.path,
+                        Paths.root.standardizedFileURL.path)
+        }
+    }
+
     suite("iPhone page top edge") { test in
         let html = PhoneWebApp.html
 

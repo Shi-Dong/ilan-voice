@@ -31,6 +31,8 @@ final class Updater: ObservableObject {
 
     static let repo = "Shi-Dong/ilan-voice"
     static let branch = "main"
+    /// The repository's page on GitHub (sidebar link).
+    static var repoURL: URL { URL(string: "https://github.com/\(repo)")! }
 
     @Published private(set) var state: State = .idle
 
