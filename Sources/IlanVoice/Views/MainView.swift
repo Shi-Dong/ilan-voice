@@ -272,9 +272,9 @@ struct ChatView: View {
     }
 }
 
-/// Quiet footer rows under the conversation list: a hairline, then Settings
-/// and Update as small icon-and-label rows in the sidebar's dim text, lit
-/// only on hover.
+/// Quiet footer rows under the conversation list: a hairline, then Settings,
+/// Update, the data folder and the GitHub page as small icon-and-label rows
+/// in the sidebar's dim text, lit only on hover.
 private struct SidebarFooter: View {
     @ObservedObject var updater: Updater
 
@@ -293,6 +293,17 @@ private struct SidebarFooter: View {
                 .buttonStyle(.plain)
                 .disabled(updater.isBusy)
                 .help(updateHelp)
+                Button { NSWorkspace.shared.open(Paths.root) } label: {
+                    SidebarFooterRow(icon: "folder", title: "Open data folder")
+                }
+                .buttonStyle(.plain)
+                .help("Open \((Paths.root.path as NSString).abbreviatingWithTildeInPath) in Finder: agent.md, mcp.json, the dictionary and every conversation")
+                Button { NSWorkspace.shared.open(Updater.repoURL) } label: {
+                    SidebarFooterRow(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub",
+                                     trailing: .symbol("arrow.up.right"))
+                }
+                .buttonStyle(.plain)
+                .help("Open \(Updater.repoURL.absoluteString) in your browser")
             }
             .padding(.horizontal, 8).padding(.vertical, 8)
         }
@@ -325,7 +336,7 @@ private struct SidebarFooter: View {
 }
 
 private struct SidebarFooterRow: View {
-    enum Trailing { case none, shortcut(String), spinner }
+    enum Trailing { case none, shortcut(String), spinner, symbol(String) }
 
     let icon: String
     let title: String
@@ -344,6 +355,8 @@ private struct SidebarFooterRow: View {
             case .none: EmptyView()
             case .shortcut(let keys): Text(keys).font(.system(size: 11)).opacity(hovering ? 0.8 : 0)
             case .spinner: ProgressView().controlSize(.mini)
+            // A hint that shows on hover, like the shortcut.
+            case .symbol(let name): Image(systemName: name).font(.system(size: 9, weight: .semibold)).opacity(hovering ? 0.8 : 0)
             }
         }
         .foregroundStyle(highlighted ? Theme.orange : (hovering ? Color.primary : Theme.textDim))
