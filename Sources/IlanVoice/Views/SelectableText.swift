@@ -86,15 +86,53 @@ final class MessageNSTextView: NSTextView {
     /// button is laid out by SwiftUI as part of the bubble.
     var onSelection: ((TextSelection?) -> Void)?
 
+    /// Character where the current click or drag began, to tell which end of
+    /// the selection the mouse is at.
+    private var dragStart: Int?
+
+    override func mouseDown(with event: NSEvent) {
+        dragStart = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
+        super.mouseDown(with: event)
+        dragStart = nil
+    }
+
+    /// The end of the selection the mouse let go at: the far end from where
+    /// the drag began (the end for a forward drag or a double-click, the start
+    /// for a backward drag). Without a drag (keyboard), the end.
+    static func activeEnd(of range: NSRange, dragStart: Int?) -> Int {
+        guard let start = dragStart, range.length > 0 else { return NSMaxRange(range) }
+        return abs(start - range.location) <= abs(start - NSMaxRange(range)) ? NSMaxRange(range) : range.location
+    }
+
+    /// The caret at character `index` (between characters), one line tall,
+    /// in this view's own top-left coordinates, from the same layout that
+    /// draws the selection highlight. At the end of a line it stays on that
+    /// line rather than jumping to the start of the next.
+    func caretRect(at index: Int) -> NSRect? {
+        guard let layout = layoutManager, let container = textContainer else { return nil }
+        layout.ensureLayout(for: container)
+        let length = (string as NSString).length
+        guard length > 0 else { return nil }
+        let clamped = max(0, min(index, length))
+        let afterChar = clamped > 0  // caret after the previous character
+        let charIndex = afterChar ? clamped - 1 : 0
+        let glyph = layout.glyphIndexForCharacter(at: charIndex)
+        let line = layout.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
+        let glyphRect = layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container)
+        let x = afterChar ? glyphRect.maxX : glyphRect.minX
+        return NSRect(x: x + textContainerOrigin.x, y: line.minY + textContainerOrigin.y, width: 1, height: line.height)
+    }
+
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
         guard !stillSelecting else { return }
         let range = selectedRange()
-        guard let text = Self.selectedText(in: string, range: range), let rect = firstLineRect(of: range) else {
+        guard let text = Self.selectedText(in: string, range: range),
+              let rect = caretRect(at: Self.activeEnd(of: range, dragStart: dragStart)) else {
             onSelection?(nil)
             return
         }
-        onSelection?(TextSelection(text: text, firstLine: rect))
+        onSelection?(TextSelection(text: text, pointer: rect))
     }
 
     /// Clicking into another message (or the message box) ends this selection,
@@ -103,23 +141,6 @@ final class MessageNSTextView: NSTextView {
         let resigned = super.resignFirstResponder()
         if resigned, selectedRange().length > 0 { setSelectedRange(NSRange(location: selectedRange().location, length: 0)) }
         return resigned
-    }
-
-    /// Where the first line of `range` is drawn, in this view's own (flipped,
-    /// top-left) coordinates. Uses the same layout that draws the selection
-    /// highlight, and nothing outside this view, so it matches the screen.
-    func firstLineRect(of range: NSRange) -> NSRect? {
-        guard let layout = layoutManager, let container = textContainer, range.length > 0 else { return nil }
-        layout.ensureLayout(for: container)
-        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-        guard glyphs.length > 0 else { return nil }
-        var lineGlyphs = NSRange()
-        _ = layout.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: &lineGlyphs)
-        let onFirstLine = NSIntersectionRange(glyphs, lineGlyphs)
-        var rect = layout.boundingRect(forGlyphRange: onFirstLine.length > 0 ? onFirstLine : glyphs, in: container)
-        rect.origin.x += textContainerOrigin.x
-        rect.origin.y += textContainerOrigin.y
-        return rect
     }
 
     /// The selected text, or nil when nothing (or only whitespace) is selected.
@@ -149,14 +170,15 @@ final class MessageNSTextView: NSTextView {
 /// A finished selection in a message.
 struct TextSelection: Equatable {
     let text: String
-    /// The selection's first line, in the text view's top-left coordinates.
-    let firstLine: CGRect
+    /// Where the mouse let go: the caret at that end of the selection, in the
+    /// text view's top-left coordinates.
+    let pointer: CGRect
 
-    /// Top-left corner for a button of `size` just above the selection's first
-    /// line, starting where the selection starts, kept within `width`.
+    /// Top-left corner for a button of `size` right under the pointer's line,
+    /// starting just left of the pointer, kept within `width`.
     func buttonOrigin(size: CGSize, width: CGFloat, gap: CGFloat = 4) -> CGPoint {
-        let x = max(0, min(firstLine.minX, width - size.width))
-        return CGPoint(x: x, y: firstLine.minY - size.height - gap)
+        let x = max(0, min(pointer.minX - 12, width - size.width))
+        return CGPoint(x: x, y: pointer.maxY + gap)
     }
 }
 

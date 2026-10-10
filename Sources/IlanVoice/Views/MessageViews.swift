@@ -19,7 +19,7 @@ struct MessageRow: View {
         .zIndex(selection == nil ? 0 : 1)
     }
 
-    /// Sits just above the selected text, inside this message's own layout.
+    /// Sits right under where the mouse let go, inside this message's own layout.
     private func selectionButton(width: CGFloat) -> some View {
         Group {
             if let selection {

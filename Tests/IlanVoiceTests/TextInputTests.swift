@@ -69,27 +69,35 @@ func registerSelectionButtonTests() {
         }
         let para = String(repeating: "word ", count: 60)  // wraps over several lines at 300 pt
 
-        test("the selection rect is on the line the selection starts on") {
-            let v = view(para, width: 300)
-            let first = v.firstLineRect(of: NSRange(location: 0, length: 4))!
-            let later = v.firstLineRect(of: NSRange(location: 200, length: 20))!
-            expect(first.minY < 1, "\(first)")
-            expect(later.minY > first.maxY, "selection further down must be lower: \(later) vs \(first)")
-            expect(later.maxX <= 300.5 && later.minX >= 0, "\(later)")
+        test("the button follows the end the mouse let go at") {
+            let r = NSRange(location: 10, length: 20)
+            expectEqual(MessageNSTextView.activeEnd(of: r, dragStart: 10), 30)   // dragged forward
+            expectEqual(MessageNSTextView.activeEnd(of: r, dragStart: 30), 10)   // dragged backward
+            expectEqual(MessageNSTextView.activeEnd(of: r, dragStart: 14), 30)   // double-click inside a word
+            expectEqual(MessageNSTextView.activeEnd(of: r, dragStart: nil), 30)  // keyboard
         }
-        test("only the first line counts for a multi-line selection") {
+        test("the caret is on the right line of a wrapped paragraph") {
             let v = view(para, width: 300)
-            let oneLine = v.firstLineRect(of: NSRange(location: 0, length: 4))!
-            let multi = v.firstLineRect(of: NSRange(location: 0, length: 150))!
-            expectEqual(multi.minY, oneLine.minY)
-            expect(abs(multi.height - oneLine.height) < 0.5, "\(multi) vs \(oneLine)")
+            let top = v.caretRect(at: 4)!, lower = v.caretRect(at: 220)!
+            expect(top.minY < 1, "\(top)")
+            expect(lower.minY > top.maxY, "\(lower) vs \(top)")
+            expect(lower.minX >= 0 && lower.minX <= 300.5, "\(lower)")
         }
-        test("the button sits just above the selection and inside the message") {
-            let sel = TextSelection(text: "x", firstLine: CGRect(x: 40, y: 60, width: 80, height: 17))
+        test("the caret moves right along a line") {
+            let v = view(para, width: 300)
+            expect(v.caretRect(at: 10)!.minX > v.caretRect(at: 4)!.minX)
+        }
+        test("the caret at a line's end stays on that line") {
+            let v = view(para, width: 300)
+            let lineEnd = (0..<300).first { v.caretRect(at: $0 + 1)!.minY > v.caretRect(at: $0)!.minY }!
+            expectEqual(v.caretRect(at: lineEnd)!.minY, v.caretRect(at: 1)!.minY)
+        }
+        test("the button sits just under the pointer and inside the message") {
+            let sel = TextSelection(text: "x", pointer: CGRect(x: 140, y: 60, width: 1, height: 17))
             let o = sel.buttonOrigin(size: CGSize(width: 128, height: 26), width: 300)
-            expectEqual(o.x, 40)
-            expectEqual(o.y, 60 - 26 - 4)
-            let right = TextSelection(text: "x", firstLine: CGRect(x: 280, y: 0, width: 10, height: 17))
+            expectEqual(o.x, 128)
+            expectEqual(o.y, 81)
+            let right = TextSelection(text: "x", pointer: CGRect(x: 295, y: 0, width: 1, height: 17))
             expectEqual(right.buttonOrigin(size: CGSize(width: 128, height: 26), width: 300).x, 172)
         }
     }
