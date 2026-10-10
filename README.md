@@ -114,3 +114,12 @@ Server voice detection is turned off (`turn_detection: null`), so your message i
 | `Sources/IlanVoice/Audio/Audio.swift` | microphone capture, streaming playback, WAV |
 | `Sources/IlanVoice/Views/` | SwiftUI interface |
 | `scripts/build-app.sh` | builds the `.app` bundle |
+| `scripts/test.sh` | builds and runs the unit tests in `Tests/IlanVoiceTests` |
+
+## Tests
+
+```
+scripts/test.sh
+```
+
+compiles the app's code as a library, links the tests in `Tests/IlanVoiceTests` against it and runs them; the whole thing takes a few seconds. It works with the Command Line Tools alone, which include neither XCTest nor the macro plugin Swift Testing needs, so the tests use a small built-in harness: group them with `suite("…") { test in test("…") { … } }` and check with `expect(…)` / `expectEqual(…, …)`. A new test file needs a `register…Tests()` function, called from `Tests/IlanVoiceTests/main.swift`. The same script runs on every pull request.
