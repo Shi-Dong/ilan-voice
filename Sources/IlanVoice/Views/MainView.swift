@@ -288,7 +288,7 @@ private struct SidebarFooter: View {
                 .buttonStyle(.plain)
                 Button(action: update) {
                     SidebarFooterRow(icon: updateIcon, title: updateTitle, trailing: updateTrailing,
-                                     highlighted: updater.updateAvailable || updater.state == .readyToRestart)
+                                     highlighted: updater.state.sidebarHighlighted)
                 }
                 .buttonStyle(.plain)
                 .disabled(updater.isBusy)
@@ -308,27 +308,8 @@ private struct SidebarFooter: View {
         }
     }
 
-    private var updateTitle: String {
-        switch updater.state {
-        case .checking: "Checking for updates…"
-        case .installing: "Updating…"
-        case .available: "Install update"
-        case .readyToRestart: "Restart to update"
-        case .upToDate: "Up to date"
-        case .failed: "Update failed – try again"
-        case .idle: "Check for updates"
-        }
-    }
-
-    private var updateIcon: String {
-        switch updater.state {
-        case .available: "arrow.down.circle.fill"
-        case .readyToRestart: "arrow.clockwise.circle.fill"
-        case .upToDate: "checkmark.circle"
-        case .failed: "exclamationmark.circle"
-        default: "arrow.down.circle"
-        }
-    }
+    private var updateTitle: String { updater.state.sidebarTitle }
+    private var updateIcon: String { updater.state.sidebarIcon }
 
     private var updateTrailing: SidebarFooterRow.Trailing {
         updater.isBusy ? .spinner : .none
@@ -371,5 +352,39 @@ private struct SidebarFooterRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
+/// How the sidebar's Update row reads in each updater state. Kept out of the
+/// view so the unit tests can check it.
+extension Updater.State {
+    var sidebarTitle: String {
+        switch self {
+        case .checking: "Checking for updates…"
+        case .installing: "Updating…"
+        case .available: "Install update"
+        case .readyToRestart: "Restart to update"
+        case .upToDate: "Up to date"
+        case .failed: "Update failed – try again"
+        case .idle: "Check for updates"
+        }
+    }
+
+    var sidebarIcon: String {
+        switch self {
+        case .available: "arrow.down.circle.fill"
+        case .readyToRestart: "arrow.clockwise.circle.fill"
+        case .upToDate: "checkmark.circle"
+        case .failed: "exclamationmark.circle"
+        default: "arrow.down.circle"
+        }
+    }
+
+    /// Orange when there is something to install or restart into.
+    var sidebarHighlighted: Bool {
+        switch self {
+        case .available, .readyToRestart: true
+        default: false
+        }
     }
 }
