@@ -148,7 +148,39 @@ final class PhoneServer: ObservableObject {
                 return c
             }()
             client.attach(peer)
+            // A page this Mac hasn't seen (new phone, or the home-screen app
+            // removed and added again) is asked which iPhone it is, so a
+            // re-added app can carry on with its old conversation.
+            if !Self.isKnown(device) {
+                let phones = self.knownPhones()
+                if phones.isEmpty { _ = Self.number(for: device) } else {
+                    peer.send(json: ["type": "choose_phone", "phones": phones])
+                }
+            }
         }
+    }
+
+    static func isKnown(_ device: String) -> Bool {
+        (UserDefaults.standard.dictionary(forKey: devicesKey) as? [String: Int])?[device] != nil
+    }
+
+    /// The iPhones seen before, newest conversation first, for the page's
+    /// "Which iPhone is this?" sheet.
+    private func knownPhones() -> [[String: Any]] {
+        let numbers = UserDefaults.standard.dictionary(forKey: Self.devicesKey) as? [String: Int] ?? [:]
+        let formatter = RelativeDateTimeFormatter()
+        return numbers.map { device, n -> (Date, [String: Any]) in
+            let conv = store.conversations.filter { $0.isFromIPhone && $0.deviceID == device }
+                .max { $0.updatedAt < $1.updatedAt }
+            var phone: [String: Any] = ["device": device, "name": "iPhone \(n)"]
+            if let conv {
+                phone["title"] = conv.title
+                phone["when"] = formatter.localizedString(for: conv.updatedAt, relativeTo: Date())
+            }
+            return (conv?.updatedAt ?? .distantPast, phone)
+        }
+        .sorted { $0.0 > $1.0 }
+        .map(\.1)
     }
 
     private func recount() {
