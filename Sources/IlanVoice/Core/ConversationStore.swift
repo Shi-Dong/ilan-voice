@@ -16,6 +16,8 @@ struct Message: Codable, Identifiable, Equatable {
     var listened = true
     var toolName: String?
     var toolArguments: String?
+    /// The transcript as heard, when TranscriptFixer corrected `text`.
+    var rawText: String?
 }
 
 struct Conversation: Codable, Identifiable, Equatable {
