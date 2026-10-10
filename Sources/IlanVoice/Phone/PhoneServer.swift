@@ -201,8 +201,8 @@ final class PhoneServer: ObservableObject {
         }
     }
 
-    /// The app icon with a voice badge in the lower right, so the iPhone web
-    /// app is told apart from other Ilan icons on the home screen.
+    /// The app icon with Ilan holding a phone, so the iPhone web app is told
+    /// apart from other Ilan icons on the home screen.
     private static func icon(_ size: Int) -> MiniHTTPServer.Response? {
         // The square artwork itself, not the Mac's rounded icon (iOS rounds it).
         let source = Bundle.main.url(forResource: "AppIcon", withExtension: "icns").flatMap(NSImage.init(contentsOf:))
@@ -212,33 +212,66 @@ final class PhoneServer: ObservableObject {
                                          bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        let s = CGFloat(size)
-        source.draw(in: NSRect(x: 0, y: 0, width: s, height: s))
-        // Badge: a dark disc with a light ring, inset from the corner so iOS's
-        // rounded mask doesn't clip it.
-        let d = s * 0.42
-        let badge = NSRect(x: s - d - s * 0.07, y: s * 0.07, width: d, height: d)
-        NSColor(red: 0.055, green: 0.071, blue: 0.075, alpha: 1).setFill()
-        NSBezierPath(ovalIn: badge).fill()
-        NSColor.white.withAlphaComponent(0.9).setStroke()
-        let ring = NSBezierPath(ovalIn: badge.insetBy(dx: s * 0.012, dy: s * 0.012))
-        ring.lineWidth = s * 0.024
-        ring.stroke()
-        // Five voice bars, like the listening pill.
-        NSColor(red: 0.663, green: 0.863, blue: 0.796, alpha: 1).setFill()
-        let heights: [CGFloat] = [0.30, 0.58, 0.82, 0.58, 0.30]
-        let barW = d * 0.085, gap = d * 0.06
-        let total = CGFloat(heights.count) * barW + CGFloat(heights.count - 1) * gap
-        var x = badge.midX - total / 2
-        for h in heights {
-            let barH = d * 0.62 * h
-            NSBezierPath(roundedRect: NSRect(x: x, y: badge.midY - barH / 2, width: barW, height: barH),
-                         xRadius: barW / 2, yRadius: barW / 2).fill()
-            x += barW + gap
-        }
+        source.draw(in: NSRect(x: 0, y: 0, width: size, height: size))
+        drawPhoneInHand(CGFloat(size))
         NSGraphicsContext.restoreGraphicsState()
         guard let png = rep.representation(using: .png, properties: [:]) else { return nil }
         return .init(contentType: "image/png", body: png)
+    }
+
+    /// A phone held at the lower right, its screen showing voice bars and a
+    /// talk button. Drawn on a 512-point square (y up) scaled to `s`.
+    private static func drawPhoneInHand(_ s: CGFloat) {
+        let k = s / 512
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.saveGState()
+        ctx.scaleBy(x: k, y: k)
+        // Phone, tilted a little, held at the lower right.
+        ctx.translateBy(x: 372, y: 118)
+        ctx.rotate(by: -0.16)
+        let skin = NSColor(red: 0.95, green: 0.78, blue: 0.63, alpha: 1)
+        let skinShade = NSColor(red: 0.88, green: 0.70, blue: 0.56, alpha: 1)
+        // soft shadow
+        ctx.setShadow(offset: CGSize(width: 0, height: -6), blur: 18, color: NSColor.black.withAlphaComponent(0.28).cgColor)
+        let body = NSRect(x: -58, y: -104, width: 116, height: 214)
+        NSColor(red: 0.12, green: 0.14, blue: 0.15, alpha: 1).setFill()
+        NSBezierPath(roundedRect: body, xRadius: 22, yRadius: 22).fill()
+        ctx.setShadow(offset: .zero, blur: 0, color: nil)
+        // screen
+        let screen = body.insetBy(dx: 7, dy: 7)
+        let grad = NSGradient(starting: NSColor(red: 0.30, green: 0.66, blue: 0.56, alpha: 1),
+                              ending: NSColor(red: 0.07, green: 0.11, blue: 0.11, alpha: 1))!
+        grad.draw(in: NSBezierPath(roundedRect: screen, xRadius: 16, yRadius: 16), angle: -90)
+        // dynamic island
+        NSColor.black.setFill()
+        NSBezierPath(roundedRect: NSRect(x: -16, y: screen.maxY - 16, width: 32, height: 9), xRadius: 4.5, yRadius: 4.5).fill()
+        // voice bars
+        NSColor(red: 0.80, green: 0.95, blue: 0.89, alpha: 1).setFill()
+        let hs: [CGFloat] = [16, 34, 52, 34, 16]
+        var x: CGFloat = -34
+        for h in hs {
+            NSBezierPath(roundedRect: NSRect(x: x, y: 18 - h / 2, width: 9, height: h), xRadius: 4.5, yRadius: 4.5).fill()
+            x += 15
+    }
+    // mic button on screen
+    NSColor(red: 0.66, green: 0.86, blue: 0.80, alpha: 1).setFill()
+    NSBezierPath(ovalIn: NSRect(x: -15, y: -78, width: 30, height: 30)).fill()
+    // hand: fingers wrapping the left edge, thumb on the right
+    skinShade.setFill()
+    for y in [-10.0, -38.0, -66.0] {
+        NSBezierPath(roundedRect: NSRect(x: -72, y: CGFloat(y), width: 30, height: 24), xRadius: 12, yRadius: 12).fill()
+    }
+    skin.setFill()
+    for y in [-8.0, -36.0, -64.0] {
+        NSBezierPath(roundedRect: NSRect(x: -70, y: CGFloat(y) + 2, width: 26, height: 20), xRadius: 10, yRadius: 10).fill()
+    }
+    // palm behind the lower phone
+    let palm = NSBezierPath(roundedRect: NSRect(x: -60, y: -150, width: 128, height: 70), xRadius: 34, yRadius: 34)
+    skin.setFill(); palm.fill()
+    // thumb
+    let thumb = NSBezierPath(roundedRect: NSRect(x: 40, y: -96, width: 28, height: 58), xRadius: 14, yRadius: 14)
+    skinShade.setFill(); thumb.fill()
+    ctx.restoreGState()
     }
 
     /// A QR code for the pairing link, to scan with the iPhone camera.
