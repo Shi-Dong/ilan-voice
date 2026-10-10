@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 /// Message text that can be selected. Selecting text shows a small "Add to
-/// Message" button above it (also at the top of the right-click menu): it
+/// Message" button on the message's bubble (also at the top of the
+/// right-click menu): it
 /// quotes the selection into the message box, like "Ask ChatGPT" on the
 /// ChatGPT website. SwiftUI's selectable Text gives no
 /// access to the selection, hence an NSTextView.
@@ -11,9 +12,12 @@ struct SelectableText: NSViewRepresentable {
     var fontSize: CGFloat = 14
     var color: NSColor
     var lineSpacing: CGFloat = 0
+    /// The selected text once a selection is finished, or nil when there is none.
+    var onSelection: (String?) -> Void = { _ in }
 
     func makeNSView(context: Context) -> MessageNSTextView {
         let view = MessageNSTextView()
+        view.onSelection = onSelection
         view.isEditable = false
         view.isSelectable = true
         view.drawsBackground = false
@@ -27,6 +31,7 @@ struct SelectableText: NSViewRepresentable {
     }
 
     func updateNSView(_ view: MessageNSTextView, context: Context) {
+        view.onSelection = onSelection
         if view.string != text || view.font?.pointSize != fontSize { apply(to: view) }
     }
 
@@ -70,27 +75,35 @@ final class MessageNSTextView: NSTextView {
         let range = selectedRange()
         guard range.length > 0 else { return }
         let selection = (string as NSString).substring(with: range)
-        Self.closeFloatingButton()
         MainActor.assumeIsolated { ComposerModel.shared.addContext(selection) }
     }
 
-    // MARK: Floating "Add to Message" button
+    // MARK: Reporting the selection
 
-    /// The one button on screen, whichever message it belongs to.
-    private static var floatingButton: NSPopover?
+    /// Tells SwiftUI about finished selections, so the message bubble can show
+    /// its own "Add to Message" button. No popover or coordinate maths: the
+    /// button is laid out by SwiftUI as part of the bubble.
+    var onSelection: ((String?) -> Void)?
 
-    static func closeFloatingButton() {
-        floatingButton?.close()
-        floatingButton = nil
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        guard !stillSelecting else { return }
+        onSelection?(Self.selectedText(in: string, range: selectedRange()))
     }
 
-    /// NSTextView tracks the whole drag inside mouseDown, so the selection
-    /// is final when it returns (also after a double- or triple-click).
-    override func mouseDown(with event: NSEvent) {
-        Self.closeFloatingButton()
-        super.mouseDown(with: event)
-        // Where the pointer is now, i.e. where the drag or click ended.
-        showFloatingButtonIfSelected(atScreenPoint: NSEvent.mouseLocation)
+    /// Clicking into another message (or the message box) ends this selection,
+    /// so only one bubble ever shows the button.
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned, selectedRange().length > 0 { setSelectedRange(NSRange(location: selectedRange().location, length: 0)) }
+        return resigned
+    }
+
+    /// The selected text, or nil when nothing (or only whitespace) is selected.
+    static func selectedText(in string: String, range: NSRange) -> String? {
+        guard range.length > 0, range.location != NSNotFound, NSMaxRange(range) <= (string as NSString).length else { return nil }
+        let text = (string as NSString).substring(with: range)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
     }
 
     /// SwiftUI measures this view at several trial widths (sizeThatFits), and
@@ -106,56 +119,23 @@ final class MessageNSTextView: NSTextView {
         }
     }
 
-    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
-        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
-        if selectedRange().length == 0, Self.floatingButton?.contentViewController?.representedObject as? MessageNSTextView === self {
-            Self.closeFloatingButton()
-        }
-    }
-
-    /// A small pill just above the pointer where the selection ended, like
-    /// ChatGPT's "Ask ChatGPT". It is anchored on the window's content view,
-    /// not on this text view: the text view's own frame comes from SwiftUI's
-    /// measuring and is not a reliable reference for placing things.
-    private func showFloatingButtonIfSelected(atScreenPoint screenPoint: NSPoint) {
-        let range = selectedRange()
-        guard range.length > 0,
-              !(string as NSString).substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let window, let host = window.contentView else { return }
-        let point = host.convert(window.convertPoint(fromScreen: screenPoint), from: nil)
-        let lineHeight = layoutManager?.defaultLineHeight(for: font ?? .systemFont(ofSize: 14)) ?? 17
-        let (anchor, edge) = Self.anchor(at: point, lineHeight: lineHeight, flipped: host.isFlipped)
-
-        let controller = NSHostingController(rootView: AddToMessagePill { [weak self] in self?.addSelectionToMessage() })
-        controller.representedObject = self
-        let popover = NSPopover()
-        popover.contentViewController = controller
-        popover.behavior = .transient
-        popover.animates = false
-        popover.appearance = NSAppearance(named: .darkAqua)
-        popover.show(relativeTo: anchor, of: host, preferredEdge: edge)
-        Self.floatingButton = popover
-    }
-
-    /// A one-line-tall rect centred on the pointer, and the edge that is "up"
-    /// in that view, so the pill sits right above the line under the pointer.
-    static func anchor(at point: NSPoint, lineHeight: CGFloat, flipped: Bool) -> (NSRect, NSRectEdge) {
-        let rect = NSRect(x: point.x - 1, y: point.y - lineHeight / 2, width: 2, height: lineHeight)
-        return (rect, flipped ? .minY : .maxY)
-    }
-
     // Containers in a scroll view: let wheel events reach the conversation.
     override func scrollWheel(with event: NSEvent) { nextResponder?.scrollWheel(with: event) }
 }
 
-private struct AddToMessagePill: View {
+/// The "Add to Message" button a message bubble shows while some of its text
+/// is selected.
+struct AddToMessagePill: View {
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Label("Add to Message", systemImage: "text.quote")
-                .font(.system(size: 12, weight: .semibold))
-                .padding(.horizontal, 10).padding(.vertical, 6)
+                .font(.system(size: 11.5, weight: .semibold))
+                .padding(.horizontal, 9).padding(.vertical, 5)
+                .background(Theme.inkRaised, in: Capsule())
+                .overlay(Capsule().stroke(Theme.mint.opacity(0.5)))
+                .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
         }
         .buttonStyle(.plain)
         .foregroundStyle(Theme.mint)
