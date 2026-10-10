@@ -169,13 +169,8 @@ enum PhoneWebApp {
       else if (m.type === "auth_failed") { localStorage.removeItem("ilanToken");
         banner("This link is no longer paired. Open the current link from Ilan Voice on your Mac."); }
       else if (m.type === "state") {
-        phase = m.phase;
-        const cls = m.phase === "Listening" ? "rec" : m.busy ? "busy" : m.phase === "Offline" ? "" : "ok";
-        setStatus(m.phase, cls);
-        if (m.error || !soundBanner) banner(m.error || "");
-        $("hint").textContent = held ? "Listening — let go to send"
-          : m.phase === "Speaking" ? "Tap to stop · hold to interrupt"
-          : m.phase === "Thinking" || m.phase === "Using tools" ? m.phase + "…" : "Hold the button and speak";
+        lastState = m;
+        showState();
       }
       else if (m.type === "messages") { render(m); }
       else if (m.type === "audio_stop") { stopAudio(); }
@@ -201,6 +196,42 @@ enum PhoneWebApp {
       }
       $("newPhone").onclick = () => { send({ type: "new_phone" }); $("sheet").classList.remove("open"); };
       $("sheet").classList.add("open");
+    }
+
+    // ---- Microphone permission ----
+    // "granted", "prompt" (not asked yet), "denied", or "unavailable" (no mic
+    // API at all, e.g. not opened over https). When the mic isn't usable the
+    // status says so instead of Ready, so it's clear why nothing will record.
+    let micPermission = navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? "prompt" : "unavailable";
+    let lastState = null;
+    if (navigator.permissions && navigator.permissions.query && micPermission !== "unavailable") {
+      navigator.permissions.query({ name: "microphone" }).then(p => {
+        micPermission = p.state; showState();
+        p.onchange = () => { micPermission = p.state; showState(); };
+      }).catch(() => {});
+    }
+    function showState() {
+      const m = lastState;
+      if (!m) return;
+      phase = m.phase;
+      const idle = !m.busy && m.phase !== "Listening";
+      if (idle && micPermission === "denied") {
+        setStatus("Microphone not allowed", "busy");
+        $("hint").textContent = "Allow the microphone for this site in iOS Settings, then reopen";
+      } else if (idle && micPermission === "unavailable") {
+        setStatus("Microphone not available", "busy");
+        $("hint").textContent = "Open the link from the Mac (https) to use the microphone";
+      } else if (idle && micPermission === "prompt") {
+        setStatus("Microphone not enabled yet", "busy");
+        $("hint").textContent = "Hold the button and allow the microphone";
+      } else {
+        const cls = m.phase === "Listening" ? "rec" : m.busy ? "busy" : m.phase === "Offline" ? "" : "ok";
+        setStatus(m.phase, cls);
+        $("hint").textContent = held ? "Listening — let go to send"
+          : m.phase === "Speaking" ? "Tap to stop · hold to interrupt"
+          : m.phase === "Thinking" || m.phase === "Using tools" ? m.phase + "…" : "Hold the button and speak";
+      }
+      if (m.error || !soundBanner) banner(m.error || "");
     }
 
     function setStatus(text, cls) { $("status").textContent = text; $("dot").className = "dot " + cls; }
@@ -286,9 +317,20 @@ enum PhoneWebApp {
     const workletURL = URL.createObjectURL(new Blob([worklet], { type: "text/javascript" }));
     let micCtx = null;
 
+    async function getMic(constraints) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (micPermission !== "granted") { micPermission = "granted"; showState(); }
+        return stream;
+      } catch (err) {
+        if (err && err.name === "NotAllowedError") { micPermission = "denied"; showState(); }
+        throw err;
+      }
+    }
+
     async function startMic() {
       setAudioSession("play-and-record");
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+      micStream = await getMic({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
       if (!sending) { stopMic(); return; }
       const c = micCtx = new (window.AudioContext || window.webkitAudioContext)();
       await c.audioWorklet.addModule(workletURL);
