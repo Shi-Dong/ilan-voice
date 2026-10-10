@@ -59,9 +59,9 @@ enum PhoneWebApp {
       .msg.assistant { align-self: flex-start; background: var(--card); border: 1px solid var(--hair); border-bottom-left-radius: 5px; }
       .msg.tool { align-self: flex-start; font-size: 12.5px; color: var(--dim); padding: 2px 6px; }
       .msg.pending { opacity: .6; }
-      footer { padding: 14px 24px calc(env(safe-area-inset-bottom) + 18px); display: grid;
+      footer { padding: 8px 24px max(10px, calc(env(safe-area-inset-bottom) - 8px)); display: grid;
         grid-template-columns: 1fr auto 1fr; align-items: center; border-top: 1px solid var(--hair); background: rgba(14,18,19,.85); }
-      .hint { grid-column: 1 / -1; text-align: center; font-size: 12.5px; color: var(--dim); margin-bottom: 12px; min-height: 17px; }
+      .hint { grid-column: 1 / -1; text-align: center; font-size: 12.5px; color: var(--dim); margin-bottom: 6px; min-height: 17px; }
       .side { width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--hair); background: var(--card); color: var(--text);
         display: flex; align-items: center; justify-content: center; justify-self: start; }
       .side:disabled { opacity: .35; }
@@ -72,7 +72,15 @@ enum PhoneWebApp {
         box-shadow: 0 0 0 6px rgba(169,220,203,.12), 0 10px 30px rgba(77,168,143,.35); transition: transform .12s; }
       #talk svg { width: 38px; height: 38px; color: #0B1F19; }
       #talk.held { transform: scale(1.08); background: radial-gradient(circle at 35% 30%, #FFC9C9, var(--red) 55%, #C94444);
-        box-shadow: 0 0 0 calc(6px + var(--lvl, 0) * 26px) rgba(255,107,107,.18), 0 10px 30px rgba(255,107,107,.35); }
+        box-shadow: 0 10px 30px rgba(255,107,107,.35); }
+      /* Voice rings behind the button: scaled and faded once per frame from a
+         smoothed voice level, which is cheap to draw and moves with speech. */
+      .talkwrap { position: relative; width: 96px; height: 96px; }
+      .talkwrap #talk { z-index: 1; }
+      .ring { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; opacity: 0;
+        will-change: transform, opacity; }
+      .ring.inner { background: rgba(255,107,107,.30); }
+      .ring.outer { background: rgba(255,107,107,.14); }
       #talk.held svg { color: #2A0B0B; }
       #talk:disabled { filter: grayscale(1) brightness(.6); }
       .sheet { position: fixed; inset: 0; background: rgba(5,8,8,.72); display: none; align-items: flex-end; z-index: 5;
@@ -113,10 +121,11 @@ enum PhoneWebApp {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
       </button>
+      <div class="talkwrap"><div class="ring outer" id="ringOuter"></div><div class="ring inner" id="ringInner"></div>
       <button id="talk" aria-label="Hold to talk">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/>
           <path d="M18.5 11.5a.9.9 0 1 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 1 0-1.8 0 6.5 6.5 0 0 0 5.6 6.4V20H8.8a.9.9 0 1 0 0 1.8h6.4a.9.9 0 1 0 0-1.8H12.9v-2.1a6.5 6.5 0 0 0 5.6-6.4Z"/></svg>
-      </button>
+      </button></div>
       <span></span>
     </footer>
     <script>
@@ -280,7 +289,7 @@ enum PhoneWebApp {
           out[i] = v * 32767; sum += v * v;
         }
         carry = input.slice(Math.floor(n * ratio));
-        $("talk").style.setProperty("--lvl", Math.min(1, Math.sqrt(sum / Math.max(1, n)) * 5).toFixed(2));
+        levelSum += sum; levelCount += n;
         if (sending && ws && ws.readyState === 1) ws.send(out.buffer);
       };
       micSource.connect(micNode);
@@ -292,8 +301,33 @@ enum PhoneWebApp {
       if (micCtx) { micCtx.close().catch(() => {}); micCtx = null; }
       micStream = micNode = micSource = null;
       setAudioSession("playback");
-      $("talk").style.setProperty("--lvl", 0);
+      levelSum = levelCount = 0;
     }
+
+    // ---- Voice rings ----
+    // Audio arrives in tiny batches hundreds of times a second; the rings are
+    // updated once per screen frame instead, from the loudness of everything
+    // heard since the last frame. Loudness is taken in decibels (closer to
+    // how loud speech sounds), rises quickly when you speak and falls gently
+    // between words, so the rings follow the voice without flickering.
+    let levelSum = 0, levelCount = 0, level = 0, target = 0, ringsOn = 0;
+    const ringInner = $("ringInner"), ringOuter = $("ringOuter");
+    function animateRings(now) {
+      if (levelCount > 0) {
+        const db = 20 * Math.log10(Math.sqrt(levelSum / levelCount) + 1e-6);
+        target = Math.max(0, Math.min(1, (db + 58) / 50));
+        levelSum = levelCount = 0;
+      } else if (!held) target = 0;
+      level += (target - level) * (target > level ? 0.3 : 0.12);
+      ringsOn += ((held ? 1 : 0) - ringsOn) * 0.18;
+      const breathe = held ? 0.025 * Math.sin(now / 420) : 0;
+      ringInner.style.transform = "scale(" + (1.08 + breathe + level * 0.38).toFixed(3) + ")";
+      ringInner.style.opacity = (ringsOn * (0.55 + level * 0.45)).toFixed(3);
+      ringOuter.style.transform = "scale(" + (1.12 + breathe * 1.6 + level * 0.82).toFixed(3) + ")";
+      ringOuter.style.opacity = (ringsOn * level * 0.9).toFixed(3);
+      requestAnimationFrame(animateRings);
+    }
+    requestAnimationFrame(animateRings);
 
     function press(e) {
       e.preventDefault();
