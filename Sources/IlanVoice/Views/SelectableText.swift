@@ -64,7 +64,7 @@ final class MessageNSTextView: NSTextView {
         let menu = super.menu(for: event) ?? NSMenu()
         let range = selectedRange()
         guard range.length > 0 else { return menu }
-        let item = NSMenuItem(title: "Add to Message", action: #selector(addSelectionToMessage), keyEquivalent: "")
+        let item = NSMenuItem(title: "Ask about this", action: #selector(addSelectionToMessage), keyEquivalent: "")
         item.target = self
         item.image = NSImage(systemSymbolName: "text.quote", accessibilityDescription: nil)
         menu.insertItem(item, at: 0)
