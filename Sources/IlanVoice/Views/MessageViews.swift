@@ -4,7 +4,7 @@ struct MessageRow: View {
     let message: Message
     @ObservedObject var session: VoiceSession
     @ObservedObject var clips: ClipPlayer
-    /// Text selected in this message, if any: shows "Add to Message" on the bubble.
+    /// Text selected in this message, if any: shows "Ask about this" under the pointer.
     @Local private var selection: TextSelection?
 
     var body: some View {

@@ -82,7 +82,7 @@ final class MessageNSTextView: NSTextView {
     // MARK: Reporting the selection
 
     /// Tells SwiftUI about finished selections, so the message bubble can show
-    /// its own "Add to Message" button. No popover or coordinate maths: the
+    /// its own "Ask about this" button. No popover or coordinate maths: the
     /// button is laid out by SwiftUI as part of the bubble.
     var onSelection: ((TextSelection?) -> Void)?
 
@@ -182,7 +182,7 @@ struct TextSelection: Equatable {
     }
 }
 
-/// The "Add to Message" button shown next to selected text in a message.
+/// The "Ask about this" button shown next to selected text in a message.
 struct AddToMessagePill: View {
     /// Fixed so the message can place it before it is drawn.
     static let size = CGSize(width: 128, height: 26)
@@ -190,7 +190,7 @@ struct AddToMessagePill: View {
 
     var body: some View {
         Button(action: action) {
-            Label("Add to Message", systemImage: "text.quote")
+            Label("Ask about this", systemImage: "text.quote")
                 .font(.system(size: 11.5, weight: .semibold))
                 .frame(width: Self.size.width, height: Self.size.height)
                 .background(Theme.inkRaised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
