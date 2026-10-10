@@ -89,7 +89,23 @@ final class MessageNSTextView: NSTextView {
     override func mouseDown(with event: NSEvent) {
         Self.closeFloatingButton()
         super.mouseDown(with: event)
-        showFloatingButtonIfSelected()
+        // The event that ended the drag: the button goes where the mouse let go.
+        let release = NSApp.currentEvent.flatMap { $0.window === window ? $0.locationInWindow : nil }
+            ?? event.locationInWindow
+        showFloatingButtonIfSelected(at: convert(release, from: nil))
+    }
+
+    /// SwiftUI measures this view at several trial widths (sizeThatFits), and
+    /// each trial resizes the text container. Re-fit it to the real width
+    /// before drawing, so wrapping, selection and positions match the screen.
+    override func layout() {
+        super.layout()
+        let width = bounds.width
+        if let container = textContainer, width > 0, abs(container.containerSize.width - width) > 0.5 {
+            container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+            layoutManager?.ensureLayout(for: container)
+            needsDisplay = true
+        }
     }
 
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
@@ -99,19 +115,15 @@ final class MessageNSTextView: NSTextView {
         }
     }
 
-    /// A small pill just above the selection, like ChatGPT's "Ask ChatGPT".
-    private func showFloatingButtonIfSelected() {
+    /// A small pill just above where the selection ended, like ChatGPT's
+    /// "Ask ChatGPT". Anchored to the mouse rather than to computed text
+    /// geometry, which is what put it far from the selection before.
+    private func showFloatingButtonIfSelected(at point: NSPoint) {
         let range = selectedRange()
         guard range.length > 0,
               !(string as NSString).substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let layout = layoutManager, let container = textContainer, window != nil else { return }
-        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-        var rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
-        rect.origin.x += textContainerOrigin.x
-        rect.origin.y += textContainerOrigin.y
-        // Anchor on the first line of the selection, centred on it.
-        let firstLine = layout.lineFragmentUsedRect(forGlyphAt: glyphs.location, effectiveRange: nil)
-        let anchor = NSRect(x: rect.minX, y: rect.minY, width: max(1, min(rect.width, firstLine.width)), height: 1)
+              window != nil else { return }
+        let anchor = Self.anchorRect(at: point, in: bounds, lineHeight: layoutManager?.defaultLineHeight(for: font ?? .systemFont(ofSize: 14)) ?? 17)
 
         let controller = NSHostingController(rootView: AddToMessagePill { [weak self] in self?.addSelectionToMessage() })
         controller.representedObject = self
@@ -122,6 +134,15 @@ final class MessageNSTextView: NSTextView {
         popover.appearance = NSAppearance(named: .darkAqua)
         popover.show(relativeTo: anchor, of: self, preferredEdge: .minY)
         Self.floatingButton = popover
+    }
+
+    /// A one-line-tall rect at the release point, kept inside the view, so the
+    /// popover sits right above the line the user finished selecting on.
+    static func anchorRect(at point: NSPoint, in bounds: NSRect, lineHeight: CGFloat) -> NSRect {
+        let x = min(max(point.x, bounds.minX), bounds.maxX)
+        // Flipped view: the line under the pointer starts about half a line above it.
+        let top = min(max(point.y - lineHeight / 2, bounds.minY), max(bounds.minY, bounds.maxY - lineHeight))
+        return NSRect(x: x - 1, y: top, width: 2, height: lineHeight)
     }
 
     // Containers in a scroll view: let wheel events reach the conversation.
