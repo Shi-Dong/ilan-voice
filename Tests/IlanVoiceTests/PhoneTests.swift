@@ -71,6 +71,11 @@ func json(_ message: URLSessionWebSocketTask.Message?) -> [String: Any] {
 @MainActor
 func registerPhoneTests() {
     suite("Phone web server") { test in
+        test("the page stays below the iPhone status bar (no blurred top edge)") {
+            let html = PhoneWebApp.html
+            expect(html.contains(#"name="apple-mobile-web-app-status-bar-style" content="black">"#), "status bar should be opaque")
+            expect(!html.contains("black-translucent"), "a translucent status bar puts the page under iOS's blur")
+        }
         test("serves the page, manifest and icons; unknown paths are 404") {
             let server = MiniHTTPServer()
             server.route = { PhoneServer.file(for: $0) }
