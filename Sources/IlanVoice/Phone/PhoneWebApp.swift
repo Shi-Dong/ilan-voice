@@ -55,7 +55,12 @@ enum PhoneWebApp {
         flex: none; position: relative; z-index: 2; background: var(--raised);
         border-bottom: 1px solid var(--hair); box-shadow: 0 6px 18px rgba(0,0,0,.25); }
       header img { width: 34px; height: 34px; border-radius: 9px; flex: none; }
-      header .title { font-weight: 600; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      /* The title clips long names with "…", so its box hides overflow. Its
+         height is whole pixels with room above and below the letters
+         (24 px line + 2 px padding each side), so the clip never cuts
+         through the top of a letter, which looked like a blurred top edge. */
+      header .title { font-weight: 600; font-size: 17px; line-height: 24px; padding: 2px 0; margin: -2px 0;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       header .status { font-size: 12.5px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
       .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
       .dot.ok { background: var(--mint); } .dot.busy { background: var(--orange); } .dot.rec { background: var(--red); }
