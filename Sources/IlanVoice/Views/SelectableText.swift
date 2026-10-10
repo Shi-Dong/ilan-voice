@@ -193,12 +193,39 @@ struct AddToMessagePill: View {
             Label("Ask about this", systemImage: "text.quote")
                 .font(.system(size: 11.5, weight: .semibold))
                 .frame(width: Self.size.width, height: Self.size.height)
-                .background(Theme.inkRaised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Theme.mint.opacity(0.5)))
-                .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(Theme.mint)
+        .buttonStyle(AskButtonStyle())
         .help("Quote the selected text in the message box")
+    }
+}
+
+/// Dark rounded rectangle that lights up under the pointer: a mint tint,
+/// a brighter border and text, a pointing-hand cursor, and a small press.
+private struct AskButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        AskButtonBody(configuration: configuration)
+    }
+
+    private struct AskButtonBody: View {
+        let configuration: ButtonStyleConfiguration
+        @Local private var hovering = false
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+            configuration.label
+                .foregroundStyle(hovering ? Theme.ink : Theme.mint)
+                .background(shape.fill(hovering ? Theme.mint : Theme.inkRaised))
+                .overlay(shape.stroke(Theme.mint.opacity(hovering ? 1 : 0.5)))
+                .shadow(color: .black.opacity(hovering ? 0.45 : 0.35), radius: hovering ? 8 : 6, y: 2)
+                .scaleEffect(configuration.isPressed ? 0.96 : (hovering ? 1.04 : 1))
+                .contentShape(shape)
+                .onHover { inside in
+                    hovering = inside
+                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+                .onDisappear { if hovering { NSCursor.pop() } }
+                .animation(.easeOut(duration: 0.12), value: hovering)
+                .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+        }
     }
 }
