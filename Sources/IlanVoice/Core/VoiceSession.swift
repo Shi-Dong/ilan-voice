@@ -209,13 +209,29 @@ final class VoiceSession: ObservableObject {
     /// every model, plus `keywords` for the models that take them. Both
     /// gpt-transcribe and gpt-live-transcribe accept keyword hints; older ones
     /// (gpt-4o-transcribe, whisper-1) would reject the field.
-    private func transcriptionConfig(_ dictionary: [String]) -> [String: Any] {
+    private func transcriptionConfig(_ dictionary: [String], context: String? = nil) -> [String: Any] {
         var config: [String: Any] = ["model": settings.transcriptionModel]
-        if let prompt = UserDictionary.transcriptionPrompt(dictionary) { config["prompt"] = prompt }
+        if let prompt = UserDictionary.transcriptionPrompt(dictionary, context: context) { config["prompt"] = prompt }
         if Self.acceptsKeywords(settings.transcriptionModel), !dictionary.isEmpty {
             config["keywords"] = Array(dictionary.prefix(100))
         }
         return config
+    }
+
+    /// What Ilan said last in this conversation, as text.
+    private func lastAssistantText() -> String? {
+        guard let id = conversationID, let conv = store.conversations.first(where: { $0.id == id }) else { return nil }
+        return conv.messages.last { $0.role == .assistant && !$0.text.isEmpty }?.text
+    }
+
+    /// Before each turn, hands the transcriber Ilan's latest reply as context
+    /// (the session itself only had it from when it started).
+    private func refreshTranscriptionContext() {
+        guard let context = lastAssistantText() else { return }
+        client?.send(["type": "session.update", "session": [
+            "type": "realtime",
+            "audio": ["input": ["transcription": transcriptionConfig(UserDictionary.terms(), context: context)]],
+        ]])
     }
 
     static func acceptsKeywords(_ model: String) -> Bool {
@@ -244,7 +260,7 @@ final class VoiceSession: ObservableObject {
                 "input": [
                     "format": ["type": "audio/pcm", "rate": 24000],
                     "turn_detection": NSNull(),
-                    "transcription": transcriptionConfig(dictionary),
+                    "transcription": transcriptionConfig(dictionary, context: lastAssistantText()),
                 ],
                 "output": [
                     "format": ["type": "audio/pcm", "rate": 24000],
@@ -339,7 +355,10 @@ final class VoiceSession: ObservableObject {
 
     private func beginRecording() {
         ensureSession()
-        if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
+        if sessionReady {
+            client?.send(["type": "input_audio_buffer.clear"])
+            refreshTranscriptionContext()
+        }
         bufferedAudio.removeAll()
         recording = Data()
         recordStart = Date()
@@ -544,6 +563,7 @@ final class VoiceSession: ObservableObject {
                 $0.text = text
                 $0.pending = false
             }
+            correctTranscript(convID)
 
         case "conversation.item.input_audio_transcription.failed":
             guard let itemID = event["item_id"] as? String else { return }
@@ -590,6 +610,7 @@ final class VoiceSession: ObservableObject {
             saveReplyAudio(convID, itemID)
             store.updateMessage(convID, itemID) { $0.pending = false }
             retitle(convID)
+            correctTranscript(convID)
 
         case "response.done":
             let response = event["response"] as? [String: Any] ?? [:]
@@ -652,6 +673,31 @@ final class VoiceSession: ObservableObject {
             guard let title = await ConversationTitler.title(for: messages, apiKey: key, model: model),
                   titleRequests[convID] == ticket else { return }
             store.setAutoTitle(convID, title)
+        }
+    }
+
+    /// User messages already sent for correction (each one only once).
+    private var correctedTranscripts: Set<String> = []
+
+    /// Once the user's latest message is transcribed and Ilan has answered it,
+    /// a text model fixes misheard words using the dictionary, the recent
+    /// conversation and Ilan's reply (which shows what was understood). The
+    /// raw transcript is kept in `rawText`. Runs from either event, whichever
+    /// comes last.
+    private func correctTranscript(_ convID: UUID) {
+        guard let conv = store.conversations.first(where: { $0.id == convID }),
+              let (user, reply) = TranscriptFixer.turnToCorrect(conv.messages, done: correctedTranscripts) else { return }
+        correctedTranscripts.insert(user.id)
+        let history = Array(conv.messages.prefix { $0.id != user.id })
+        let key = settings.apiKey, model = settings.titleModel, terms = UserDictionary.terms()
+        Task {
+            guard let fixed = await TranscriptFixer.fix(user.text, dictionary: terms, history: history,
+                                                         reply: reply.text, apiKey: key, model: model) else { return }
+            store.updateMessage(convID, user.id) { message in
+                guard message.text == user.text else { return }  // edited meanwhile
+                message.rawText = message.rawText ?? message.text
+                message.text = fixed
+            }
         }
     }
 

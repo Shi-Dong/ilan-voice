@@ -25,6 +25,8 @@ Conversations name themselves: after every reply, a small text model (GPT-6 Luna
 
 **Dictionary.** Settings → Dictionary is a list of your own words (names, jargon, acronyms): type one to add it, click the trash icon to delete it, or **Import…** a text file with one word or phrase per line (duplicates are skipped). They are sent to the transcription model as a hint and to Ilan as a vocabulary list, so both recognise and spell them your way. Stored in `dictionary.txt` next to `agent.md`.
 
+**Transcripts of what you say.** Before each turn the transcription model is also given what Ilan said last, so it knows the topic. After Ilan answers, a small text model (the title model, GPT-6 Luna by default) fixes misheard words in your transcript using the dictionary, the recent conversation and Ilan's reply; the original transcript is kept in `conversation.json` as `rawText`.
+
 ## Two ways to hear replies
 
 | Mode | What happens |

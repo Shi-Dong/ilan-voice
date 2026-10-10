@@ -65,17 +65,31 @@ enum UserDictionary {
     }
 
     /// Transcription prompts have a length limit; keep the hint well under it.
-    static func transcriptionPrompt(_ terms: [String], maxCharacters: Int = 800) -> String? {
-        guard !terms.isEmpty else { return nil }
-        var prompt = "Vocabulary that may appear, with its exact spelling: "
-        var added = 0
-        for term in terms {
-            let piece = (added == 0 ? "" : ", ") + term
-            if prompt.count + piece.count > maxCharacters { break }
-            prompt += piece
-            added += 1
+    /// `context` is what Ilan said last: speech recognition does better when
+    /// it knows the topic. It gets whatever room the vocabulary leaves, and
+    /// keeps its end (the part nearest to what the user says next).
+    static func transcriptionPrompt(_ terms: [String], context: String? = nil,
+                                    maxCharacters: Int = 800) -> String? {
+        var prompt = ""
+        if !terms.isEmpty {
+            prompt = "Vocabulary that may appear, with its exact spelling: "
+            var added = 0
+            for term in terms {
+                let piece = (added == 0 ? "" : ", ") + term
+                if prompt.count + piece.count > maxCharacters { break }
+                prompt += piece
+                added += 1
+            }
+            prompt += "."
         }
-        return prompt + "."
+        let said = (context ?? "").split(whereSeparator: \.isNewline).joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
+        let lead = (prompt.isEmpty ? "" : " ") + "The user is replying to: \""
+        let room = maxCharacters - prompt.count - lead.count - 1
+        if !said.isEmpty, room >= 40 {
+            prompt += lead + (said.count > room ? "…" + said.suffix(room - 1) : said) + "\""
+        }
+        return prompt.isEmpty ? nil : prompt
     }
 
     static func instructions(_ terms: [String]) -> String? {
