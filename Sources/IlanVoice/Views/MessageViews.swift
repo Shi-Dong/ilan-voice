@@ -5,41 +5,57 @@ struct MessageRow: View {
     @ObservedObject var session: VoiceSession
     @ObservedObject var clips: ClipPlayer
     /// Text selected in this message, if any: shows "Add to Message" on the bubble.
-    @Local private var selection: String?
+    @Local private var selection: TextSelection?
 
     var body: some View {
-        switch message.role {
-        case .user: userBubble
-        case .assistant: assistantCard
-        case .tool: ToolRow(message: message)
+        Group {
+            switch message.role {
+            case .user: userBubble
+            case .assistant: assistantCard
+            case .tool: ToolRow(message: message)
+            }
+        }
+        // The button may stick out above the bubble: draw over the row above.
+        .zIndex(selection == nil ? 0 : 1)
+    }
+
+    /// Sits right under where the mouse let go, inside this message's own layout.
+    private func selectionButton(width: CGFloat) -> some View {
+        Group {
+            if let selection {
+                let origin = selection.buttonOrigin(size: AddToMessagePill.size, width: width)
+                AddToMessagePill {
+                    ComposerModel.shared.addContext(selection.text)
+                    self.selection = nil
+                }
+                .frame(width: AddToMessagePill.size.width, height: AddToMessagePill.size.height)
+                .offset(x: origin.x, y: origin.y)
+                .transition(.opacity)
+            }
         }
     }
 
-    /// Sits on the top edge of the bubble whose text is selected.
-    @ViewBuilder private var addToMessageButton: some View {
-        if let selection {
-            AddToMessagePill {
-                ComposerModel.shared.addContext(selection)
-                self.selection = nil
+    /// Message text with the selection button overlaid at the selection.
+    private func messageText(_ text: String, color: NSColor, lineSpacing: CGFloat = 0) -> some View {
+        SelectableText(text: text, color: color, lineSpacing: lineSpacing, onSelection: { selection = $0 })
+            .overlay(alignment: .topLeading) {
+                GeometryReader { geo in selectionButton(width: geo.size.width) }
             }
-            .transition(.opacity.combined(with: .scale(scale: 0.9)))
-        }
     }
 
     private var userBubble: some View {
         HStack(alignment: .bottom) {
             Spacer(minLength: 80)
             VStack(alignment: .trailing, spacing: 6) {
-                SelectableText(text: message.text.isEmpty ? "Transcribing…" : message.text,
-                               color: NSColor(message.pending ? Theme.ink.opacity(0.55) : Theme.ink),
-                               onSelection: { selection = $0 })
+                messageText(message.text.isEmpty ? "Transcribing…" : message.text,
+                            color: NSColor(message.pending ? Theme.ink.opacity(0.55) : Theme.ink))
                 if message.audioFile != nil {
                     PlayChip(message: message, session: session, clips: clips, dark: true)
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
             .background(Theme.mint, in: BubbleShape(mine: true))
-            .overlay(alignment: .topLeading) { addToMessageButton.offset(y: -14) }
+
         }
     }
 
@@ -50,8 +66,7 @@ struct MessageRow: View {
                 if message.text.isEmpty && message.pending {
                     TypingDots()
                 } else {
-                    SelectableText(text: message.text, color: NSColor(white: 1, alpha: 0.92), lineSpacing: 3,
-                                   onSelection: { selection = $0 })
+                    messageText(message.text, color: NSColor(white: 1, alpha: 0.92), lineSpacing: 3)
                 }
                 if message.audioFile != nil {
                     PlayChip(message: message, session: session, clips: clips, dark: false)
@@ -60,7 +75,7 @@ struct MessageRow: View {
             .padding(.horizontal, 14).padding(.vertical, 11)
             .background(Theme.card, in: BubbleShape(mine: false))
             .overlay(BubbleShape(mine: false).stroke(message.listened ? Theme.hairline : Theme.orange.opacity(0.6)))
-            .overlay(alignment: .topTrailing) { addToMessageButton.offset(y: -14) }
+
             Spacer(minLength: 80)
         }
     }

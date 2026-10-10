@@ -12,8 +12,9 @@ struct SelectableText: NSViewRepresentable {
     var fontSize: CGFloat = 14
     var color: NSColor
     var lineSpacing: CGFloat = 0
-    /// The selected text once a selection is finished, or nil when there is none.
-    var onSelection: (String?) -> Void = { _ in }
+    /// The finished selection (its text and where its first line sits in this
+    /// view, top-left origin), or nil when there is none.
+    var onSelection: (TextSelection?) -> Void = { _ in }
 
     func makeNSView(context: Context) -> MessageNSTextView {
         let view = MessageNSTextView()
@@ -83,12 +84,55 @@ final class MessageNSTextView: NSTextView {
     /// Tells SwiftUI about finished selections, so the message bubble can show
     /// its own "Add to Message" button. No popover or coordinate maths: the
     /// button is laid out by SwiftUI as part of the bubble.
-    var onSelection: ((String?) -> Void)?
+    var onSelection: ((TextSelection?) -> Void)?
+
+    /// Character where the current click or drag began, to tell which end of
+    /// the selection the mouse is at.
+    private var dragStart: Int?
+
+    override func mouseDown(with event: NSEvent) {
+        dragStart = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
+        super.mouseDown(with: event)
+        dragStart = nil
+    }
+
+    /// The end of the selection the mouse let go at: the far end from where
+    /// the drag began (the end for a forward drag or a double-click, the start
+    /// for a backward drag). Without a drag (keyboard), the end.
+    static func activeEnd(of range: NSRange, dragStart: Int?) -> Int {
+        guard let start = dragStart, range.length > 0 else { return NSMaxRange(range) }
+        return abs(start - range.location) <= abs(start - NSMaxRange(range)) ? NSMaxRange(range) : range.location
+    }
+
+    /// The caret at character `index` (between characters), one line tall,
+    /// in this view's own top-left coordinates, from the same layout that
+    /// draws the selection highlight. At the end of a line it stays on that
+    /// line rather than jumping to the start of the next.
+    func caretRect(at index: Int) -> NSRect? {
+        guard let layout = layoutManager, let container = textContainer else { return nil }
+        layout.ensureLayout(for: container)
+        let length = (string as NSString).length
+        guard length > 0 else { return nil }
+        let clamped = max(0, min(index, length))
+        let afterChar = clamped > 0  // caret after the previous character
+        let charIndex = afterChar ? clamped - 1 : 0
+        let glyph = layout.glyphIndexForCharacter(at: charIndex)
+        let line = layout.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
+        let glyphRect = layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container)
+        let x = afterChar ? glyphRect.maxX : glyphRect.minX
+        return NSRect(x: x + textContainerOrigin.x, y: line.minY + textContainerOrigin.y, width: 1, height: line.height)
+    }
 
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
         guard !stillSelecting else { return }
-        onSelection?(Self.selectedText(in: string, range: selectedRange()))
+        let range = selectedRange()
+        guard let text = Self.selectedText(in: string, range: range),
+              let rect = caretRect(at: Self.activeEnd(of: range, dragStart: dragStart)) else {
+            onSelection?(nil)
+            return
+        }
+        onSelection?(TextSelection(text: text, pointer: rect))
     }
 
     /// Clicking into another message (or the message box) ends this selection,
@@ -123,16 +167,32 @@ final class MessageNSTextView: NSTextView {
     override func scrollWheel(with event: NSEvent) { nextResponder?.scrollWheel(with: event) }
 }
 
-/// The "Add to Message" button a message bubble shows while some of its text
-/// is selected.
+/// A finished selection in a message.
+struct TextSelection: Equatable {
+    let text: String
+    /// Where the mouse let go: the caret at that end of the selection, in the
+    /// text view's top-left coordinates.
+    let pointer: CGRect
+
+    /// Top-left corner for a button of `size` right under the pointer's line,
+    /// starting just left of the pointer, kept within `width`.
+    func buttonOrigin(size: CGSize, width: CGFloat, gap: CGFloat = 4) -> CGPoint {
+        let x = max(0, min(pointer.minX - 12, width - size.width))
+        return CGPoint(x: x, y: pointer.maxY + gap)
+    }
+}
+
+/// The "Add to Message" button shown next to selected text in a message.
 struct AddToMessagePill: View {
+    /// Fixed so the message can place it before it is drawn.
+    static let size = CGSize(width: 128, height: 26)
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Label("Add to Message", systemImage: "text.quote")
                 .font(.system(size: 11.5, weight: .semibold))
-                .padding(.horizontal, 9).padding(.vertical, 5)
+                .frame(width: Self.size.width, height: Self.size.height)
                 .background(Theme.inkRaised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Theme.mint.opacity(0.5)))
                 .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
