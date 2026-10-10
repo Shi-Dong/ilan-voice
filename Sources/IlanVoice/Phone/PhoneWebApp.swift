@@ -75,6 +75,18 @@ enum PhoneWebApp {
         box-shadow: 0 0 0 calc(6px + var(--lvl, 0) * 26px) rgba(255,107,107,.18), 0 10px 30px rgba(255,107,107,.35); }
       #talk.held svg { color: #2A0B0B; }
       #talk:disabled { filter: grayscale(1) brightness(.6); }
+      .sheet { position: fixed; inset: 0; background: rgba(5,8,8,.72); display: none; align-items: flex-end; z-index: 5;
+        -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+      .sheet.open { display: flex; }
+      .sheet .panel { width: 100%; background: var(--raised); border-top: 1px solid var(--hair); border-radius: 22px 22px 0 0;
+        padding: 22px 18px calc(env(safe-area-inset-bottom) + 18px); }
+      .sheet h2 { margin: 0 0 4px; font-size: 19px; }
+      .sheet p { margin: 0 0 16px; color: var(--dim); font-size: 14px; }
+      .choice { width: 100%; text-align: left; border: 1px solid var(--hair); background: var(--card); color: var(--text);
+        border-radius: 14px; padding: 12px 14px; margin-bottom: 9px; font: inherit; display: flex; align-items: center; gap: 12px; }
+      .choice .nm { font-weight: 600; }
+      .choice .sub { color: var(--dim); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .choice.new { border-style: dashed; color: var(--mint); justify-content: center; font-weight: 600; }
       .banner { margin: 10px 16px 0; padding: 9px 12px; border-radius: 10px; font-size: 13.5px;
         background: rgba(242,140,42,.14); color: var(--orange); display: none; }
     </style>
@@ -88,6 +100,12 @@ enum PhoneWebApp {
       </div>
     </header>
     <div class="banner" id="banner"></div>
+    <div class="sheet" id="sheet"><div class="panel">
+      <h2>Which iPhone is this?</h2>
+      <p>Pick it to carry on with its conversation, for example after adding Ilan to the home screen again.</p>
+      <div id="phones"></div>
+      <button class="choice new" id="newPhone">This is a new iPhone</button>
+    </div></div>
     <main id="list"><div class="empty"><b>Hold to talk</b>Let go to send. Ilan answers out loud.</div></main>
     <footer>
       <div class="hint" id="hint">Hold the button and speak</div>
@@ -136,6 +154,7 @@ enum PhoneWebApp {
 
     function onJSON(m) {
       if (m.type === "hello_ok") { replaced = false; banner(""); }
+      else if (m.type === "choose_phone") { choosePhone(m.phones); }
       else if (m.type === "replaced") { replaced = true;
         banner("Ilan was opened in another window on this phone. Tap here to use it in this one."); }
       else if (m.type === "auth_failed") { localStorage.removeItem("ilanToken");
@@ -151,6 +170,28 @@ enum PhoneWebApp {
       }
       else if (m.type === "messages") { render(m); }
       else if (m.type === "audio_stop") { stopAudio(); }
+    }
+
+    // Taking over an earlier iPhone's ID resumes its conversation.
+    function choosePhone(phones) {
+      const list = $("phones"); list.innerHTML = "";
+      for (const p of phones) {
+        const b = document.createElement("button");
+        b.className = "choice";
+        const text = document.createElement("div"); text.style.minWidth = "0";
+        const nm = document.createElement("div"); nm.className = "nm"; nm.textContent = p.name;
+        const sub = document.createElement("div"); sub.className = "sub";
+        sub.textContent = p.title ? p.title + (p.when ? " · " + p.when : "") : "No conversation yet";
+        text.append(nm, sub); b.append(text);
+        b.onclick = () => {
+          localStorage.setItem("ilanDevice", p.device); device = p.device;
+          $("sheet").classList.remove("open");
+          if (ws) ws.close(); else connect();
+        };
+        list.appendChild(b);
+      }
+      $("newPhone").onclick = () => { send({ type: "new_phone" }); $("sheet").classList.remove("open"); };
+      $("sheet").classList.add("open");
     }
 
     function setStatus(text, cls) { $("status").textContent = text; $("dot").className = "dot " + cls; }
@@ -176,6 +217,18 @@ enum PhoneWebApp {
       $("replay").disabled = !hasReply;
       if (atBottom || m.items.length) list.scrollTop = list.scrollHeight;
     }
+
+    // ---- Audio routing ----
+    // iOS sends sound to the quiet earpiece whenever a page's audio session
+    // is in "play and record" mode, which is what using the microphone
+    // switches it to. So: replies play from their own audio context with the
+    // session set to "playback" (the loudspeaker); the microphone gets a
+    // separate context that only exists while the button is held, and the
+    // session goes back to "playback" as soon as it is closed.
+    function setAudioSession(type) {
+      try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (e) {}
+    }
+    setAudioSession("playback");
 
     // ---- Playback ----
     function audioContext() {
@@ -203,14 +256,16 @@ enum PhoneWebApp {
     const worklet = `class Tap extends AudioWorkletProcessor {
       process(inputs) { const ch = inputs[0][0]; if (ch) this.port.postMessage(ch.slice(0)); return true; } }
       registerProcessor("tap", Tap);`;
-    let workletReady = null;
+    const workletURL = URL.createObjectURL(new Blob([worklet], { type: "text/javascript" }));
+    let micCtx = null;
 
     async function startMic() {
-      const c = audioContext();
-      if (!workletReady) workletReady = c.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], { type: "text/javascript" })));
-      await workletReady;
+      setAudioSession("play-and-record");
       micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
       if (!sending) { stopMic(); return; }
+      const c = micCtx = new (window.AudioContext || window.webkitAudioContext)();
+      await c.audioWorklet.addModule(workletURL);
+      if (!sending || micCtx !== c) { stopMic(); return; }
       micSource = c.createMediaStreamSource(micStream);
       micNode = new AudioWorkletNode(c, "tap");
       const ratio = c.sampleRate / RATE;
@@ -230,12 +285,13 @@ enum PhoneWebApp {
       };
       micSource.connect(micNode);
     }
-    // The mic is closed after every press: while it is open, iOS plays
-    // everything quietly through the earpiece instead of the speaker.
+    // The mic is closed after every press (see Audio routing above).
     function stopMic() {
       try { micSource && micSource.disconnect(); micNode && micNode.disconnect(); } catch (e) {}
       if (micStream) micStream.getTracks().forEach(t => t.stop());
+      if (micCtx) { micCtx.close().catch(() => {}); micCtx = null; }
       micStream = micNode = micSource = null;
+      setAudioSession("playback");
       $("talk").style.setProperty("--lvl", 0);
     }
 
@@ -243,6 +299,7 @@ enum PhoneWebApp {
       e.preventDefault();
       if (held || !ws || ws.readyState !== 1) return;
       held = true; sending = true;
+      audioContext();  // unlocks reply playback; iOS only allows that inside a touch
       $("talk").classList.add("held");
       stopAudio();
       send({ type: "press" });
