@@ -89,10 +89,8 @@ final class MessageNSTextView: NSTextView {
     override func mouseDown(with event: NSEvent) {
         Self.closeFloatingButton()
         super.mouseDown(with: event)
-        // The event that ended the drag: the button goes where the mouse let go.
-        let release = NSApp.currentEvent.flatMap { $0.window === window ? $0.locationInWindow : nil }
-            ?? event.locationInWindow
-        showFloatingButtonIfSelected(at: convert(release, from: nil))
+        // Where the pointer is now, i.e. where the drag or click ended.
+        showFloatingButtonIfSelected(atScreenPoint: NSEvent.mouseLocation)
     }
 
     /// SwiftUI measures this view at several trial widths (sizeThatFits), and
@@ -115,15 +113,18 @@ final class MessageNSTextView: NSTextView {
         }
     }
 
-    /// A small pill just above where the selection ended, like ChatGPT's
-    /// "Ask ChatGPT". Anchored to the mouse rather than to computed text
-    /// geometry, which is what put it far from the selection before.
-    private func showFloatingButtonIfSelected(at point: NSPoint) {
+    /// A small pill just above the pointer where the selection ended, like
+    /// ChatGPT's "Ask ChatGPT". It is anchored on the window's content view,
+    /// not on this text view: the text view's own frame comes from SwiftUI's
+    /// measuring and is not a reliable reference for placing things.
+    private func showFloatingButtonIfSelected(atScreenPoint screenPoint: NSPoint) {
         let range = selectedRange()
         guard range.length > 0,
               !(string as NSString).substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              window != nil else { return }
-        let anchor = Self.anchorRect(at: point, in: bounds, lineHeight: layoutManager?.defaultLineHeight(for: font ?? .systemFont(ofSize: 14)) ?? 17)
+              let window, let host = window.contentView else { return }
+        let point = host.convert(window.convertPoint(fromScreen: screenPoint), from: nil)
+        let lineHeight = layoutManager?.defaultLineHeight(for: font ?? .systemFont(ofSize: 14)) ?? 17
+        let (anchor, edge) = Self.anchor(at: point, lineHeight: lineHeight, flipped: host.isFlipped)
 
         let controller = NSHostingController(rootView: AddToMessagePill { [weak self] in self?.addSelectionToMessage() })
         controller.representedObject = self
@@ -132,17 +133,15 @@ final class MessageNSTextView: NSTextView {
         popover.behavior = .transient
         popover.animates = false
         popover.appearance = NSAppearance(named: .darkAqua)
-        popover.show(relativeTo: anchor, of: self, preferredEdge: .minY)
+        popover.show(relativeTo: anchor, of: host, preferredEdge: edge)
         Self.floatingButton = popover
     }
 
-    /// A one-line-tall rect at the release point, kept inside the view, so the
-    /// popover sits right above the line the user finished selecting on.
-    static func anchorRect(at point: NSPoint, in bounds: NSRect, lineHeight: CGFloat) -> NSRect {
-        let x = min(max(point.x, bounds.minX), bounds.maxX)
-        // Flipped view: the line under the pointer starts about half a line above it.
-        let top = min(max(point.y - lineHeight / 2, bounds.minY), max(bounds.minY, bounds.maxY - lineHeight))
-        return NSRect(x: x - 1, y: top, width: 2, height: lineHeight)
+    /// A one-line-tall rect centred on the pointer, and the edge that is "up"
+    /// in that view, so the pill sits right above the line under the pointer.
+    static func anchor(at point: NSPoint, lineHeight: CGFloat, flipped: Bool) -> (NSRect, NSRectEdge) {
+        let rect = NSRect(x: point.x - 1, y: point.y - lineHeight / 2, width: 2, height: lineHeight)
+        return (rect, flipped ? .minY : .maxY)
     }
 
     // Containers in a scroll view: let wheel events reach the conversation.
