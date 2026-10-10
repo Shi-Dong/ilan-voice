@@ -40,7 +40,7 @@ func registerTextInputTests() {
     }
 }
 
-/// What counts as a selection worth offering "Add to Message" for.
+/// What counts as a selection, and where its button goes.
 @MainActor
 func registerSelectionButtonTests() {
     suite("Add to Message button") { test in
@@ -55,6 +55,42 @@ func registerSelectionButtonTests() {
         test("an out-of-range selection is ignored, not a crash") {
             expect(MessageNSTextView.selectedText(in: text, range: NSRange(location: 20, length: 40)) == nil)
             expect(MessageNSTextView.selectedText(in: text, range: NSRange(location: NSNotFound, length: 3)) == nil)
+        }
+
+        /// A real message text view, laid out at `width` like SwiftUI does.
+        func view(_ string: String, width: CGFloat) -> MessageNSTextView {
+            let v = MessageNSTextView(frame: NSRect(x: 0, y: 0, width: width, height: 400))
+            v.textContainerInset = .zero
+            v.textContainer?.lineFragmentPadding = 0
+            v.textContainer?.widthTracksTextView = false
+            v.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+            v.textStorage?.setAttributedString(NSAttributedString(string: string, attributes: [.font: NSFont.systemFont(ofSize: 14)]))
+            return v
+        }
+        let para = String(repeating: "word ", count: 60)  // wraps over several lines at 300 pt
+
+        test("the selection rect is on the line the selection starts on") {
+            let v = view(para, width: 300)
+            let first = v.firstLineRect(of: NSRange(location: 0, length: 4))!
+            let later = v.firstLineRect(of: NSRange(location: 200, length: 20))!
+            expect(first.minY < 1, "\(first)")
+            expect(later.minY > first.maxY, "selection further down must be lower: \(later) vs \(first)")
+            expect(later.maxX <= 300.5 && later.minX >= 0, "\(later)")
+        }
+        test("only the first line counts for a multi-line selection") {
+            let v = view(para, width: 300)
+            let oneLine = v.firstLineRect(of: NSRange(location: 0, length: 4))!
+            let multi = v.firstLineRect(of: NSRange(location: 0, length: 150))!
+            expectEqual(multi.minY, oneLine.minY)
+            expect(abs(multi.height - oneLine.height) < 0.5, "\(multi) vs \(oneLine)")
+        }
+        test("the button sits just above the selection and inside the message") {
+            let sel = TextSelection(text: "x", firstLine: CGRect(x: 40, y: 60, width: 80, height: 17))
+            let o = sel.buttonOrigin(size: CGSize(width: 128, height: 26), width: 300)
+            expectEqual(o.x, 40)
+            expectEqual(o.y, 60 - 26 - 4)
+            let right = TextSelection(text: "x", firstLine: CGRect(x: 280, y: 0, width: 10, height: 17))
+            expectEqual(right.buttonOrigin(size: CGSize(width: 128, height: 26), width: 300).x, 172)
         }
     }
 }

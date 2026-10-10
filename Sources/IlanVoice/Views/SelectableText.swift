@@ -12,8 +12,9 @@ struct SelectableText: NSViewRepresentable {
     var fontSize: CGFloat = 14
     var color: NSColor
     var lineSpacing: CGFloat = 0
-    /// The selected text once a selection is finished, or nil when there is none.
-    var onSelection: (String?) -> Void = { _ in }
+    /// The finished selection (its text and where its first line sits in this
+    /// view, top-left origin), or nil when there is none.
+    var onSelection: (TextSelection?) -> Void = { _ in }
 
     func makeNSView(context: Context) -> MessageNSTextView {
         let view = MessageNSTextView()
@@ -83,12 +84,17 @@ final class MessageNSTextView: NSTextView {
     /// Tells SwiftUI about finished selections, so the message bubble can show
     /// its own "Add to Message" button. No popover or coordinate maths: the
     /// button is laid out by SwiftUI as part of the bubble.
-    var onSelection: ((String?) -> Void)?
+    var onSelection: ((TextSelection?) -> Void)?
 
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
         guard !stillSelecting else { return }
-        onSelection?(Self.selectedText(in: string, range: selectedRange()))
+        let range = selectedRange()
+        guard let text = Self.selectedText(in: string, range: range), let rect = firstLineRect(of: range) else {
+            onSelection?(nil)
+            return
+        }
+        onSelection?(TextSelection(text: text, firstLine: rect))
     }
 
     /// Clicking into another message (or the message box) ends this selection,
@@ -97,6 +103,23 @@ final class MessageNSTextView: NSTextView {
         let resigned = super.resignFirstResponder()
         if resigned, selectedRange().length > 0 { setSelectedRange(NSRange(location: selectedRange().location, length: 0)) }
         return resigned
+    }
+
+    /// Where the first line of `range` is drawn, in this view's own (flipped,
+    /// top-left) coordinates. Uses the same layout that draws the selection
+    /// highlight, and nothing outside this view, so it matches the screen.
+    func firstLineRect(of range: NSRange) -> NSRect? {
+        guard let layout = layoutManager, let container = textContainer, range.length > 0 else { return nil }
+        layout.ensureLayout(for: container)
+        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        guard glyphs.length > 0 else { return nil }
+        var lineGlyphs = NSRange()
+        _ = layout.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: &lineGlyphs)
+        let onFirstLine = NSIntersectionRange(glyphs, lineGlyphs)
+        var rect = layout.boundingRect(forGlyphRange: onFirstLine.length > 0 ? onFirstLine : glyphs, in: container)
+        rect.origin.x += textContainerOrigin.x
+        rect.origin.y += textContainerOrigin.y
+        return rect
     }
 
     /// The selected text, or nil when nothing (or only whitespace) is selected.
@@ -123,16 +146,31 @@ final class MessageNSTextView: NSTextView {
     override func scrollWheel(with event: NSEvent) { nextResponder?.scrollWheel(with: event) }
 }
 
-/// The "Add to Message" button a message bubble shows while some of its text
-/// is selected.
+/// A finished selection in a message.
+struct TextSelection: Equatable {
+    let text: String
+    /// The selection's first line, in the text view's top-left coordinates.
+    let firstLine: CGRect
+
+    /// Top-left corner for a button of `size` just above the selection's first
+    /// line, starting where the selection starts, kept within `width`.
+    func buttonOrigin(size: CGSize, width: CGFloat, gap: CGFloat = 4) -> CGPoint {
+        let x = max(0, min(firstLine.minX, width - size.width))
+        return CGPoint(x: x, y: firstLine.minY - size.height - gap)
+    }
+}
+
+/// The "Add to Message" button shown next to selected text in a message.
 struct AddToMessagePill: View {
+    /// Fixed so the message can place it before it is drawn.
+    static let size = CGSize(width: 128, height: 26)
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Label("Add to Message", systemImage: "text.quote")
                 .font(.system(size: 11.5, weight: .semibold))
-                .padding(.horizontal, 9).padding(.vertical, 5)
+                .frame(width: Self.size.width, height: Self.size.height)
                 .background(Theme.inkRaised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Theme.mint.opacity(0.5)))
                 .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
