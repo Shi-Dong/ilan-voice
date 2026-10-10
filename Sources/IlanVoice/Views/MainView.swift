@@ -273,7 +273,7 @@ struct ChatView: View {
 }
 
 /// Quiet footer rows under the conversation list: a hairline, then Settings,
-/// Update, the data folder and the GitHub page as small icon-and-label rows
+/// the data folder, the GitHub page and, last, Update as small icon-and-label rows
 /// in the sidebar's dim text, lit only on hover.
 private struct SidebarFooter: View {
     @ObservedObject var updater: Updater
@@ -286,13 +286,6 @@ private struct SidebarFooter: View {
                     SidebarFooterRow(icon: "gearshape", title: "Settings", trailing: .shortcut("⌘,"))
                 }
                 .buttonStyle(.plain)
-                Button(action: update) {
-                    SidebarFooterRow(icon: updateIcon, title: updateTitle, trailing: updateTrailing,
-                                     highlighted: updater.state.sidebarHighlighted)
-                }
-                .buttonStyle(.plain)
-                .disabled(updater.isBusy)
-                .help(updateHelp)
                 Button { NSWorkspace.shared.open(Paths.root) } label: {
                     SidebarFooterRow(icon: "folder", title: "Open data folder")
                 }
@@ -304,6 +297,13 @@ private struct SidebarFooter: View {
                 }
                 .buttonStyle(.plain)
                 .help("Open \(Updater.repoURL.absoluteString) in your browser")
+                Button(action: update) {
+                    SidebarFooterRow(icon: updateIcon, title: updateTitle, trailing: updateTrailing,
+                                     highlighted: updater.state.sidebarHighlighted)
+                }
+                .buttonStyle(.plain)
+                .disabled(updater.isBusy)
+                .help(updateHelp)
             }
             .padding(.horizontal, 8).padding(.vertical, 8)
         }
