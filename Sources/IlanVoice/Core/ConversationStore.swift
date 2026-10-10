@@ -18,6 +18,8 @@ struct Message: Codable, Identifiable, Equatable {
     var toolArguments: String?
     /// The transcript as heard, when TranscriptFixer corrected `text`.
     var rawText: String?
+    /// Typed in the Mac app's message box rather than spoken.
+    var typed: Bool?
 }
 
 struct Conversation: Codable, Identifiable, Equatable {

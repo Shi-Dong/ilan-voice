@@ -25,7 +25,8 @@ enum TranscriptFixer {
     static func turnToCorrect(_ messages: [Message], done: Set<String>) -> (user: Message, reply: Message)? {
         guard let userIndex = messages.lastIndex(where: { $0.role == .user }) else { return nil }
         let user = messages[userIndex]
-        guard !user.pending, !user.text.isEmpty, user.rawText == nil, !done.contains(user.id) else { return nil }
+        guard !user.pending, !user.text.isEmpty, user.rawText == nil, user.typed != true,
+              !done.contains(user.id) else { return nil }
         guard let reply = messages[(userIndex + 1)...].first(where: { $0.role == .assistant }),
               !reply.pending, !reply.text.isEmpty else { return nil }
         return (user, reply)

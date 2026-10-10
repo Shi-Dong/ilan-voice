@@ -17,10 +17,8 @@ struct MessageRow: View {
         HStack(alignment: .bottom) {
             Spacer(minLength: 80)
             VStack(alignment: .trailing, spacing: 6) {
-                Text(message.text.isEmpty ? "Transcribing…" : message.text)
-                    .font(.system(size: 14))
-                    .foregroundStyle(message.pending ? Theme.ink.opacity(0.55) : Theme.ink)
-                    .textSelection(.enabled)
+                SelectableText(text: message.text.isEmpty ? "Transcribing…" : message.text,
+                               color: NSColor(message.pending ? Theme.ink.opacity(0.55) : Theme.ink))
                 if message.audioFile != nil {
                     PlayChip(message: message, session: session, clips: clips, dark: true)
                 }
@@ -37,11 +35,7 @@ struct MessageRow: View {
                 if message.text.isEmpty && message.pending {
                     TypingDots()
                 } else {
-                    Text(message.text)
-                        .font(.system(size: 14))
-                        .lineSpacing(3)
-                        .foregroundStyle(.white.opacity(0.92))
-                        .textSelection(.enabled)
+                    SelectableText(text: message.text, color: NSColor(white: 1, alpha: 0.92), lineSpacing: 3)
                 }
                 if message.audioFile != nil {
                     PlayChip(message: message, session: session, clips: clips, dark: false)

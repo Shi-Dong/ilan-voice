@@ -83,7 +83,7 @@ private struct GeneralSettings: View {
                     ForEach(OutputMode.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.radioGroup)
-                Text("Real-time plays a reply as it is generated. Cached saves it and waits for you to press play (or Space). Transcripts and audio are always saved.")
+                Text("Real-time plays a reply as it is generated. Cached saves it and waits for you to press play (or ⇧⌘P). Transcripts and audio are always saved.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             WebSearchSection()
