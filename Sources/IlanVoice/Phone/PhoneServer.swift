@@ -31,7 +31,8 @@ final class PhoneServer: ObservableObject {
 
     private let store: ConversationStore
     private let mcp: MCPManager
-    private let http = MiniHTTPServer()
+    /// Internal (not private) so the unit tests can run it on a spare port.
+    let http = MiniHTTPServer()
     /// One client per iPhone, by the device ID the page keeps in its storage.
     private var clients: [String: PhoneClient] = [:]
     /// Connections that haven't sent the pairing code yet; held so they stay alive.
@@ -189,7 +190,7 @@ final class PhoneServer: ObservableObject {
 
     // MARK: Files
 
-    private static func file(for path: String) -> MiniHTTPServer.Response? {
+    static func file(for path: String) -> MiniHTTPServer.Response? {
         switch path {
         case "/", "/index.html":
             return .init(contentType: "text/html; charset=utf-8", body: Data(PhoneWebApp.html.utf8))

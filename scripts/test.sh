@@ -26,4 +26,8 @@ swiftc -j "$JOBS" -Onone -target "$TARGET" -I "$OUT" -L "$OUT" -lIlanVoice \
     -o "$OUT/run-tests" "${TESTS[@]}" 2>"$OUT/tests-build.log" \
     || { grep -E "error" "$OUT/tests-build.log"; exit 1; }
 
-"$OUT/run-tests"
+# A throwaway home folder: the app's data folder, secrets file and so on are
+# created there instead of in the real ~/Library/Application Support.
+HOME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ilan-voice-tests.XXXXXX")"
+trap 'rm -rf "$HOME_DIR"' EXIT
+CFFIXED_USER_HOME="$HOME_DIR" "$OUT/run-tests"
