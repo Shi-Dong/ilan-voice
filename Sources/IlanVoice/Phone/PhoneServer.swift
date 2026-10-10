@@ -169,14 +169,41 @@ final class PhoneServer: ObservableObject {
         }
     }
 
+    /// The app icon with a voice badge in the lower right, so the iPhone web
+    /// app is told apart from other Ilan icons on the home screen.
     private static func icon(_ size: Int) -> MiniHTTPServer.Response? {
-        let source = NSApp.applicationIconImage ?? NSImage()
+        // The square artwork itself, not the Mac's rounded icon (iOS rounds it).
+        let source = Bundle.main.url(forResource: "AppIcon", withExtension: "icns").flatMap(NSImage.init(contentsOf:))
+            ?? NSApp.applicationIconImage ?? NSImage()
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size, bitsPerSample: 8,
                                          samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
                                          bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        source.draw(in: NSRect(x: 0, y: 0, width: size, height: size))
+        let s = CGFloat(size)
+        source.draw(in: NSRect(x: 0, y: 0, width: s, height: s))
+        // Badge: a dark disc with a light ring, inset from the corner so iOS's
+        // rounded mask doesn't clip it.
+        let d = s * 0.42
+        let badge = NSRect(x: s - d - s * 0.07, y: s * 0.07, width: d, height: d)
+        NSColor(red: 0.055, green: 0.071, blue: 0.075, alpha: 1).setFill()
+        NSBezierPath(ovalIn: badge).fill()
+        NSColor.white.withAlphaComponent(0.9).setStroke()
+        let ring = NSBezierPath(ovalIn: badge.insetBy(dx: s * 0.012, dy: s * 0.012))
+        ring.lineWidth = s * 0.024
+        ring.stroke()
+        // Five voice bars, like the listening pill.
+        NSColor(red: 0.663, green: 0.863, blue: 0.796, alpha: 1).setFill()
+        let heights: [CGFloat] = [0.30, 0.58, 0.82, 0.58, 0.30]
+        let barW = d * 0.085, gap = d * 0.06
+        let total = CGFloat(heights.count) * barW + CGFloat(heights.count - 1) * gap
+        var x = badge.midX - total / 2
+        for h in heights {
+            let barH = d * 0.62 * h
+            NSBezierPath(roundedRect: NSRect(x: x, y: badge.midY - barH / 2, width: barW, height: barH),
+                         xRadius: barW / 2, yRadius: barW / 2).fill()
+            x += barW + gap
+        }
         NSGraphicsContext.restoreGraphicsState()
         guard let png = rep.representation(using: .png, properties: [:]) else { return nil }
         return .init(contentType: "image/png", body: png)

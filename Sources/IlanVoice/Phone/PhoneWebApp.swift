@@ -177,6 +177,18 @@ enum PhoneWebApp {
       if (atBottom || m.items.length) list.scrollTop = list.scrollHeight;
     }
 
+    // ---- Audio routing ----
+    // iOS sends sound to the quiet earpiece whenever a page's audio session
+    // is in "play and record" mode, which is what using the microphone
+    // switches it to. So: replies play from their own audio context with the
+    // session set to "playback" (the loudspeaker); the microphone gets a
+    // separate context that only exists while the button is held, and the
+    // session goes back to "playback" as soon as it is closed.
+    function setAudioSession(type) {
+      try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (e) {}
+    }
+    setAudioSession("playback");
+
     // ---- Playback ----
     function audioContext() {
       if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -203,14 +215,16 @@ enum PhoneWebApp {
     const worklet = `class Tap extends AudioWorkletProcessor {
       process(inputs) { const ch = inputs[0][0]; if (ch) this.port.postMessage(ch.slice(0)); return true; } }
       registerProcessor("tap", Tap);`;
-    let workletReady = null;
+    const workletURL = URL.createObjectURL(new Blob([worklet], { type: "text/javascript" }));
+    let micCtx = null;
 
     async function startMic() {
-      const c = audioContext();
-      if (!workletReady) workletReady = c.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], { type: "text/javascript" })));
-      await workletReady;
+      setAudioSession("play-and-record");
       micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
       if (!sending) { stopMic(); return; }
+      const c = micCtx = new (window.AudioContext || window.webkitAudioContext)();
+      await c.audioWorklet.addModule(workletURL);
+      if (!sending || micCtx !== c) { stopMic(); return; }
       micSource = c.createMediaStreamSource(micStream);
       micNode = new AudioWorkletNode(c, "tap");
       const ratio = c.sampleRate / RATE;
@@ -230,12 +244,13 @@ enum PhoneWebApp {
       };
       micSource.connect(micNode);
     }
-    // The mic is closed after every press: while it is open, iOS plays
-    // everything quietly through the earpiece instead of the speaker.
+    // The mic is closed after every press (see Audio routing above).
     function stopMic() {
       try { micSource && micSource.disconnect(); micNode && micNode.disconnect(); } catch (e) {}
       if (micStream) micStream.getTracks().forEach(t => t.stop());
+      if (micCtx) { micCtx.close().catch(() => {}); micCtx = null; }
       micStream = micNode = micSource = null;
+      setAudioSession("playback");
       $("talk").style.setProperty("--lvl", 0);
     }
 
@@ -243,6 +258,7 @@ enum PhoneWebApp {
       e.preventDefault();
       if (held || !ws || ws.readyState !== 1) return;
       held = true; sending = true;
+      audioContext();  // unlocks reply playback; iOS only allows that inside a touch
       $("talk").classList.add("held");
       stopAudio();
       send({ type: "press" });
