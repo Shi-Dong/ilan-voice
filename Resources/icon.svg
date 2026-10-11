@@ -1,5 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <!-- The app's icon: the same portrait as before, redrawn in a few flat
+  <!-- The Ilan Voice icon (Mac app and README): the portrait with a big toothy
+       smile on a light red background. The Mac app and the iPhone web app use
+       the same artwork (icon.svg and icon-phone.svg differ only in comments).
+       icon-512.png is a render of this file at 512;
+       edit this, then re-render. Notes from icon.svg follow.
+       The app's icon: the same portrait as before, redrawn in a few flat
        shapes and strokes so it still reads at tab size, where the shaded
        original turned to mush. Drawn as shapes rather than traced, so it
        rasterises identically wherever it is rendered. Full-bleed and opaque
@@ -12,6 +17,9 @@
     <!-- The head: a wide crown tapering to the chin. -->
     <path id="head" d="M256 64 C340 64 404 140 404 222 C404 320 338 392 256 392 C174 392 108 320 108 222 C108 140 172 64 256 64 Z"/>
     <clipPath id="face"><use href="#head"/></clipPath>
+    <!-- The open, smiling mouth: a gentle upper lip, a deep lower curve. -->
+    <path id="mouth" d="M206 300 Q256 316 306 300 Q304 354 256 356 Q208 354 206 300 Z"/>
+    <clipPath id="inside"><use href="#mouth"/></clipPath>
   </defs>
   <rect width="512" height="512" fill="#f4a7a3"/>
   <!-- jacket, shoulders -->
@@ -30,13 +38,19 @@
   <!-- the beard shadow: from the sideburns down to the corners of the mouth
        and back up under the nose, a shade darker than the skin -->
   <path d="M108 236 Q160 250 200 300 Q256 272 312 300 Q352 250 404 236 L404 400 L108 400 Z" fill="#e3b493" clip-path="url(#face)"/>
-  <!-- brows, eyes, nose, smile -->
+  <!-- brows, eyes, nose -->
   <g fill="none" stroke="#3a2b24" stroke-linecap="round" stroke-linejoin="round">
     <path d="M180 206 Q210 190 240 200" stroke-width="14"/>
     <path d="M272 200 Q302 190 332 206" stroke-width="14"/>
     <path d="M262 244 Q250 274 270 282" stroke-width="10"/>
-    <path d="M208 304 Q256 346 304 304" stroke-width="12"/>
   </g>
+  <!-- a big smile with teeth: dark mouth, a row of top teeth, a little tongue -->
+  <use href="#mouth" fill="#3a2b24"/>
+  <g clip-path="url(#inside)">
+    <path d="M200 292 L312 292 L312 322 Q256 333 200 322 Z" fill="#ffffff"/>
+    <ellipse cx="256" cy="358" rx="30" ry="17" fill="#e0706a"/>
+  </g>
+  <use href="#mouth" fill="none" stroke="#3a2b24" stroke-width="8" stroke-linejoin="round"/>
   <circle cx="208" cy="236" r="12" fill="#3a2b24"/>
   <circle cx="304" cy="236" r="12" fill="#3a2b24"/>
 </svg>
