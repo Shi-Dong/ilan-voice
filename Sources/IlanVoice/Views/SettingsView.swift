@@ -33,7 +33,7 @@ struct SettingsView: View {
         }
         .frame(width: 640, height: 520)
         .preferredColorScheme(.dark)
-        .tint(Theme.mint)
+        .tint(Theme.accent)
     }
 }
 
@@ -269,7 +269,7 @@ private struct MCPSettings: View {
             ForEach(mcp.servers) { s in
                 Rectangle().fill(Theme.hairline).frame(height: 1)
                 HStack(spacing: 8) {
-                    Circle().fill(s.ok ? Theme.mint : Theme.orange).frame(width: 7, height: 7)
+                    Circle().fill(s.ok ? Theme.accent : Theme.orange).frame(width: 7, height: 7)
                     Text(s.name).font(.system(size: 12, weight: .medium))
                     Spacer(minLength: 12)
                     Text(s.state)
@@ -360,7 +360,7 @@ private struct UpdatesSection: View {
         case .checking:
             HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Checking…") }
         case .upToDate:
-            Label("Up to date", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.mint)
+            Label("Up to date", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.accent)
         case .available(let commit, let summary, let date):
             VStack(alignment: .leading, spacing: 2) {
                 Label("Update available · \(commit.prefix(7))", systemImage: "arrow.down.circle.fill")
@@ -374,7 +374,7 @@ private struct UpdatesSection: View {
                 Text(step).font(.caption).foregroundStyle(.secondary)
             }
         case .readyToRestart:
-            Label("Update installed. Restart to use it.", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.mint)
+            Label("Update installed. Restart to use it.", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.accent)
         case .failed(let message):
             VStack(alignment: .leading, spacing: 4) {
                 Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.orange)
@@ -668,7 +668,7 @@ private struct WebSearchSection: View {
             HStack {
                 Text("Web Search")
                 Spacer()
-                Text(status).font(.caption).foregroundStyle(settings.webSearchAvailable ? Theme.mint : Theme.orange)
+                Text(status).font(.caption).foregroundStyle(settings.webSearchAvailable ? Theme.accent : Theme.orange)
             }
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
@@ -780,7 +780,7 @@ private struct APIKeyRow: View {
                     Label(APIKeyCheck.hint(for: key), systemImage: "checkmark.seal.fill")
                         .labelStyle(.titleAndIcon)
                         .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(Theme.mint)
+                        .foregroundStyle(Theme.accent)
                 } else {
                     Label("Not set", systemImage: "exclamationmark.circle")
                         .foregroundStyle(Theme.orange)
@@ -937,7 +937,7 @@ private struct PhoneSection: View {
 
     private var statusDot: some View {
         let color: Color = switch phone.status {
-        case .running: phone.connectedCount > 0 ? Theme.mint : Theme.mintDeep
+        case .running: phone.connectedCount > 0 ? Theme.accent : Theme.accentDeep
         case .failed: Theme.orange
         default: Color.secondary.opacity(0.5)
         }

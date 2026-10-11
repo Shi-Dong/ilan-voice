@@ -203,7 +203,7 @@ final class PhoneServer: ObservableObject {
     }
 
     /// The iPhone web app's icon: the portrait with a toothy smile
-    /// (Resources/icon-phone.svg), so it is told apart from the Mac app.
+    /// (Resources/icon-phone.svg), the same artwork as the Mac app.
     private static func icon(_ size: Int) -> MiniHTTPServer.Response? {
         let source = Bundle.main.url(forResource: "icon-phone-512", withExtension: "png").flatMap(NSImage.init(contentsOf:))
             ?? NSApp.applicationIconImage ?? NSImage()

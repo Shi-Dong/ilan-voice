@@ -17,7 +17,7 @@ struct MainView: View {
         }
         .background(Theme.background)
         .preferredColorScheme(.dark)
-        .tint(Theme.mint)
+        .tint(Theme.accent)
         .onChange(of: store.selectedID) { _, _ in
             session.clips.stop()
             session.connect()
@@ -45,7 +45,7 @@ struct Sidebar: View {
                             if conv.isFromIPhone {
                                 Image(systemName: "iphone")
                                     .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(Theme.mint)
+                                    .foregroundStyle(Theme.accent)
                                     .help("Started on \(conv.deviceName ?? "an iPhone"). You can continue it here.")
                             }
                             Text(conv.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
@@ -58,7 +58,7 @@ struct Sidebar: View {
                                 } label: {
                                     Image(systemName: "terminal.fill")
                                         .font(.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(Theme.mint)
+                                        .foregroundStyle(Theme.accent)
                                 }
                                 .menuStyle(.borderlessButton)
                                 .menuIndicator(.hidden)
@@ -206,7 +206,7 @@ struct ChatView: View {
 
     private var emptyState: some View {
         VStack(spacing: 14) {
-            AppIcon(size: 88).shadow(color: Theme.mint.opacity(0.25), radius: 30)
+            AppIcon(size: 88).shadow(color: Theme.accent.opacity(0.25), radius: 30)
             Text("Hold \(settings.talkTrigger.shortLabel) and speak")
                 .font(.system(size: 22, weight: .semibold, design: .rounded))
             Text("Let go to send. Ilan answers out loud\(settings.outputMode == .cached ? " — replies wait for you to press play" : "").")

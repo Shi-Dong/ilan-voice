@@ -199,7 +199,7 @@ struct AddToMessagePill: View {
     }
 }
 
-/// Dark rounded rectangle that lights up under the pointer: a mint tint,
+/// Dark rounded rectangle that lights up under the pointer: an accent fill,
 /// a brighter border and text, a pointing-hand cursor, and a small press.
 private struct AskButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -213,9 +213,9 @@ private struct AskButtonStyle: ButtonStyle {
         var body: some View {
             let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
             configuration.label
-                .foregroundStyle(hovering ? Theme.ink : Theme.mint)
-                .background(shape.fill(hovering ? Theme.mint : Theme.inkRaised))
-                .overlay(shape.stroke(Theme.mint.opacity(hovering ? 1 : 0.5)))
+                .foregroundStyle(hovering ? Theme.ink : Theme.accent)
+                .background(shape.fill(hovering ? Theme.accent : Theme.inkRaised))
+                .overlay(shape.stroke(Theme.accent.opacity(hovering ? 1 : 0.5)))
                 .shadow(color: .black.opacity(hovering ? 0.45 : 0.35), radius: hovering ? 8 : 6, y: 2)
                 .scaleEffect(configuration.isPressed ? 0.96 : (hovering ? 1.04 : 1))
                 .contentShape(shape)

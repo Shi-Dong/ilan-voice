@@ -54,7 +54,7 @@ struct MessageRow: View {
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(Theme.mint, in: BubbleShape(mine: true))
+            .background(Theme.accent, in: BubbleShape(mine: true))
 
         }
     }
@@ -148,7 +148,7 @@ struct ToolRow: View {
             if expanded {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(message.toolArguments ?? "{}")
-                        .foregroundStyle(Theme.mint.opacity(0.8))
+                        .foregroundStyle(Theme.accent.opacity(0.8))
                     Divider().overlay(Theme.hairline)
                     Text(message.text.prefix(4000))
                         .foregroundStyle(.white.opacity(0.7))

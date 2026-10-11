@@ -10,8 +10,8 @@ enum PhoneWebApp {
       "name": "Ilan Voice",
       "short_name": "Ilan",
       "display": "standalone",
-      "background_color": "#0E1213",
-      "theme_color": "#161D1C",
+      "background_color": "#131010",
+      "theme_color": "#1D1818",
       "icons": [
         { "src": "/icon-180.png", "sizes": "180x180", "type": "image/png" },
         { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
@@ -32,14 +32,14 @@ enum PhoneWebApp {
          blurred fade that a page cannot remove. -->
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Ilan">
-    <meta name="theme-color" content="#161D1C">
+    <meta name="theme-color" content="#1D1818">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icon-180.png">
     <title>Ilan Voice</title>
     <style>
       :root {
-        --ink: #0E1213; --raised: #161D1C; --card: rgba(255,255,255,.055); --hair: rgba(255,255,255,.08);
-        --text: #E9EFED; --dim: rgba(255,255,255,.55); --mint: #A9DCCB; --mint-deep: #4DA88F; --orange: #F28C2A; --red: #FF6B6B;
+        --ink: #131010; --raised: #1D1818; --card: rgba(255,255,255,.055); --hair: rgba(255,255,255,.08);
+        --text: #F0EAEA; --dim: rgba(255,255,255,.55); --accent: #F4A7A3; --accent-deep: #E0706A; --ready: #A9DCCB; --orange: #F28C2A; --red: #FF6B6B;
       }
       * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
       html, body { margin: 0; height: 100%; background: var(--ink); color: var(--text);
@@ -50,7 +50,7 @@ enum PhoneWebApp {
          at the very top, so the status bar sits on a crisp, even band rather
          than on the soft background gradient. */
       body { display: flex; flex-direction: column; overflow: hidden; height: 100vh; height: 100dvh;
-        background: radial-gradient(120% 60% at 50% 30%, #15211F 0%, var(--ink) 60%); }
+        background: radial-gradient(120% 60% at 50% 30%, #231918 0%, var(--ink) 60%); }
       header { padding: calc(env(safe-area-inset-top) + 12px) 20px 12px; display: flex; align-items: center; gap: 12px;
         flex: none; position: relative; z-index: 2; background: var(--raised);
         border-bottom: 1px solid var(--hair); box-shadow: 0 6px 18px rgba(0,0,0,.25); }
@@ -67,18 +67,18 @@ enum PhoneWebApp {
       #reconnect svg { width: 17px; height: 17px; transition: transform .6s ease; }
       #reconnect.spin svg { transform: rotate(180deg); }
       .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
-      .dot.ok { background: var(--mint); } .dot.busy { background: var(--orange); } .dot.rec { background: var(--red); }
+      .dot.ok { background: var(--ready); } .dot.busy { background: var(--orange); } .dot.rec { background: var(--red); }
       main { flex: 1; overflow-y: auto; padding: 16px 16px 24px; display: flex; flex-direction: column; gap: 10px;
         -webkit-overflow-scrolling: touch; }
       .empty { margin: auto; text-align: center; color: var(--dim); font-size: 15px; padding: 0 30px; }
       .empty b { display: block; color: var(--text); font-size: 20px; margin-bottom: 6px; }
       .msg { max-width: 84%; padding: 9px 13px; border-radius: 17px; font-size: 15.5px; white-space: pre-wrap; word-wrap: break-word; }
-      .msg.user { align-self: flex-end; background: var(--mint-deep); color: #06120F; border-bottom-right-radius: 5px; }
+      .msg.user { align-self: flex-end; background: var(--accent); color: #1A0E0D; border-bottom-right-radius: 5px; }
       .msg.assistant { align-self: flex-start; background: var(--card); border: 1px solid var(--hair); border-bottom-left-radius: 5px; }
       .msg.tool { align-self: flex-start; font-size: 12.5px; color: var(--dim); padding: 2px 6px; }
       .msg.pending { opacity: .6; }
       footer { padding: 8px 24px max(10px, calc(env(safe-area-inset-bottom) - 8px)); display: grid;
-        grid-template-columns: 1fr auto 1fr; align-items: center; border-top: 1px solid var(--hair); background: rgba(14,18,19,.85); }
+        grid-template-columns: 1fr auto 1fr; align-items: center; border-top: 1px solid var(--hair); background: rgba(19,16,16,.85); }
       .hint { grid-column: 1 / -1; text-align: center; font-size: 12.5px; color: var(--dim); margin-bottom: 6px; min-height: 17px; }
       .side { width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--hair); background: var(--card); color: var(--text);
         display: flex; align-items: center; justify-content: center; justify-self: start; }
@@ -86,9 +86,9 @@ enum PhoneWebApp {
       .side svg { width: 22px; height: 22px; }
       #talk { width: 96px; height: 96px; border-radius: 50%; border: none; position: relative; touch-action: none;
         -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
-        background: radial-gradient(circle at 35% 30%, #CFF0E4, var(--mint) 45%, var(--mint-deep));
-        box-shadow: 0 0 0 6px rgba(169,220,203,.12), 0 10px 30px rgba(77,168,143,.35); transition: transform .12s; }
-      #talk svg { width: 38px; height: 38px; color: #0B1F19; }
+        background: radial-gradient(circle at 35% 30%, #FFE1DF, var(--accent) 45%, var(--accent-deep));
+        box-shadow: 0 0 0 6px rgba(244,167,163,.12), 0 10px 30px rgba(224,112,106,.35); transition: transform .12s; }
+      #talk svg { width: 38px; height: 38px; color: #2A1210; }
       #talk.held { transform: scale(1.08); background: radial-gradient(circle at 35% 30%, #FFC9C9, var(--red) 55%, #C94444);
         box-shadow: 0 10px 30px rgba(255,107,107,.35); }
       /* The voice halo: a canvas behind the button, drawn every frame from the
@@ -104,7 +104,7 @@ enum PhoneWebApp {
       #talk.held.cancel svg { color: #1c2221; }
       .hint.cancel { color: var(--red); font-weight: 600; }
       #talk:disabled { filter: grayscale(1) brightness(.6); }
-      .sheet { position: fixed; inset: 0; background: rgba(5,8,8,.72); display: none; align-items: flex-end; z-index: 5;
+      .sheet { position: fixed; inset: 0; background: rgba(8,5,5,.72); display: none; align-items: flex-end; z-index: 5;
         -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
       .sheet.open { display: flex; }
       .sheet .panel { width: 100%; background: var(--raised); border-top: 1px solid var(--hair); border-radius: 22px 22px 0 0;
@@ -115,7 +115,7 @@ enum PhoneWebApp {
         border-radius: 14px; padding: 12px 14px; margin-bottom: 9px; font: inherit; display: flex; align-items: center; gap: 12px; }
       .choice .nm { font-weight: 600; }
       .choice .sub { color: var(--dim); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .choice.new { border-style: dashed; color: var(--mint); justify-content: center; font-weight: 600; }
+      .choice.new { border-style: dashed; color: var(--accent); justify-content: center; font-weight: 600; }
       .banner { margin: 10px 16px 0; padding: 9px 12px; border-radius: 10px; font-size: 13.5px;
         background: rgba(242,140,42,.14); color: var(--orange); display: none; }
     </style>

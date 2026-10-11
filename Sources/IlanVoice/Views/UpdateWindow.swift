@@ -39,7 +39,7 @@ private struct UpdateProgressView: View {
                 case .installing(let step):
                     ProgressView(value: updater.progress)
                         .progressViewStyle(.linear)
-                        .tint(Theme.mint)
+                        .tint(Theme.accent)
                     Text(step).font(.caption).foregroundStyle(.secondary)
                     // Shown greyed out until the build finishes.
                     buttons {
@@ -48,7 +48,7 @@ private struct UpdateProgressView: View {
                             .disabled(true)
                     }
                 case .readyToRestart:
-                    ProgressView(value: 1).progressViewStyle(.linear).tint(Theme.mint)
+                    ProgressView(value: 1).progressViewStyle(.linear).tint(Theme.accent)
                     Text("The new version is installed. Restart Ilan Voice to start using it. If you choose Later, it is used the next time the app opens.")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -75,7 +75,7 @@ private struct UpdateProgressView: View {
         .padding(20)
         .frame(width: 400)
         .preferredColorScheme(.dark)
-        .tint(Theme.mint)
+        .tint(Theme.accent)
     }
 
     private var title: String {
