@@ -658,7 +658,6 @@ final class VoiceSession: ObservableObject {
             saveReplyAudio(convID, itemID)
             store.updateMessage(convID, itemID) { $0.pending = false }
             retitle(convID)
-            correctTranscript(convID)
 
         case "response.done":
             let response = event["response"] as? [String: Any] ?? [:]
@@ -672,8 +671,10 @@ final class VoiceSession: ObservableObject {
             speaker.flush()
             if !calls.isEmpty {
                 runTools(calls, convID)
-            } else if !speaker.isPlaying {
-                phase = .ready
+            } else {
+                if !speaker.isPlaying { phase = .ready }
+                // Ilan's whole answer (replies and tool calls) is in: fix the transcript.
+                correctTranscript(convID)
             }
             if response["status"] as? String == "failed",
                let details = response["status_details"] as? [String: Any],
@@ -727,20 +728,24 @@ final class VoiceSession: ObservableObject {
     /// User messages already sent for correction (each one only once).
     private var correctedTranscripts: Set<String> = []
 
-    /// Once the user's latest message is transcribed and Ilan has answered it,
-    /// a text model fixes misheard words using the dictionary, the recent
-    /// conversation and Ilan's reply (which shows what was understood). The
-    /// raw transcript is kept in `rawText`. Runs from either event, whichever
-    /// comes last.
+    /// Once the user's latest message is transcribed and Ilan's whole answer
+    /// is done (final reply after any tool calls), a text model fixes misheard
+    /// words using the dictionary, the recent conversation, Ilan's tool calls
+    /// and replies. The raw transcript is kept in `rawText`. Runs from either
+    /// event (transcript done, final response done), whichever comes last.
     private func correctTranscript(_ convID: UUID) {
+        let finished = !responseActive && phase != .thinking && phase != .working
         guard let conv = store.conversations.first(where: { $0.id == convID }),
-              let (user, reply) = TranscriptFixer.turnToCorrect(conv.messages, done: correctedTranscripts) else { return }
+              let turn = TranscriptFixer.turnToCorrect(conv.messages, done: correctedTranscripts,
+                                                       turnFinished: finished) else { return }
+        let user = turn.user
+        let reply = turn.replies.map(\.text).joined(separator: "\n")
         correctedTranscripts.insert(user.id)
         let history = Array(conv.messages.prefix { $0.id != user.id })
         let key = settings.apiKey, model = settings.titleModel, terms = UserDictionary.terms()
         Task {
             guard let fixed = await TranscriptFixer.fix(user.text, dictionary: terms, history: history,
-                                                         reply: reply.text, apiKey: key, model: model) else { return }
+                                                         tools: turn.tools, reply: reply, apiKey: key, model: model) else { return }
             store.updateMessage(convID, user.id) { message in
                 guard message.text == user.text else { return }  // edited meanwhile
                 message.rawText = message.rawText ?? message.text

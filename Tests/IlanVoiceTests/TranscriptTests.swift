@@ -39,7 +39,8 @@ func registerTranscriptQualityTests() {
             expect(TranscriptFixer.turnToCorrect([msg("u", .user, "hi"), msg("a", .assistant, "...", pending: true)], done: []) == nil)
             let turn = TranscriptFixer.turnToCorrect([msg("u", .user, "hi"), msg("t", .tool, "x"), msg("a", .assistant, "Hello")], done: [])
             expectEqual(turn?.user.id, "u")
-            expectEqual(turn?.reply.id, "a")
+            expectEqual(turn?.replies.map(\.id), ["a"])
+            expectEqual(turn?.tools.map(\.id), ["t"])
         }
         test("corrects each message once, and only the latest") {
             let messages = [msg("u1", .user, "one"), msg("a1", .assistant, "A"), msg("u2", .user, "two"), msg("a2", .assistant, "B")]
@@ -49,14 +50,41 @@ func registerTranscriptQualityTests() {
             fixed[2].rawText = "too"
             expect(TranscriptFixer.turnToCorrect(fixed, done: []) == nil)
         }
-        test("keeps the original unless the answer is a plausible correction") {
+        test("waits for Ilan's whole answer, including tool calls") {
+            let turn = [msg("u", .user, "check the box"), msg("a1", .assistant, "Let me check."),
+                        msg("t", .tool, "", pending: true)]
+            expect(TranscriptFixer.turnToCorrect(turn, done: []) == nil, "a tool call is still running")
+            let done = [msg("u", .user, "check the box"), msg("a1", .assistant, "Let me check."),
+                        msg("t", .tool, "ok"), msg("a2", .assistant, "It's up.")]
+            expect(TranscriptFixer.turnToCorrect(done, done: [], turnFinished: false) == nil, "response still running")
+            expectEqual(TranscriptFixer.turnToCorrect(done, done: [])?.replies.map(\.id), ["a1", "a2"])
+        }
+        test("any non-empty, changed answer is used; length is not checked") {
             expectEqual(TranscriptFixer.accept(original: "launch it on the dev box", corrected: "launch it on the devbox"),
                         "launch it on the devbox")
             expectEqual(TranscriptFixer.accept(original: "ask sigh lang", corrected: "\"ask SGLang\"\n"), "ask SGLang")
             expect(TranscriptFixer.accept(original: "same", corrected: "same") == nil)
             expect(TranscriptFixer.accept(original: "hi", corrected: "  ") == nil)
-            let rambling = "Sure! Here is a detailed answer to your question about the weather and much more besides."
-            expect(TranscriptFixer.accept(original: "what's the weather like", corrected: rambling) == nil)
+            let longer = "so um yeah run it on shi-h200-1 and then check the logs on shi-h200-2 as well please"
+            expectEqual(TranscriptFixer.accept(original: "so um yeah run it", corrected: longer), longer)
+        }
+        test("tool calls go in with their arguments, cut when long") {
+            var tool = msg("t", .tool, "huge output that is not sent")
+            tool.toolName = "run_shell"
+            tool.toolArguments = #"{"command":"ssh shi-h200-1 nvidia-smi"}"#
+            let input = TranscriptFixer.input("run it on she h two hundred one", dictionary: [], history: [],
+                                              tools: [tool], reply: "Running nvidia-smi on shi-h200-1.")
+            expect(input.contains("Tool calls the assistant made for this message:\n- run_shell({\"command\":\"ssh shi-h200-1 nvidia-smi\"})"), input)
+            expect(!input.contains("huge output"), "tool output must not be sent")
+            expect(input.range(of: "Tool calls")!.lowerBound > input.range(of: "Transcript to correct")!.lowerBound)
+            tool.toolArguments = String(repeating: "x", count: 2000)
+            expectEqual(TranscriptFixer.describe(tool: tool).count, "run_shell(".count + TranscriptFixer.maxToolArguments + 2)
+        }
+        test("the instructions forbid polishing and rewording") {
+            let s = TranscriptFixer.instructions
+            expect(s.contains("Do not polish, rephrase, shorten, summarise"), s)
+            expect(s.contains("When unsure, leave the word as it is"), s)
+            expect(s.contains("tool calls"), s)
         }
         test("the request carries vocabulary, context, transcript and reply") {
             let input = TranscriptFixer.input("run it on shy h two hundred", dictionary: ["shi-h200-1"],
