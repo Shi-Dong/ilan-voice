@@ -1,26 +1,28 @@
 import SwiftUI
 
-/// Colours lifted from the Ilan icon: its mint background and orange lanyard,
-/// set on a deep green-black.
+/// Colours lifted from the Ilan icon: its light red background and orange
+/// lanyard, set on a warm near-black.
 enum Theme {
-    static let mint = Color(red: 0.663, green: 0.863, blue: 0.796)       // #A9DCCB
-    static let mintDeep = Color(red: 0.302, green: 0.659, blue: 0.561)   // #4DA88F
+    static let accent = Color(red: 0.957, green: 0.655, blue: 0.639)     // #F4A7A3
+    static let accentDeep = Color(red: 0.878, green: 0.439, blue: 0.416) // #E0706A
+    /// "Ready" stays green so it can't be mistaken for red "Listening".
+    static let ready = Color(red: 0.663, green: 0.863, blue: 0.796)      // #A9DCCB
     static let orange = Color(red: 0.949, green: 0.549, blue: 0.165)     // #F28C2A
-    static let ink = Color(red: 0.055, green: 0.071, blue: 0.075)        // #0E1213
-    static let inkRaised = Color(red: 0.086, green: 0.114, blue: 0.110)  // #161D1C
+    static let ink = Color(red: 0.075, green: 0.063, blue: 0.063)        // #131010
+    static let inkRaised = Color(red: 0.114, green: 0.094, blue: 0.094)  // #1D1818
     static let card = Color.white.opacity(0.055)
     static let hairline = Color.white.opacity(0.08)
     static let textDim = Color.white.opacity(0.55)
 
     static let background = LinearGradient(
-        colors: [Color(red: 0.067, green: 0.098, blue: 0.094), ink],
+        colors: [Color(red: 0.102, green: 0.078, blue: 0.078), ink],
         startPoint: .top, endPoint: .bottom)
 
     static func color(for phase: VoiceSession.Phase) -> Color {
         switch phase {
         case .offline: .gray
         case .connecting: .yellow
-        case .ready: mint
+        case .ready: ready
         case .recording: Color(red: 1, green: 0.42, blue: 0.42)
         case .thinking, .working: Color(red: 0.69, green: 0.84, blue: 1)
         case .speaking: orange

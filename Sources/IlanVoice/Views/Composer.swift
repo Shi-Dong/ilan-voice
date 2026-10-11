@@ -70,7 +70,7 @@ struct ComposerBar: View {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 20))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Theme.mint)
+                .foregroundStyle(Theme.accent)
                 .disabled(session.phase == .recording)
                 .help("Send (Enter). Shift+Enter adds a line.")
             }
@@ -110,7 +110,7 @@ private struct ComposerTextView: NSViewRepresentable {
         view.drawsBackground = false
         view.font = .systemFont(ofSize: 13.5)
         view.textColor = .white
-        view.insertionPointColor = NSColor(Theme.mint)
+        view.insertionPointColor = NSColor(Theme.accent)
         view.textContainerInset = .zero
         view.textContainer?.lineFragmentPadding = 0
         view.isAutomaticQuoteSubstitutionEnabled = false

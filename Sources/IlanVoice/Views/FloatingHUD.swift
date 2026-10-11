@@ -143,7 +143,7 @@ private struct HUDView: View {
                 HStack(alignment: .center, spacing: 2.5) {
                     ForEach(Array(model.levels.enumerated()), id: \.offset) { _, level in
                         Capsule()
-                            .fill(Theme.mint)
+                            .fill(Theme.accent)
                             .frame(width: 3, height: 4 + CGFloat(level) * 18)
                     }
                 }
@@ -156,7 +156,7 @@ private struct HUDView: View {
                 Label(model.mode == .stopped ? "Stopped assistant speech" : "Sent to Ilan",
                       systemImage: model.mode == .stopped ? "stop.fill" : "checkmark")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.mint)
+                    .foregroundStyle(Theme.accent)
                     .transition(.opacity)
             }
         }
@@ -164,7 +164,7 @@ private struct HUDView: View {
         .frame(height: 38)
         .background(
             Capsule().fill(Theme.ink.opacity(0.92))
-                .overlay(Capsule().stroke(Theme.mint.opacity(0.35), lineWidth: 1))
+                .overlay(Capsule().stroke(Theme.accent.opacity(0.35), lineWidth: 1))
         )
         .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
         .frame(width: 240, height: 44)

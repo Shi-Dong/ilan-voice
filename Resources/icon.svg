@@ -13,7 +13,7 @@
     <path id="head" d="M256 64 C340 64 404 140 404 222 C404 320 338 392 256 392 C174 392 108 320 108 222 C108 140 172 64 256 64 Z"/>
     <clipPath id="face"><use href="#head"/></clipPath>
   </defs>
-  <rect width="512" height="512" fill="#a9dccb"/>
+  <rect width="512" height="512" fill="#f4a7a3"/>
   <!-- jacket, shoulders -->
   <path d="M24 512 C24 440 120 404 256 404 C392 404 488 440 488 512 Z" fill="#8e9098"/>
   <!-- the white tee showing at the open front -->
