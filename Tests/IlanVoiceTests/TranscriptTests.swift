@@ -1,3 +1,4 @@
+import Foundation
 @testable import IlanVoice
 
 /// Better user transcripts: the transcriber gets Ilan's last reply as
@@ -95,6 +96,72 @@ func registerTranscriptQualityTests() {
             expect(input.contains("Assistant: Which box?"), input)
             expect(input.contains("Transcript to correct:\nrun it on shy h two hundred"), input)
             expect(input.hasSuffix("Assistant's reply to it:\nStarting on shi-h200-1."), input)
+        }
+    }
+}
+
+/// Retrying the transcript correction when OpenAI or the network fails.
+@MainActor
+func registerTranscriptRetryTests() {
+    final class Fake: @unchecked Sendable {
+        var replies: [Result<Int, URLError>]
+        var calls = 0
+        var waits: [TimeInterval] = []
+        init(_ replies: [Result<Int, URLError>]) { self.replies = replies }
+    }
+    let ok = Data(#"{"output_text":"run it on shi-h200-1"}"#.utf8)
+
+    /// Runs `fix` against scripted results: an HTTP status, or a network error.
+    func run(_ fake: Fake) async -> String? {
+        await TranscriptFixer.fix("run it on she h two hundred one", dictionary: [], history: [], reply: "OK",
+                                  apiKey: "test", model: "m",
+                                  send: { request in
+                                      fake.calls += 1
+                                      switch fake.replies.removeFirst() {
+                                      case .failure(let e): throw e
+                                      case .success(let code):
+                                          let r = HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: nil)!
+                                          return (code == 200 ? ok : Data("{}".utf8), r)
+                                      }
+                                  },
+                                  sleep: { fake.waits.append($0) })
+    }
+    func blocking(_ body: @escaping () async -> Void) {
+        var done = false
+        Task { await body(); done = true }
+        while !done { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005)) }
+    }
+
+    suite("Transcript correction retries") { test in
+        test("server errors and rate limits are retried, then succeed") {
+            let fake = Fake([.success(500), .success(429), .success(200)])
+            var result: String?
+            blocking { result = await run(fake) }
+            expectEqual(result, "run it on shi-h200-1")
+            expectEqual(fake.calls, 3)
+            expectEqual(fake.waits, TranscriptFixer.retryDelays)
+        }
+        test("a dropped connection is retried") {
+            let fake = Fake([.failure(URLError(.networkConnectionLost)), .success(200)])
+            var result: String?
+            blocking { result = await run(fake) }
+            expectEqual(result, "run it on shi-h200-1")
+            expectEqual(fake.calls, 2)
+        }
+        test("a bad key or bad request is not retried") {
+            for code in [400, 401, 403, 404] {
+                let fake = Fake([.success(code), .success(200)])
+                var result: String? = "x"
+                blocking { result = await run(fake) }
+                expect(result == nil && fake.calls == 1, "\(code): \(fake.calls) calls")
+            }
+        }
+        test("gives up after three attempts and keeps the original") {
+            let fake = Fake([.success(503), .success(503), .success(503), .success(200)])
+            var result: String? = "x"
+            blocking { result = await run(fake) }
+            expect(result == nil)
+            expectEqual(fake.calls, 3)
         }
     }
 }

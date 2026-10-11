@@ -94,8 +94,28 @@ enum TranscriptFixer {
         return fixed
     }
 
+    /// Waits before the 2nd and 3rd attempt. Only temporary failures are retried.
+    static let retryDelays: [TimeInterval] = [1, 3]
+
+    typealias Send = (URLRequest) async throws -> (Data, URLResponse)
+
+    /// Whether a failed attempt is worth repeating: no connection, a timeout,
+    /// "too many requests" or an OpenAI server error. A bad key, an unknown
+    /// model or another request error would only fail again.
+    static func shouldRetry(status: Int?, error: Error?) -> Bool {
+        if let error = error as? URLError {
+            return [.timedOut, .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost,
+                    .cannotFindHost, .dnsLookupFailed, .resourceUnavailable].contains(error.code)
+        }
+        if error != nil { return false }
+        guard let status else { return false }
+        return status == 408 || status == 429 || (500...599).contains(status)
+    }
+
     static func fix(_ transcript: String, dictionary: [String], history: [Message], tools: [Message] = [],
-                    reply: String, apiKey: String, model: String) async -> String? {
+                    reply: String, apiKey: String, model: String,
+                    send: Send = { try await URLSession.shared.data(for: $0) },
+                    sleep: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1e9)) }) async -> String? {
         guard !apiKey.isEmpty else { return nil }
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/responses")!, timeoutInterval: 30)
         request.httpMethod = "POST"
@@ -111,14 +131,29 @@ enum TranscriptFixer {
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
         request.httpBody = data
-        guard let (reply, response) = try? await URLSession.shared.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let obj = try? JSONSerialization.jsonObject(with: reply) as? [String: Any] else { return nil }
-        let text = (obj["output_text"] as? String) ?? (obj["output"] as? [[String: Any]] ?? [])
-            .filter { $0["type"] as? String == "message" }
-            .flatMap { $0["content"] as? [[String: Any]] ?? [] }
-            .compactMap { $0["text"] as? String }
-            .joined()
-        return accept(original: transcript, corrected: text)
+
+        for attempt in 0...retryDelays.count {
+            if attempt > 0 { await sleep(retryDelays[attempt - 1]) }
+            let status: Int?, failure: Error?
+            do {
+                let (reply, response) = try await send(request)
+                status = (response as? HTTPURLResponse)?.statusCode
+                failure = nil
+                if status == 200 {
+                    guard let obj = try? JSONSerialization.jsonObject(with: reply) as? [String: Any] else { return nil }
+                    let text = (obj["output_text"] as? String) ?? (obj["output"] as? [[String: Any]] ?? [])
+                        .filter { $0["type"] as? String == "message" }
+                        .flatMap { $0["content"] as? [[String: Any]] ?? [] }
+                        .compactMap { $0["text"] as? String }
+                        .joined()
+                    return accept(original: transcript, corrected: text)
+                }
+            } catch {
+                status = nil
+                failure = error
+            }
+            guard shouldRetry(status: status, error: failure) else { return nil }
+        }
+        return nil
     }
 }
