@@ -24,9 +24,12 @@ struct MessageRow: View {
         Group {
             if let selection {
                 let origin = selection.buttonOrigin(size: AddToMessagePill.size, width: width)
-                AddToMessagePill {
-                    ComposerModel.shared.addContext(selection.text)
-                    self.selection = nil
+                // Its own AppKit view, so it is layered above the message's text view.
+                SolidOverlay {
+                    AddToMessagePill {
+                        ComposerModel.shared.addContext(selection.text)
+                        self.selection = nil
+                    }
                 }
                 .frame(width: AddToMessagePill.size.width, height: AddToMessagePill.size.height)
                 .offset(x: origin.x, y: origin.y)

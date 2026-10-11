@@ -223,8 +223,9 @@ struct AddToMessagePill: View {
     }
 }
 
-/// Dark rounded rectangle that lights up under the pointer: an accent fill,
-/// a brighter border and text, a pointing-hand cursor, and a small press.
+/// A solid light red rounded rectangle with dark text (fully opaque, so the
+/// message never shows through). Under the pointer it deepens to the darker
+/// accent and grows a little, with a pointing-hand cursor and a small press.
 private struct AskButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         AskButtonBody(configuration: configuration)
@@ -237,9 +238,9 @@ private struct AskButtonStyle: ButtonStyle {
         var body: some View {
             let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
             configuration.label
-                .foregroundStyle(hovering ? Theme.ink : Theme.accent)
-                .background(shape.fill(hovering ? Theme.accent : Theme.inkRaised))
-                .overlay(shape.stroke(Theme.accent.opacity(hovering ? 1 : 0.5)))
+                .foregroundStyle(Theme.ink)
+                .background(shape.fill(hovering ? Theme.accentDeep : Theme.accent))
+                .overlay(shape.stroke(Color.black.opacity(0.25)))
                 .shadow(color: .black.opacity(hovering ? 0.45 : 0.35), radius: hovering ? 8 : 6, y: 2)
                 .scaleEffect(configuration.isPressed ? 0.96 : (hovering ? 1.04 : 1))
                 .contentShape(shape)
@@ -251,5 +252,23 @@ private struct AskButtonStyle: ButtonStyle {
                 .animation(.easeOut(duration: 0.12), value: hovering)
                 .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
         }
+    }
+}
+
+/// Hosts SwiftUI content in its own AppKit view, so it is layered above the
+/// message's NSTextView. SwiftUI draws an overlay into the hosting view's own
+/// layer, which sits *below* AppKit subviews such as the text view: the
+/// message text showed through the "Ask about this" button.
+struct SolidOverlay<Content: View>: NSViewRepresentable {
+    @ViewBuilder var content: () -> Content
+
+    func makeNSView(context: Context) -> NSHostingView<Content> {
+        let view = NSHostingView(rootView: content())
+        view.wantsLayer = true
+        return view
+    }
+
+    func updateNSView(_ view: NSHostingView<Content>, context: Context) {
+        view.rootView = content()
     }
 }
