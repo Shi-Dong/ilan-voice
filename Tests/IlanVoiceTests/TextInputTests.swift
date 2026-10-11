@@ -124,12 +124,59 @@ func registerMessageTextTests() {
             expect(v.show(c))
             expect(!v.show(c))
         }
+        test("a redraw clears the user's selection (and its button)") {
+            let v = MessageNSTextView()
+            var reported: [TextSelection?] = []
+            v.onSelection = { reported.append($0) }
+            v.show(.init(text: "hello there", fontSize: 14, color: grey, lineSpacing: 0))
+            v.setSelectedRange(NSRange(location: 0, length: 5))
+            expectEqual(v.selectedRange().length, 5)
+            v.show(.init(text: "hello there", fontSize: 14, color: dark, lineSpacing: 0))
+            expectEqual(v.selectedRange().length, 0)
+            expect(reported.last.flatMap { $0 } == nil, "the button must be hidden")
+        }
         test("new words and line spacing are shown") {
             let v = MessageNSTextView()
             v.show(.init(text: "a", fontSize: 14, color: dark, lineSpacing: 0))
             expect(v.show(.init(text: "b", fontSize: 14, color: dark, lineSpacing: 0)))
             expectEqual(v.string, "b")
             expect(v.show(.init(text: "b", fontSize: 14, color: dark, lineSpacing: 3)))
+        }
+    }
+}
+
+/// Spoken messages stay grey until the Luna correction is done.
+@MainActor
+func registerProvisionalTests() {
+    suite("Grey until corrected") { test in
+        test("grey while transcribing and while waiting for the correction") {
+            var m = Message(id: "u", role: .user, text: "hi", pending: true)
+            expect(m.isProvisional)
+            m.pending = false
+            m.awaitingCorrection = true
+            expect(m.isProvisional)
+            m.awaitingCorrection = nil
+            expect(!m.isProvisional)
+            expect(!Message(id: "t", role: .user, text: "typed", typed: true).isProvisional)
+        }
+        test("a new message settles earlier ones that will never be corrected") {
+            var conv = Conversation()
+            var a = Message(id: "a", role: .user, text: "cut off")
+            a.awaitingCorrection = true
+            conv.messages = [a, Message(id: "r", role: .assistant, text: "ok")]
+            VoiceSession.settleEarlierCorrections(&conv)
+            expect(conv.messages.allSatisfy { !$0.isProvisional })
+        }
+        test("after a restart nothing is left waiting") {
+            let store = ConversationStore()
+            var conv = store.newConversation()
+            var m = Message(id: "u", role: .user, text: "hello")
+            m.awaitingCorrection = true
+            store.update(conv.id) { $0.messages = [m] }
+            store.flush()
+            let reloaded = ConversationStore()
+            conv = reloaded.conversations.first { $0.id == conv.id }!
+            expectEqual(conv.messages.first?.awaitingCorrection, nil)
         }
     }
 }

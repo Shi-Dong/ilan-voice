@@ -294,6 +294,7 @@ final class VoiceSession: ObservableObject {
         guard conversationID == convID else { return false }
         let itemID = Self.newItemID()
         store.update(convID) {
+            Self.settleEarlierCorrections(&$0)
             $0.messages.append(Message(id: itemID, role: .user, text: text, typed: true))
         }
         noteOwnMessages()
@@ -594,7 +595,10 @@ final class VoiceSession: ObservableObject {
                 msg.audioSeconds = PCM.seconds(pcm)
                 pendingUserAudio = nil
             }
-            store.update(convID) { $0.messages.append(msg) }
+            store.update(convID) { conv in
+                Self.settleEarlierCorrections(&conv)
+                conv.messages.append(msg)
+            }
 
         case "conversation.item.input_audio_transcription.delta":
             guard let itemID = event["item_id"] as? String, let delta = event["delta"] as? String else { return }
@@ -610,6 +614,7 @@ final class VoiceSession: ObservableObject {
             store.updateMessage(convID, itemID) {
                 $0.text = text
                 $0.pending = false
+                $0.awaitingCorrection = true  // grey until Luna has had its go
             }
             correctTranscript(convID)
 
@@ -732,6 +737,14 @@ final class VoiceSession: ObservableObject {
     /// conversation and Ilan's reply (which shows what was understood). The
     /// raw transcript is kept in `rawText`. Runs from either event, whichever
     /// comes last.
+    /// Only the latest message is ever corrected, so when a new one starts,
+    /// any earlier message still waiting (its turn was cut off or failed) is final.
+    static func settleEarlierCorrections(_ conv: inout Conversation) {
+        for i in conv.messages.indices where conv.messages[i].awaitingCorrection == true {
+            conv.messages[i].awaitingCorrection = nil
+        }
+    }
+
     private func correctTranscript(_ convID: UUID) {
         guard let conv = store.conversations.first(where: { $0.id == convID }),
               let (user, reply) = TranscriptFixer.turnToCorrect(conv.messages, done: correctedTranscripts) else { return }
@@ -739,10 +752,12 @@ final class VoiceSession: ObservableObject {
         let history = Array(conv.messages.prefix { $0.id != user.id })
         let key = settings.apiKey, model = settings.titleModel, terms = UserDictionary.terms()
         Task {
-            guard let fixed = await TranscriptFixer.fix(user.text, dictionary: terms, history: history,
-                                                         reply: reply.text, apiKey: key, model: model) else { return }
+            let fixed = await TranscriptFixer.fix(user.text, dictionary: terms, history: history,
+                                                  reply: reply.text, apiKey: key, model: model)
+            // Final either way: corrected, unchanged, or every attempt failed.
             store.updateMessage(convID, user.id) { message in
-                guard message.text == user.text else { return }  // edited meanwhile
+                message.awaitingCorrection = nil
+                guard let fixed, message.text == user.text else { return }  // edited meanwhile
                 message.rawText = message.rawText ?? message.text
                 message.text = fixed
             }

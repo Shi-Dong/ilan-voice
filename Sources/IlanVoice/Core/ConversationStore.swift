@@ -20,6 +20,12 @@ struct Message: Codable, Identifiable, Equatable {
     var rawText: String?
     /// Typed in the Mac app's message box rather than spoken.
     var typed: Bool?
+    /// Spoken message whose transcript is final but not yet through the
+    /// Luna correction (TranscriptFixer): still shown grey.
+    var awaitingCorrection: Bool?
+
+    /// Grey in the conversation: still transcribing, or waiting for its correction.
+    var isProvisional: Bool { pending || awaitingCorrection == true }
 }
 
 struct Conversation: Codable, Identifiable, Equatable {
@@ -71,7 +77,10 @@ final class ConversationStore: ObservableObject {
         let dirs = (try? FileManager.default.contentsOfDirectory(at: Paths.conversations, includingPropertiesForKeys: nil)) ?? []
         conversations = dirs.compactMap { dir in
             guard let data = try? Data(contentsOf: dir.appendingPathComponent("conversation.json")) else { return nil }
-            return try? decoder.decode(Conversation.self, from: data)
+            guard var conv = try? decoder.decode(Conversation.self, from: data) else { return nil }
+            // A correction cut short by quitting will never finish: show those as final.
+            for i in conv.messages.indices { conv.messages[i].awaitingCorrection = nil }
+            return conv
         }
         .sorted { $0.updatedAt > $1.updatedAt }
     }

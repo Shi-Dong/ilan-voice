@@ -53,8 +53,8 @@ struct SelectableText: NSViewRepresentable {
 
 final class MessageNSTextView: NSTextView {
     /// What the view is showing. Any change, colour included, redraws it: a
-    /// transcript turns from grey (transcribing) to its normal colour when it
-    /// is final, usually without its words changing.
+    /// spoken message turns from grey to its normal colour once Luna's
+    /// correction is done, even when its words don't change.
     struct Content: Equatable {
         var text: String
         var fontSize: CGFloat
@@ -71,7 +71,6 @@ final class MessageNSTextView: NSTextView {
         shown = content
         let style = NSMutableParagraphStyle()
         style.lineSpacing = content.lineSpacing
-        let range = selectedRange()
         textStorage?.setAttributedString(NSAttributedString(string: content.text, attributes: [
             .font: NSFont.systemFont(ofSize: content.fontSize),
             .foregroundColor: content.color,
@@ -79,8 +78,9 @@ final class MessageNSTextView: NSTextView {
         ]))
         font = .systemFont(ofSize: content.fontSize)
         selectedTextAttributes = [.backgroundColor: NSColor.selectedTextBackgroundColor]
-        // Keep a selection the user is making when only the colour changed.
-        if NSMaxRange(range) <= (content.text as NSString).length { setSelectedRange(range) }
+        // Redrawn (new words, or grey turning final): any selection is cleared,
+        // which also hides its "Ask about this" button.
+        setSelectedRange(NSRange(location: 0, length: 0))
         return true
     }
 
