@@ -27,6 +27,8 @@ MainActor.assumeIsolated {
     registerTranscriptRetryTests()
     registerTextInputTests()
     registerSelectionButtonTests()
+    registerMessageTextTests()
+    registerProvisionalTests()
     registerDoubleTapTests()
     let failed = runAll()
     UserDefaults.standard.removePersistentDomain(forName: ProcessInfo.processInfo.processName)

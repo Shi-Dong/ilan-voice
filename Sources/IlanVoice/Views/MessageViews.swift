@@ -48,7 +48,7 @@ struct MessageRow: View {
             Spacer(minLength: 80)
             VStack(alignment: .trailing, spacing: 6) {
                 messageText(message.text.isEmpty ? "Transcribing…" : message.text,
-                            color: NSColor(message.pending ? Theme.ink.opacity(0.55) : Theme.ink))
+                            color: NSColor(message.isProvisional ? Theme.ink.opacity(0.55) : Theme.ink))
                 if message.audioFile != nil {
                     PlayChip(message: message, session: session, clips: clips, dark: true)
                 }
