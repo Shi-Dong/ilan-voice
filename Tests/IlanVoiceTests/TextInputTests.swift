@@ -102,3 +102,34 @@ func registerSelectionButtonTests() {
         }
     }
 }
+
+/// Message text redraws when its colour changes, not only its words.
+@MainActor
+func registerMessageTextTests() {
+    suite("Message text") { test in
+        let grey = NSColor(white: 0.5, alpha: 1), dark = NSColor(white: 0.1, alpha: 1)
+        func colour(_ v: MessageNSTextView) -> NSColor? {
+            v.textStorage?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        }
+        test("a finished transcript loses its grey even when its words are the same") {
+            let v = MessageNSTextView()
+            v.show(.init(text: "hello there", fontSize: 14, color: grey, lineSpacing: 0))
+            expectEqual(colour(v), grey)
+            expect(v.show(.init(text: "hello there", fontSize: 14, color: dark, lineSpacing: 0)), "colour change ignored")
+            expectEqual(colour(v), dark)
+        }
+        test("nothing is redone when nothing changed") {
+            let v = MessageNSTextView()
+            let c = MessageNSTextView.Content(text: "hi", fontSize: 14, color: dark, lineSpacing: 3)
+            expect(v.show(c))
+            expect(!v.show(c))
+        }
+        test("new words and line spacing are shown") {
+            let v = MessageNSTextView()
+            v.show(.init(text: "a", fontSize: 14, color: dark, lineSpacing: 0))
+            expect(v.show(.init(text: "b", fontSize: 14, color: dark, lineSpacing: 0)))
+            expectEqual(v.string, "b")
+            expect(v.show(.init(text: "b", fontSize: 14, color: dark, lineSpacing: 3)))
+        }
+    }
+}

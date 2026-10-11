@@ -27,25 +27,17 @@ struct SelectableText: NSViewRepresentable {
         view.textContainer?.lineFragmentPadding = 0
         view.textContainer?.widthTracksTextView = false
         view.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        apply(to: view)
+        view.show(content)
         return view
+    }
+
+    private var content: MessageNSTextView.Content {
+        .init(text: text, fontSize: fontSize, color: color, lineSpacing: lineSpacing)
     }
 
     func updateNSView(_ view: MessageNSTextView, context: Context) {
         view.onSelection = onSelection
-        if view.string != text || view.font?.pointSize != fontSize { apply(to: view) }
-    }
-
-    private func apply(to view: MessageNSTextView) {
-        let style = NSMutableParagraphStyle()
-        style.lineSpacing = lineSpacing
-        view.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: [
-            .font: NSFont.systemFont(ofSize: fontSize),
-            .foregroundColor: color,
-            .paragraphStyle: style,
-        ]))
-        view.font = .systemFont(ofSize: fontSize)
-        view.selectedTextAttributes = [.backgroundColor: NSColor.selectedTextBackgroundColor]
+        view.show(content)
     }
 
     /// As wide as the text needs (up to the space offered) and as tall as it wraps.
@@ -60,6 +52,38 @@ struct SelectableText: NSViewRepresentable {
 }
 
 final class MessageNSTextView: NSTextView {
+    /// What the view is showing. Any change, colour included, redraws it: a
+    /// transcript turns from grey (transcribing) to its normal colour when it
+    /// is final, usually without its words changing.
+    struct Content: Equatable {
+        var text: String
+        var fontSize: CGFloat
+        var color: NSColor
+        var lineSpacing: CGFloat
+    }
+
+    private(set) var shown: Content?
+
+    /// Shows `content`; returns false (and does nothing) when it is already shown.
+    @discardableResult
+    func show(_ content: Content) -> Bool {
+        guard content != shown else { return false }
+        shown = content
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = content.lineSpacing
+        let range = selectedRange()
+        textStorage?.setAttributedString(NSAttributedString(string: content.text, attributes: [
+            .font: NSFont.systemFont(ofSize: content.fontSize),
+            .foregroundColor: content.color,
+            .paragraphStyle: style,
+        ]))
+        font = .systemFont(ofSize: content.fontSize)
+        selectedTextAttributes = [.backgroundColor: NSColor.selectedTextBackgroundColor]
+        // Keep a selection the user is making when only the colour changed.
+        if NSMaxRange(range) <= (content.text as NSString).length { setSelectedRange(range) }
+        return true
+    }
+
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = super.menu(for: event) ?? NSMenu()
         let range = selectedRange()
