@@ -80,9 +80,11 @@ func registerTranscriptQualityTests() {
             tool.toolArguments = String(repeating: "x", count: 2000)
             expectEqual(TranscriptFixer.describe(tool: tool).count, "run_shell(".count + TranscriptFixer.maxToolArguments + 2)
         }
-        test("the instructions forbid polishing and rewording") {
+        test("the instructions allow grammar fixes but forbid polishing and rewording") {
             let s = TranscriptFixer.instructions
+            expect(s.contains("fix grammar mistakes"), s)
             expect(s.contains("Do not polish, rephrase, shorten, summarise"), s)
+            expect(s.contains("do not change the user's word choice, tone or style"), s)
             expect(s.contains("When unsure, leave the word as it is"), s)
             expect(s.contains("tool calls"), s)
         }

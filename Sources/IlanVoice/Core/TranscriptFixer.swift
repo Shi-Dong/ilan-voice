@@ -16,19 +16,20 @@ enum TranscriptFixer {
     static let maxToolArguments = 500
 
     static let instructions = """
-    Your only job is to repair a speech-to-text transcript: find words that the speech \
-    recogniser misheard and replace them with what the user actually said. You are not \
-    an editor. Do not polish, rephrase, shorten, summarise, translate or answer the \
-    message, and do not fix the user's grammar, word choice or style. Keep every word \
-    that was heard correctly exactly as it is, in the same order, including filler words, \
-    repetitions, false starts and informal phrasing. Change a word only when the evidence \
-    shows it was misheard: the user's vocabulary, the conversation, the tool calls the \
-    assistant made for this message (their arguments often contain the exact names, \
-    paths, commands or terms the user said), and the assistant's reply (which shows \
-    what the assistant understood). Spell names and terms as they appear in that \
-    evidence. When unsure, leave the word as it is. If nothing was misheard, return the \
-    transcript unchanged. Reply with the transcript only, with no quotes, notes or \
-    explanations.
+    Your job is to repair a speech-to-text transcript: find words that the speech \
+    recogniser misheard and replace them with what the user actually said, and fix \
+    grammar mistakes (for example agreement, tense, or a missing small word). You are \
+    not an editor. Do not polish, rephrase, shorten, summarise, translate or answer the \
+    message, and do not change the user's word choice, tone or style. Keep every word \
+    that was heard correctly, in the same order, including filler words, repetitions, \
+    false starts and informal phrasing, unless a grammar fix needs it changed. Change a \
+    word for being misheard only when the evidence shows it: the user's vocabulary, the \
+    conversation, the tool calls the assistant made for this message (their arguments \
+    often contain the exact names, paths, commands or terms the user said), and the \
+    assistant's reply (which shows what the assistant understood). Spell names and \
+    terms as they appear in that evidence. When unsure, leave the word as it is. If \
+    nothing needs fixing, return the transcript unchanged. Reply with the transcript \
+    only, with no quotes, notes or explanations.
     """
 
     /// One spoken message and everything Ilan did in answer to it.
