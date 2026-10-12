@@ -61,6 +61,8 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
     private let queue = DispatchQueue(label: "ilan-voice.microphone")
     private var input: AVCaptureDeviceInput?
     private var inputUID: String?
+    /// The microphone the last `start` records from, as macOS names it.
+    private(set) var deviceName: String?
     /// Called on a background queue with a PCM chunk and its loudness (0…1).
     var onChunk: ((Data, Float) -> Void)?
 
@@ -104,6 +106,7 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
             session.addOutput(output)
         }
         session.commitConfiguration()
+        deviceName = device.localizedName
         // startRunning blocks for a moment; keep it off the main thread.
         queue.async { [session] in session.startRunning() }
     }

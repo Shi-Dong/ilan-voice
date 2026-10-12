@@ -4,8 +4,9 @@ import os
 import SwiftUI
 
 /// A small pill near the bottom of the screen that shows, over any app, that
-/// Ilan is listening, with live voice bars. After you let go it briefly says
-/// "Sent" and fades away. It never takes focus and clicks pass through it.
+/// Ilan is listening, with live voice bars and the name of the microphone
+/// recording. After you let go it briefly says "Sent" and fades away. It
+/// never takes focus and clicks pass through it.
 @MainActor
 final class FloatingHUD {
     private let panel: NSPanel
@@ -26,7 +27,7 @@ final class FloatingHUD {
     }
 
     init(session: VoiceSession) {
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 44),
+        panel = NSPanel(contentRect: NSRect(origin: .zero, size: HUDView.panelSize),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         panel.isFloatingPanel = true
         panel.level = .statusBar
@@ -43,7 +44,8 @@ final class FloatingHUD {
         session.$phase
             .removeDuplicates()
             .sink { [weak self, weak session] phase in
-                self?.update(phase, recordedFor: session.map { Date().timeIntervalSince($0.recordStart) } ?? 0)
+                self?.update(phase, recordedFor: session.map { Date().timeIntervalSince($0.recordStart) } ?? 0,
+                             microphone: session?.microphoneName)
             }
             .store(in: &cancellables)
         session.pressEnded
@@ -58,12 +60,11 @@ final class FloatingHUD {
     /// as long as the cutoff below which a recording is never sent: a quick
     /// tap is almost always meant to cut Ilan off, so it goes straight to
     /// "Stopped assistant speech" without flashing "Listening".
-    private func update(_ phase: VoiceSession.Phase, recordedFor: TimeInterval) {
+    private func update(_ phase: VoiceSession.Phase, recordedFor: TimeInterval, microphone: String?) {
         guard phase == .recording else { return }
         hideWork?.cancel()
         showWork?.cancel()
-        model.mode = .listening
-        model.reset()
+        model.listen(microphone: microphone)
         let work = DispatchWorkItem { [weak self] in self?.show() }
         showWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.listeningWait(recordedFor: recordedFor), execute: work)
@@ -126,6 +127,24 @@ final class HUDModel: ObservableObject {
     /// Fades the pill in and out.
     @Published var shown = false
     @Published private(set) var levels = Array(repeating: Float(0), count: barCount)
+    /// The microphone recording, named next to the voice bars while listening.
+    @Published private(set) var microphone: String?
+    /// Longer names are cut short so the pill stays small.
+    static let microphoneMaxLength = 30
+
+    /// A new recording: empty bars and the name of the microphone it uses.
+    func listen(microphone name: String?) {
+        mode = .listening
+        microphone = Self.microphoneLabel(name)
+        reset()
+    }
+
+    /// The name to show for a microphone, or nil to show none.
+    static func microphoneLabel(_ name: String?) -> String? {
+        guard let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+        guard name.count > microphoneMaxLength else { return name }
+        return name.prefix(microphoneMaxLength - 1).trimmingCharacters(in: .whitespaces) + "…"
+    }
 
     func push(_ level: Float) {
         guard mode == .listening else { return }
@@ -137,6 +156,9 @@ final class HUDModel: ObservableObject {
 }
 
 private struct HUDView: View {
+    /// Wide enough for the listening pill with a long microphone name; the
+    /// pill itself is only as wide as its content, centred in the panel.
+    static let panelSize = CGSize(width: 400, height: 44)
     @ObservedObject var model: HUDModel
 
     var body: some View {
@@ -161,6 +183,17 @@ private struct HUDView: View {
                 Circle()
                     .fill(Color(red: 1, green: 0.42, blue: 0.42))
                     .frame(width: 7, height: 7)
+                if let microphone = model.microphone {
+                    HStack(spacing: 4) {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(microphone)
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                            .truncationMode(.tail)  // only if wide letters overflow the panel
+                    }
+                    .foregroundStyle(Theme.textDim)
+                }
             } else {
                 Label(model.mode == .stopped ? "Stopped assistant speech" : "Sent to Ilan",
                       systemImage: model.mode == .stopped ? "stop.fill" : "checkmark")
@@ -176,7 +209,7 @@ private struct HUDView: View {
                 .overlay(Capsule().stroke(Theme.accent.opacity(0.35), lineWidth: 1))
         )
         .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
-        .frame(width: 240, height: 44)
+        .frame(width: Self.panelSize.width, height: Self.panelSize.height)
         .animation(.easeInOut(duration: 0.15), value: model.mode)
     }
 }

@@ -4,6 +4,9 @@ import Foundation
 /// mono PCM16. Chunks are passed on only while the session is recording.
 final class RemoteMicrophone: VoiceInput {
     var onChunk: ((Data, Float) -> Void)?
+    /// The iPhone's own microphone: its name isn't known here, and the Mac's
+    /// pill never shows for it.
+    var deviceName: String? { nil }
     private var active = false
 
     func requestPermission() async -> Bool { true }  // the iPhone asks for the mic itself

@@ -60,6 +60,8 @@ final class VoiceSession: ObservableObject {
     /// When the microphone started for this press. It may have recorded
     /// quietly for a while before going live (see "Push to talk").
     private(set) var recordStart = Date()
+    /// The microphone this press records from, as macOS names it (shown in the pill).
+    private(set) var microphoneName: String?
     private var commitWhenReady = false
     private var responseActive = false
     private var talkKeyHeld = false
@@ -503,6 +505,7 @@ final class VoiceSession: ObservableObject {
             errorMessage = error.localizedDescription
             return
         }
+        microphoneName = mic.deviceName
         // Undecided: record quietly; nothing reaches OpenAI, nothing changes for Ilan.
         quietRecording = press == .undecided
         if !quietRecording { goLive() }
