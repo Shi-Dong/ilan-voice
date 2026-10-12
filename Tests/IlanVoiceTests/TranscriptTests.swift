@@ -84,6 +84,7 @@ func registerTranscriptQualityTests() {
         test("the instructions allow grammar fixes but forbid polishing and rewording") {
             let s = TranscriptFixer.instructions
             expect(s.contains("fix grammar mistakes"), s)
+            expect(s.contains("remove filler sounds (uh, um"), s)
             expect(s.contains("Do not polish, rephrase, shorten, summarise"), s)
             expect(s.contains("do not change the user's word choice, tone or style"), s)
             expect(s.contains("When unsure, leave the word as it is"), s)

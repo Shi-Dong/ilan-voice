@@ -17,12 +17,14 @@ enum TranscriptFixer {
 
     static let instructions = """
     Your job is to repair a speech-to-text transcript: find words that the speech \
-    recogniser misheard and replace them with what the user actually said, and fix \
-    grammar mistakes (for example agreement, tense, or a missing small word). You are \
-    not an editor. Do not polish, rephrase, shorten, summarise, translate or answer the \
-    message, and do not change the user's word choice, tone or style. Keep every word \
-    that was heard correctly, in the same order, including filler words, repetitions, \
-    false starts and informal phrasing, unless a grammar fix needs it changed. Change a \
+    recogniser misheard and replace them with what the user actually said, fix \
+    grammar mistakes (for example agreement, tense, or a missing small word), and \
+    remove filler sounds (uh, um, er, ah, hmm, mm and the like) and words repeated by \
+    accident ("the the"). You are not an editor. Do not polish, rephrase, shorten, \
+    summarise, translate or answer the message, and do not change the user's word \
+    choice, tone or style. Keep every other word that was heard correctly, in the same \
+    order, including informal phrasing and words such as "like", "so" or "you know", \
+    unless a grammar fix needs it changed. Change a \
     word for being misheard only when the evidence shows it: the user's vocabulary, the \
     conversation, the tool calls the assistant made for this message (their arguments \
     often contain the exact names, paths, commands or terms the user said), and the \
