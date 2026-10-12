@@ -46,7 +46,8 @@ final class VoiceSession: ObservableObject {
     private var knownMessageIDs: Set<String> = []
     private var client: RealtimeClient?
 
-    private var conversationID: UUID?
+    /// Internal (not private) so the unit tests can feed server events.
+    var conversationID: UUID?
     private var sessionReady = false
     private var connectedFingerprint = ""
     /// When the current Realtime session was opened. OpenAI ends every
@@ -54,8 +55,11 @@ final class VoiceSession: ObservableObject {
     private var sessionStartedAt = Date()
     static let sessionRefreshAge: TimeInterval = 50 * 60
     private var bufferedAudio: [Data] = []
-    private var recording = Data()
-    private var recordStart = Date()
+    /// This press's audio so far. Internal (read-only) so the unit tests can check it.
+    private(set) var recording = Data()
+    /// When the microphone started for this press. It may have recorded
+    /// quietly for a while before going live (see "Push to talk").
+    private(set) var recordStart = Date()
     private var commitWhenReady = false
     private var responseActive = false
     private var talkKeyHeld = false
@@ -72,6 +76,9 @@ final class VoiceSession: ObservableObject {
     private var currentResponseID: String?
     /// Audio for this response is dropped: the user interrupted it.
     private var mutedResponseID: String?
+    /// Interrupted after asking for a reply but before it started (e.g. right
+    /// after a tool result went back): cancel that reply as soon as it starts.
+    private var cancelNextResponse = false
     /// Bumped on every interrupt so a tool loop knows not to ask for a reply.
     private var interruptGeneration = 0
     private var speakingItemID: String?
@@ -182,6 +189,7 @@ final class VoiceSession: ObservableObject {
         client = nil
         sessionReady = false
         responseActive = false
+        cancelNextResponse = false
         speaker.stop()
         phase = .offline
     }
@@ -283,11 +291,12 @@ final class VoiceSession: ObservableObject {
     private var pendingTextItem: [String: Any]?
 
     /// Sends a typed message; Ilan answers out loud like a spoken one.
-    /// Returns false (and sends nothing) while the user is recording.
+    /// Returns false (and sends nothing) while the user is recording or
+    /// holding the talk key.
     @discardableResult
     func sendText(_ raw: String) -> Bool {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, phase != .recording, let convID = target() else { return false }
+        guard !text.isEmpty, phase != .recording, !talkKeyHeld, let convID = target() else { return false }
         errorMessage = nil
         interrupt()
         ensureSession()
@@ -325,22 +334,102 @@ final class VoiceSession: ObservableObject {
 
     // MARK: Push to talk
 
-    func pressToTalk() {
+    // On the Mac, a single tap of the talk key stops Ilan; a double tap opens
+    // the window and leaves Ilan alone. A press while Ilan is busy can't know
+    // yet which it is, so it doesn't touch Ilan until that is clear:
+    //   - held past a tap's length: the user is talking, stop Ilan;
+    //   - a tap with no second tap within `secondTapWindow`: stop Ilan;
+    //   - a double tap: `keepIlanGoing()`, nothing is stopped.
+    // Meanwhile the microphone records quietly (nothing reaches OpenAI and the
+    // phase stays as it is), so a press that turns out to be talking loses
+    // none of its first words. The orb and the iPhone have no double tap: they
+    // stop Ilan the moment they are pressed.
+
+    /// How long after a tap a second tap may still come (the double-tap gap, plus a margin).
+    static let secondTapWindow = DoubleTapDetector().maxGap + 0.05
+
+    /// What the current (or last) press is, as far as stopping Ilan goes.
+    private enum Press { case plain, undecided, talk, tap }
+    private var press = Press.plain
+    /// Counts presses, so a slow microphone-permission check acts only for its own press.
+    private var pressCount = 0
+    private var quietRecording = false
+    /// Turns an undecided press that is still held into talking. Replacing
+    /// either timer (or setting it to nil) cancels the old one.
+    private var holdCheck: DispatchWorkItem? { didSet { oldValue?.cancel() } }
+    /// Stops Ilan after a tap, unless a second tap comes first.
+    private var tapStop: DispatchWorkItem? { didSet { oldValue?.cancel() } }
+
+    /// Something a tap would stop: Ilan speaking, thinking or using tools, or a replay.
+    private var ilanBusy: Bool {
+        speaker.isPlaying || responseActive || clips.playingID != nil
+            || phase == .speaking || phase == .working || phase == .thinking
+    }
+
+    private func after(_ delay: TimeInterval, _ action: @escaping () -> Void) -> DispatchWorkItem {
+        let work = DispatchWorkItem(block: action)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        return work
+    }
+
+    /// A double tap: Ilan carries on with whatever it was doing.
+    func keepIlanGoing() { forgetTap() }
+
+    /// Calls off a tap's pending stop: something newer (a double tap, a stop,
+    /// a replay, a typed message) decides what Ilan does now.
+    private func forgetTap() { tapStop = nil }
+
+    /// Held past a tap's length: the user is talking, so Ilan stops and the
+    /// quiet recording becomes a real one.
+    private func pressIsTalk() {
+        holdCheck = nil
+        guard press == .undecided, talkKeyHeld else { return }
+        press = .talk
+        interruptedThisPress = interrupt()
+        if quietRecording {
+            quietRecording = false
+            goLive()
+        }
+    }
+
+    /// A tap, and no second tap came: Ilan stops.
+    private func stopAfterTap() {
+        tapStop = nil
+        pressEnded.send(interrupt() ? .stoppedSpeech : .discarded)
+    }
+
+    /// - Parameter waitForDoubleTap: true for the talk key, which double-taps
+    ///   to open the window (see above).
+    func pressToTalk(waitForDoubleTap: Bool = false) {
         guard phase != .recording else { return }
         errorMessage = nil
-        // Stop Ilan the instant the key goes down, even for a quick tap that
-        // never becomes a recording. Remembered so the pill can say so.
-        interruptedThisPress = interrupt()
+        pressCount += 1
+        if waitForDoubleTap && (tapStop != nil || ilanBusy) {
+            // Maybe a double tap, or its second half (the first tap's stop
+            // now waits on this press): Ilan is left alone for now.
+            press = .undecided
+            interruptedThisPress = false
+            forgetTap()
+            holdCheck = after(Self.minRecordingSeconds) { [weak self] in self?.pressIsTalk() }
+        } else {
+            // Stop Ilan the instant the key goes down, even for a quick tap that
+            // never becomes a recording. Remembered so the pill can say so.
+            press = .plain
+            interruptedThisPress = interrupt()
+        }
         talkKeyHeld = true
+        let thisPress = pressCount
         Task {
             guard await mic.requestPermission() else {
                 errorMessage = "Ilan Voice needs microphone access (System Settings → Privacy & Security → Microphone)."
                 return
             }
-            // A quick tap can be over before permission comes back: then the
-            // tap only interrupted Ilan, and nothing is recorded.
+            // Pressed again while waiting (the permission prompt): that press has its own check.
+            guard thisPress == pressCount else { return }
+            // A quick press can be over before permission comes back: then
+            // nothing is recorded. A tap reports once its wait is over.
             guard talkKeyHeld else {
-                pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded)
+                if press != .tap { pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded) }
                 return
             }
             beginRecording()
@@ -370,7 +459,11 @@ final class VoiceSession: ObservableObject {
     /// Returns true if there was something to stop.
     @discardableResult
     func interrupt() -> Bool {
-        let wasSpeaking = speaker.isPlaying || responseActive || phase == .speaking || phase == .working
+        forgetTap()
+        // Asked for a reply that hasn't started yet: cancel it once it starts.
+        let replyRequested = phase == .thinking && !responseActive
+        if replyRequested { cancelNextResponse = true }
+        let wasSpeaking = speaker.isPlaying || responseActive || replyRequested || phase == .speaking || phase == .working
         let wasReplaying = clips.playingID != nil
         clips.stop()
         guard wasSpeaking else { return wasReplaying }
@@ -400,21 +493,32 @@ final class VoiceSession: ObservableObject {
     }
 
     private func beginRecording() {
-        ensureSession()
-        if sessionReady {
-            client?.send(["type": "input_audio_buffer.clear"])
-            refreshTranscriptionContext()
-        }
         bufferedAudio.removeAll()
         recording = Data()
         recordStart = Date()
         commitWhenReady = false
         do {
             try mic.start()
-            phase = .recording
         } catch {
             errorMessage = error.localizedDescription
+            return
         }
+        // Undecided: record quietly; nothing reaches OpenAI, nothing changes for Ilan.
+        quietRecording = press == .undecided
+        if !quietRecording { goLive() }
+    }
+
+    /// The press is for talking: OpenAI starts hearing it, from its first word.
+    private func goLive() {
+        ensureSession()
+        if sessionReady {
+            client?.send(["type": "input_audio_buffer.clear"])
+            refreshTranscriptionContext()
+            if !recording.isEmpty { sendAudio(recording) }
+        } else if !recording.isEmpty {
+            bufferedAudio = [recording]
+        }
+        phase = .recording
     }
 
     /// Drops the recording in progress without sending it (the iPhone page's
@@ -436,6 +540,19 @@ final class VoiceSession: ObservableObject {
 
     func releaseToTalk() {
         talkKeyHeld = false
+        if press == .undecided {
+            // A tap: Ilan stops only if no second tap follows.
+            press = .tap
+            holdCheck = nil
+            if quietRecording {
+                quietRecording = false
+                mic.stop()
+                recording = Data()
+                inputLevel = 0
+            }
+            tapStop = after(Self.secondTapWindow) { [weak self] in self?.stopAfterTap() }
+            return
+        }
         guard phase == .recording, !finishingRecording else { return }
         mic.stop()
         // The microphone hands over audio in small batches; give the last one
@@ -469,9 +586,10 @@ final class VoiceSession: ObservableObject {
     }
 
     private func handleMic(_ data: Data, _ level: Float) {
-        guard phase == .recording else { return }
+        guard phase == .recording || quietRecording else { return }
         inputLevel = inputLevel * 0.6 + level * 0.4
         recording.append(data)
+        guard !quietRecording else { return }
         if sessionReady {
             sendAudio(data)
         } else {
@@ -557,7 +675,8 @@ final class VoiceSession: ObservableObject {
 
     // MARK: Server events
 
-    private func handle(_ event: [String: Any]) {
+    /// Internal (not private) so the unit tests can feed server events.
+    func handle(_ event: [String: Any]) {
         guard let type = event["type"] as? String, let convID = conversationID else { return }
         if type != "session.created" && type != "session.updated" { cancelWatchdog() }
         defer { noteOwnMessages() }
@@ -623,8 +742,14 @@ final class VoiceSession: ObservableObject {
             store.updateMessage(convID, itemID) { $0.text = "(transcription failed)"; $0.pending = false }
 
         case "response.created":
-            responseActive = true
             currentResponseID = (event["response"] as? [String: Any])?["id"] as? String
+            if cancelNextResponse {
+                cancelNextResponse = false
+                mutedResponseID = currentResponseID
+                client?.send(["type": "response.cancel"])
+                return
+            }
+            responseActive = true
 
         case "response.output_item.added":
             guard let item = event["item"] as? [String: Any], let itemID = item["id"] as? String,
@@ -694,6 +819,8 @@ final class VoiceSession: ObservableObject {
             if (error?["code"] as? String) == "response_cancel_not_active" { return }
             // Cutting a reply at a point it already ended at is harmless too.
             if message.contains("is already shorter than") { return }
+            // A reply that failed to start won't need cancelling.
+            cancelNextResponse = false
             // OpenAI ends every session after 60 minutes. That is routine: start
             // a fresh one quietly (the conversation is carried over as text),
             // unless a reply was on its way, which the user should hear about.
@@ -786,6 +913,9 @@ final class VoiceSession: ObservableObject {
         }
     }
 
+    /// Unit tests only: runs every tool call instead of the real tools.
+    var toolOverride: (@MainActor (_ name: String, _ arguments: String) async -> String)?
+
     private func runTools(_ calls: [[String: Any]], _ convID: UUID) {
         phase = .working
         let generation = interruptGeneration
@@ -803,6 +933,7 @@ final class VoiceSession: ObservableObject {
                     group.addTask { @MainActor in
                         let output: String
                         switch name {
+                        case _ where self.toolOverride != nil: output = await self.toolOverride!(name, args)
                         case ShellTool.functionName: output = await self.runShell(arguments: args, conversation: convID)
                         case ShellTool.closeFunctionName:
                             output = ShellSessions.shared.close(convID)
@@ -894,28 +1025,34 @@ final class VoiceSession: ObservableObject {
 
     func play(_ message: Message) {
         guard let convID = store.selectedID, let file = message.audioFile else { return }
+        forgetTap()  // chosen after a tap: the tap's late stop mustn't cut it
         speaker.stop()
         store.updateMessage(convID, message.id) { $0.listened = true }
         clips.toggle(id: message.id, url: store.audioURL(convID, file))
     }
 
-    /// Plays the oldest reply the user has not heard yet, then the next one.
     /// Plays the assistant reply heard most recently again from the start,
-    /// cutting off anything Ilan is saying now.
+    /// cutting off anything Ilan is saying now. Not while the talk key is down.
     func replayLast() {
-        guard let last = clips.lastPlayed, FileManager.default.fileExists(atPath: last.url.path) else { return }
+        guard !talkKeyHeld, let last = clips.lastPlayed, FileManager.default.fileExists(atPath: last.url.path) else { return }
         interrupt()
         clips.stop()
         clips.toggle(id: last.id, url: last.url)
     }
 
+    /// Plays the oldest reply the user has not heard yet, then the next one.
     func playNextUnheard() {
+        forgetTap()  // chosen after a tap: the tap's late stop mustn't cut it
+        playUnheard()
+    }
+
+    private func playUnheard() {
         guard let conv = store.selected,
               let next = conv.messages.first(where: { $0.role == .assistant && !$0.listened && $0.audioFile != nil }) else { return }
         let convID = conv.id
         store.updateMessage(convID, next.id) { $0.listened = true }
         clips.toggle(id: next.id, url: store.audioURL(convID, next.audioFile!)) { [weak self] in
-            self?.playNextUnheard()
+            self?.playUnheard()
         }
     }
 }

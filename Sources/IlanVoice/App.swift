@@ -27,11 +27,12 @@ final class AppModel: ObservableObject {
         activity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
             reason: "Listening for the talk key and streaming voice to OpenAI")
-        ptt.onPress = { [weak self] in self?.session.pressToTalk() }
+        ptt.onPress = { [weak self] in self?.session.pressToTalk(waitForDoubleTap: true) }
         ptt.onRelease = { [weak self] in self?.session.releaseToTalk() }
-        // Double-tap: each tap already stopped Ilan; now bring the window
-        // forward with the cursor in the message box.
-        ptt.onDoubleTap = {
+        // Double-tap: Ilan carries on (a tap only stops Ilan once no second
+        // tap follows); bring the window forward with the cursor in the message box.
+        ptt.onDoubleTap = { [weak self] in
+            self?.session.keepIlanGoing()
             AppDelegate.showMainWindow()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { ComposerModel.shared.focusRequests.send() }
         }

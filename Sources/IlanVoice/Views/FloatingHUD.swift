@@ -18,6 +18,13 @@ final class FloatingHUD {
     private var showWork: DispatchWorkItem?
     private static let listeningDelay: TimeInterval = VoiceSession.minRecordingSeconds
 
+    /// How long to wait before "Listening". A press over a busy Ilan records
+    /// quietly until it is past the cutoff (see VoiceSession.pressToTalk), so
+    /// when it goes live the wait is already over.
+    static func listeningWait(recordedFor: TimeInterval) -> TimeInterval {
+        max(0, listeningDelay - recordedFor)
+    }
+
     init(session: VoiceSession) {
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 44),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -35,7 +42,9 @@ final class FloatingHUD {
 
         session.$phase
             .removeDuplicates()
-            .sink { [weak self] phase in self?.update(phase) }
+            .sink { [weak self, weak session] phase in
+                self?.update(phase, recordedFor: session.map { Date().timeIntervalSince($0.recordStart) } ?? 0)
+            }
             .store(in: &cancellables)
         session.pressEnded
             .sink { [weak self] outcome in self?.finish(outcome) }
@@ -49,7 +58,7 @@ final class FloatingHUD {
     /// as long as the cutoff below which a recording is never sent: a quick
     /// tap is almost always meant to cut Ilan off, so it goes straight to
     /// "Stopped assistant speech" without flashing "Listening".
-    private func update(_ phase: VoiceSession.Phase) {
+    private func update(_ phase: VoiceSession.Phase, recordedFor: TimeInterval) {
         guard phase == .recording else { return }
         hideWork?.cancel()
         showWork?.cancel()
@@ -57,7 +66,7 @@ final class FloatingHUD {
         model.reset()
         let work = DispatchWorkItem { [weak self] in self?.show() }
         showWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.listeningDelay, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.listeningWait(recordedFor: recordedFor), execute: work)
     }
 
     /// How a press ended: "Sent to Ilan", "Stopped assistant speech" (a quick
