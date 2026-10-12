@@ -55,8 +55,11 @@ final class VoiceSession: ObservableObject {
     private var sessionStartedAt = Date()
     static let sessionRefreshAge: TimeInterval = 50 * 60
     private var bufferedAudio: [Data] = []
-    private var recording = Data()
-    private var recordStart = Date()
+    /// This press's audio so far. Internal (read-only) so the unit tests can check it.
+    private(set) var recording = Data()
+    /// When the microphone started for this press. It may have recorded
+    /// quietly for a while before going live (see "Push to talk").
+    private(set) var recordStart = Date()
     private var commitWhenReady = false
     private var responseActive = false
     private var talkKeyHeld = false
@@ -288,11 +291,12 @@ final class VoiceSession: ObservableObject {
     private var pendingTextItem: [String: Any]?
 
     /// Sends a typed message; Ilan answers out loud like a spoken one.
-    /// Returns false (and sends nothing) while the user is recording.
+    /// Returns false (and sends nothing) while the user is recording or
+    /// holding the talk key.
     @discardableResult
     func sendText(_ raw: String) -> Bool {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, phase != .recording, let convID = target() else { return false }
+        guard !text.isEmpty, phase != .recording, !talkKeyHeld, let convID = target() else { return false }
         errorMessage = nil
         interrupt()
         ensureSession()
@@ -330,22 +334,31 @@ final class VoiceSession: ObservableObject {
 
     // MARK: Push to talk
 
-    // A single tap of the talk key stops Ilan; a double tap opens the window
-    // and leaves Ilan alone. So on the Mac, a press while Ilan is busy doesn't
-    // touch Ilan at all until it is clear what it is:
+    // On the Mac, a single tap of the talk key stops Ilan; a double tap opens
+    // the window and leaves Ilan alone. A press while Ilan is busy can't know
+    // yet which it is, so it doesn't touch Ilan until that is clear:
     //   - held past a tap's length: the user is talking, stop Ilan;
     //   - a tap with no second tap within `secondTapWindow`: stop Ilan;
     //   - a double tap: `keepIlanGoing()`, nothing is stopped.
-    // Until then the microphone records quietly (the phase stays as it is),
-    // so a held press loses none of its first words.
+    // Meanwhile the microphone records quietly (nothing reaches OpenAI and the
+    // phase stays as it is), so a press that turns out to be talking loses
+    // none of its first words. The orb and the iPhone have no double tap: they
+    // stop Ilan the moment they are pressed.
 
     /// How long after a tap a second tap may still come (the double-tap gap, plus a margin).
     static let secondTapWindow = DoubleTapDetector().maxGap + 0.05
-    /// This press may still be a tap: Ilan is left alone and the mic records quietly.
-    private var pressUndecided = false
+
+    /// What the current (or last) press is, as far as stopping Ilan goes.
+    private enum Press { case plain, undecided, talk, tap }
+    private var press = Press.plain
+    /// Counts presses, so a slow microphone-permission check acts only for its own press.
+    private var pressCount = 0
     private var quietRecording = false
-    /// Stops Ilan once a press is known not to be (half of) a double tap.
-    private var pendingStop: DispatchWorkItem?
+    /// Turns an undecided press that is still held into talking. Replacing
+    /// either timer (or setting it to nil) cancels the old one.
+    private var holdCheck: DispatchWorkItem? { didSet { oldValue?.cancel() } }
+    /// Stops Ilan after a tap, unless a second tap comes first.
+    private var tapStop: DispatchWorkItem? { didSet { oldValue?.cancel() } }
 
     /// Something a tap would stop: Ilan speaking, thinking or using tools, or a replay.
     private var ilanBusy: Bool {
@@ -353,25 +366,25 @@ final class VoiceSession: ObservableObject {
             || phase == .speaking || phase == .working || phase == .thinking
     }
 
-    private func scheduleStop(after delay: TimeInterval, _ action: @escaping () -> Void) {
-        pendingStop?.cancel()
+    private func after(_ delay: TimeInterval, _ action: @escaping () -> Void) -> DispatchWorkItem {
         let work = DispatchWorkItem(block: action)
-        pendingStop = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        return work
     }
 
     /// A double tap: Ilan carries on with whatever it was doing.
-    func keepIlanGoing() {
-        pendingStop?.cancel()
-        pendingStop = nil
-    }
+    func keepIlanGoing() { forgetTap() }
+
+    /// Calls off a tap's pending stop: something newer (a double tap, a stop,
+    /// a replay, a typed message) decides what Ilan does now.
+    private func forgetTap() { tapStop = nil }
 
     /// Held past a tap's length: the user is talking, so Ilan stops and the
     /// quiet recording becomes a real one.
     private func pressIsTalk() {
-        pendingStop = nil
-        guard pressUndecided, talkKeyHeld else { return }
-        pressUndecided = false
+        holdCheck = nil
+        guard press == .undecided, talkKeyHeld else { return }
+        press = .talk
         interruptedThisPress = interrupt()
         if quietRecording {
             quietRecording = false
@@ -379,38 +392,44 @@ final class VoiceSession: ObservableObject {
         }
     }
 
-    /// A single tap: no second tap came, so Ilan stops.
+    /// A tap, and no second tap came: Ilan stops.
     private func stopAfterTap() {
-        pendingStop = nil
+        tapStop = nil
         pressEnded.send(interrupt() ? .stoppedSpeech : .discarded)
     }
 
-    func pressToTalk() {
+    /// - Parameter waitForDoubleTap: true for the talk key, which double-taps
+    ///   to open the window (see above).
+    func pressToTalk(waitForDoubleTap: Bool = false) {
         guard phase != .recording else { return }
         errorMessage = nil
-        if !isRemote && (pendingStop != nil || ilanBusy) {
-            // Maybe a double tap (or its second half): decided later.
-            pressUndecided = true
+        pressCount += 1
+        if waitForDoubleTap && (tapStop != nil || ilanBusy) {
+            // Maybe a double tap, or its second half (the first tap's stop
+            // now waits on this press): Ilan is left alone for now.
+            press = .undecided
             interruptedThisPress = false
-            scheduleStop(after: Self.minRecordingSeconds) { [weak self] in self?.pressIsTalk() }
+            forgetTap()
+            holdCheck = after(Self.minRecordingSeconds) { [weak self] in self?.pressIsTalk() }
         } else {
             // Stop Ilan the instant the key goes down, even for a quick tap that
             // never becomes a recording. Remembered so the pill can say so.
-            pressUndecided = false
+            press = .plain
             interruptedThisPress = interrupt()
         }
         talkKeyHeld = true
-        let undecided = pressUndecided
+        let thisPress = pressCount
         Task {
             guard await mic.requestPermission() else {
                 errorMessage = "Ilan Voice needs microphone access (System Settings → Privacy & Security → Microphone)."
                 return
             }
-            // A quick tap can be over before permission comes back: then the
-            // tap only interrupted Ilan, and nothing is recorded.
+            // Pressed again while waiting (the permission prompt): that press has its own check.
+            guard thisPress == pressCount else { return }
+            // A quick press can be over before permission comes back: then
+            // nothing is recorded. A tap reports once its wait is over.
             guard talkKeyHeld else {
-                // An undecided tap reports when its stop happens.
-                if !undecided { pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded) }
+                if press != .tap { pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded) }
                 return
             }
             beginRecording()
@@ -440,15 +459,11 @@ final class VoiceSession: ObservableObject {
     /// Returns true if there was something to stop.
     @discardableResult
     func interrupt() -> Bool {
-        // Anything that stops Ilan settles a tap that was waiting to (but not
-        // the check on a press still held, which may become a recording).
-        if !pressUndecided {
-            pendingStop?.cancel()
-            pendingStop = nil
-        }
+        forgetTap()
+        // Asked for a reply that hasn't started yet: cancel it once it starts.
         let replyRequested = phase == .thinking && !responseActive
+        if replyRequested { cancelNextResponse = true }
         let wasSpeaking = speaker.isPlaying || responseActive || replyRequested || phase == .speaking || phase == .working
-        if replyRequested && client != nil { cancelNextResponse = true }
         let wasReplaying = clips.playingID != nil
         clips.stop()
         guard wasSpeaking else { return wasReplaying }
@@ -489,7 +504,8 @@ final class VoiceSession: ObservableObject {
             return
         }
         // Undecided: record quietly; nothing reaches OpenAI, nothing changes for Ilan.
-        if pressUndecided { quietRecording = true } else { goLive() }
+        quietRecording = press == .undecided
+        if !quietRecording { goLive() }
     }
 
     /// The press is for talking: OpenAI starts hearing it, from its first word.
@@ -524,16 +540,17 @@ final class VoiceSession: ObservableObject {
 
     func releaseToTalk() {
         talkKeyHeld = false
-        if pressUndecided {
+        if press == .undecided {
             // A tap: Ilan stops only if no second tap follows.
-            pressUndecided = false
+            press = .tap
+            holdCheck = nil
             if quietRecording {
                 quietRecording = false
                 mic.stop()
                 recording = Data()
                 inputLevel = 0
             }
-            scheduleStop(after: Self.secondTapWindow) { [weak self] in self?.stopAfterTap() }
+            tapStop = after(Self.secondTapWindow) { [weak self] in self?.stopAfterTap() }
             return
         }
         guard phase == .recording, !finishingRecording else { return }
@@ -1008,28 +1025,34 @@ final class VoiceSession: ObservableObject {
 
     func play(_ message: Message) {
         guard let convID = store.selectedID, let file = message.audioFile else { return }
+        forgetTap()  // chosen after a tap: the tap's late stop mustn't cut it
         speaker.stop()
         store.updateMessage(convID, message.id) { $0.listened = true }
         clips.toggle(id: message.id, url: store.audioURL(convID, file))
     }
 
-    /// Plays the oldest reply the user has not heard yet, then the next one.
     /// Plays the assistant reply heard most recently again from the start,
-    /// cutting off anything Ilan is saying now.
+    /// cutting off anything Ilan is saying now. Not while the talk key is down.
     func replayLast() {
-        guard let last = clips.lastPlayed, FileManager.default.fileExists(atPath: last.url.path) else { return }
+        guard !talkKeyHeld, let last = clips.lastPlayed, FileManager.default.fileExists(atPath: last.url.path) else { return }
         interrupt()
         clips.stop()
         clips.toggle(id: last.id, url: last.url)
     }
 
+    /// Plays the oldest reply the user has not heard yet, then the next one.
     func playNextUnheard() {
+        forgetTap()  // chosen after a tap: the tap's late stop mustn't cut it
+        playUnheard()
+    }
+
+    private func playUnheard() {
         guard let conv = store.selected,
               let next = conv.messages.first(where: { $0.role == .assistant && !$0.listened && $0.audioFile != nil }) else { return }
         let convID = conv.id
         store.updateMessage(convID, next.id) { $0.listened = true }
         clips.toggle(id: next.id, url: store.audioURL(convID, next.audioFile!)) { [weak self] in
-            self?.playNextUnheard()
+            self?.playUnheard()
         }
     }
 }
