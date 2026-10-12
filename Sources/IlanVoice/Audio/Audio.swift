@@ -152,7 +152,6 @@ final class StreamPlayer {
     private(set) var playedFrames = 0
     private var held: [AVAudioPCMBuffer] = []
     private var heldFrames: AVAudioFrameCount = 0
-    private var paused = false
     /// Main-thread callback once every queued chunk has been heard.
     var onDrained: (() -> Void)?
 
@@ -179,7 +178,7 @@ final class StreamPlayer {
     /// Starts playing whatever is held, even if it is under the threshold
     /// (a short reply, or the end of one).
     func flush() {
-        guard !held.isEmpty, !paused else { return }
+        guard !held.isEmpty else { return }
         if !engine.isRunning { try? engine.start() }
         held.forEach(schedule)
         held.removeAll()
@@ -187,19 +186,7 @@ final class StreamPlayer {
         if !node.isPlaying { node.play() }
     }
 
-    func pause() {
-        paused = true
-        node.pause()
-    }
-
-    func resume() {
-        guard paused else { return }
-        paused = false
-        if !held.isEmpty { flush() } else if queued > 0 { node.play() }
-    }
-
     func stop() {
-        paused = false
         held.removeAll()
         heldFrames = 0
         queued = 0
@@ -268,9 +255,6 @@ final class ClipPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             }
         }
     }
-
-    func pause() { player?.pause() }
-    func resume() { player?.play() }
 
     /// Records a reply that was heard live, so it can be replayed later.
     func markPlayed(id: String, url: URL) { lastPlayed = (id, url) }
