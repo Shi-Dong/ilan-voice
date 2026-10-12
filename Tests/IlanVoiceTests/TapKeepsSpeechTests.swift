@@ -83,6 +83,47 @@ func registerTapKeepsSpeechTests() {
             session.resumeHeldSpeech()
             expect(!speaker.log.contains("resume"))
         }
+        /// Ilan in the middle of a tool call that takes `seconds`; logs whether
+        /// the tool finished while the tap's brief recording was on screen.
+        @MainActor func sessionUsingTool(_ seconds: Double) -> (VoiceSession, FakeSpeaker, () -> Bool) {
+            let (session, speaker) = makeSession()
+            speaker.isPlaying = false  // silent tool use, no voice
+            session.conversationID = session.store.selectedID
+            var finishedDuringTap = false
+            session.toolOverride = { [weak session] _, _ in
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
+                finishedDuringTap = session?.phase == .recording
+                return "ok"
+            }
+            session.handle(["type": "response.done", "response": [
+                "id": "r1", "output": [["type": "function_call", "name": "slow", "arguments": "{}", "call_id": "c1"]]]])
+            expectEqual(session.phase, .working)
+            return (session, speaker, { finishedDuringTap })
+        }
+        test("a double tap during a chain of tool calls lets the chain carry on") {
+            let (session, speaker, finishedDuringTap) = sessionUsingTool(0.1)
+            session.pressToTalk()
+            pause(0.15)  // the tool finishes while the first tap is down
+            session.releaseToTalk()
+            pause(0.2)
+            session.pressToTalk()
+            session.releaseToTalk()
+            session.resumeHeldSpeech()
+            pause(VoiceSession.doubleTapWindow + 0.2)
+            expect(finishedDuringTap(), "the tool should finish during the tap (test timing)")
+            // The tool's result went back and Ilan is thinking about it.
+            expectEqual(session.phase, .thinking)
+            expect(!speaker.log.contains("stop"))
+        }
+        test("a single tap during a chain of tool calls still stops it") {
+            let (session, speaker, _) = sessionUsingTool(0.1)
+            session.pressToTalk()
+            pause(0.15)
+            session.releaseToTalk()
+            expect(waitFor(2) { speaker.log.contains("stop") }, "never stopped")
+            pause(0.1)
+            expectEqual(session.phase, .offline)  // no API key in tests: offline, not ready
+        }
         test("with Ilan quiet, a tap pauses nothing") {
             let (session, speaker) = makeSession()
             speaker.isPlaying = false

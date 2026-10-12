@@ -46,7 +46,8 @@ final class VoiceSession: ObservableObject {
     private var knownMessageIDs: Set<String> = []
     private var client: RealtimeClient?
 
-    private var conversationID: UUID?
+    /// Internal (not private) so the unit tests can feed server events.
+    var conversationID: UUID?
     private var sessionReady = false
     private var connectedFingerprint = ""
     /// When the current Realtime session was opened. OpenAI ends every
@@ -72,6 +73,9 @@ final class VoiceSession: ObservableObject {
     private var currentResponseID: String?
     /// Audio for this response is dropped: the user interrupted it.
     private var mutedResponseID: String?
+    /// Interrupted after asking for a reply but before it started (e.g. right
+    /// after a tool result went back): cancel that reply as soon as it starts.
+    private var cancelNextResponse = false
     /// Bumped on every interrupt so a tool loop knows not to ask for a reply.
     private var interruptGeneration = 0
     private var speakingItemID: String?
@@ -120,8 +124,8 @@ final class VoiceSession: ObservableObject {
             DispatchQueue.main.async { self?.handleMic(data, level) }
         }
         speaker.onDrained = { [weak self] in
-            guard let self, self.phase == .speaking, !self.responseActive else { return }
-            self.phase = .ready
+            guard let self, self.ilanPhase == .speaking, !self.responseActive else { return }
+            self.setIlanPhase(.ready)
         }
     }
 
@@ -182,6 +186,7 @@ final class VoiceSession: ObservableObject {
         client = nil
         sessionReady = false
         responseActive = false
+        cancelNextResponse = false
         speaker.stop()
         phase = .offline
     }
@@ -329,24 +334,37 @@ final class VoiceSession: ObservableObject {
     //
     // A single tap of the talk key stops Ilan; a double tap opens the window
     // and must not. The first press can't tell which it is, so it only
-    // *pauses* Ilan (silent at once, nothing lost). The pause becomes a real
-    // stop when the press turns into a hold (talking), or when no second tap
-    // follows in time; a double tap resumes from the same spot instead.
+    // *pauses* Ilan's voice (silent at once, nothing lost). Everything else
+    // Ilan is doing (a reply on its way, a chain of tool calls) carries on.
+    // The pause becomes a real stop when the press turns into a hold
+    // (talking), or when no second tap follows in time; a double tap resumes
+    // from the same spot instead.
 
     /// Ilan is paused by a press, waiting to know whether to stop or resume.
     private(set) var speechHeld = false
-    private var phaseBeforeHold: Phase = .ready
+    /// While a tap's brief recording shows `.recording`, what Ilan itself is
+    /// doing (speaking, using tools...). It keeps changing underneath and is
+    /// put back when the tap's recording ends.
+    private var phaseUnderTap: Phase?
     private var stopHeldWork: DispatchWorkItem?
+
+    /// What Ilan itself is doing, even under a tap's recording.
+    var ilanPhase: Phase { phaseUnderTap ?? phase }
+
+    /// Ilan's own progress (a reply, tools, done) never overwrites a tap's recording.
+    private func setIlanPhase(_ new: Phase) {
+        if phaseUnderTap != nil { phaseUnderTap = new } else { phase = new }
+    }
     /// How long after a tap a second tap may still start (the double-tap window).
     static let doubleTapWindow = DoubleTapDetector().maxGap + 0.05
 
-    /// Something a tap would stop: Ilan speaking or thinking, or a replay.
+    /// Something a tap would stop: Ilan speaking, thinking or using tools, or a replay.
     private var hasSpeechToStop: Bool {
-        speaker.isPlaying || responseActive || phase == .speaking || phase == .working || clips.playingID != nil
+        speaker.isPlaying || responseActive || clips.playingID != nil
+            || phase == .speaking || phase == .working || phase == .thinking
     }
 
     private func holdSpeech() {
-        phaseBeforeHold = phase
         speaker.pause()
         clips.pause()
         speechHeld = true
@@ -374,9 +392,9 @@ final class VoiceSession: ObservableObject {
         guard speechHeld else { return }
         speechHeld = false
         stopHeldWork?.cancel()
+        interruptedThisPress = false  // nothing was stopped after all
         speaker.resume()
         clips.resume()
-        if phase != .recording { phase = phaseBeforeHold }
     }
 
     func pressToTalk() {
@@ -440,7 +458,11 @@ final class VoiceSession: ObservableObject {
         // Anything that stops Ilan settles a pending tap too.
         speechHeld = false
         stopHeldWork?.cancel()
-        let wasSpeaking = speaker.isPlaying || responseActive || phase == .speaking || phase == .working
+        let replyRequested = ilanPhase == .thinking && !responseActive
+        let wasSpeaking = speaker.isPlaying || responseActive || replyRequested
+            || ilanPhase == .speaking || ilanPhase == .working
+        if replyRequested && client != nil { cancelNextResponse = true }
+        phaseUnderTap = nil  // the recording, if any, is now a real one
         let wasReplaying = clips.playingID != nil
         clips.stop()
         guard wasSpeaking else { return wasReplaying }
@@ -481,6 +503,7 @@ final class VoiceSession: ObservableObject {
         commitWhenReady = false
         do {
             try mic.start()
+            if speechHeld { phaseUnderTap = phase }
             phase = .recording
         } catch {
             errorMessage = error.localizedDescription
@@ -528,15 +551,19 @@ final class VoiceSession: ObservableObject {
         // never shows up in the conversation or reaches the model.
         guard PCM.seconds(recording) >= Self.minRecordingSeconds, PCM.containsSpeech(recording) else {
             if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
-            if speechHeld {
-                // Paused, not stopped yet: the pill speaks up if it becomes a stop.
-                phase = phaseBeforeHold
+            if let underneath = phaseUnderTap {
+                // A tap that paused Ilan: back to what Ilan is doing. Stopping
+                // (and the pill saying so) is decided by the tap logic.
+                phaseUnderTap = nil
+                phase = underneath
             } else {
                 pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded)
                 phase = sessionReady ? .ready : (client == nil ? .offline : .connecting)
             }
             return
         }
+        // Real words: the user is talking to Ilan, so Ilan stops for good.
+        if speechHeld { stopHeldSpeech() }
         pressEnded.send(.sent)
         // "Breeze" in System Settings → Sound; the file is still Blow.aiff.
         if !isRemote { NSSound(named: "Blow")?.play() }
@@ -634,7 +661,8 @@ final class VoiceSession: ObservableObject {
 
     // MARK: Server events
 
-    private func handle(_ event: [String: Any]) {
+    /// Internal (not private) so the unit tests can feed server events.
+    func handle(_ event: [String: Any]) {
         guard let type = event["type"] as? String, let convID = conversationID else { return }
         if type != "session.created" && type != "session.updated" { cancelWatchdog() }
         defer { noteOwnMessages() }
@@ -700,8 +728,14 @@ final class VoiceSession: ObservableObject {
             store.updateMessage(convID, itemID) { $0.text = "(transcription failed)"; $0.pending = false }
 
         case "response.created":
-            responseActive = true
             currentResponseID = (event["response"] as? [String: Any])?["id"] as? String
+            if cancelNextResponse {
+                cancelNextResponse = false
+                mutedResponseID = currentResponseID
+                client?.send(["type": "response.cancel"])
+                return
+            }
+            responseActive = true
 
         case "response.output_item.added":
             guard let item = event["item"] as? [String: Any], let itemID = item["id"] as? String,
@@ -726,7 +760,7 @@ final class VoiceSession: ObservableObject {
                     speakingItemStartFrame = speaker.enqueuedFrames
                 }
                 speaker.enqueue(pcm)
-                if phase != .recording { phase = .speaking }
+                setIlanPhase(.speaking)
             }
 
         case "response.output_audio.done":
@@ -754,7 +788,7 @@ final class VoiceSession: ObservableObject {
             if !calls.isEmpty {
                 runTools(calls, convID)
             } else {
-                if !speaker.isPlaying { phase = .ready }
+                if !speaker.isPlaying { setIlanPhase(.ready) }
                 // Ilan's whole answer (replies and tool calls) is in: fix the transcript.
                 correctTranscript(convID)
             }
@@ -771,11 +805,13 @@ final class VoiceSession: ObservableObject {
             if (error?["code"] as? String) == "response_cancel_not_active" { return }
             // Cutting a reply at a point it already ended at is harmless too.
             if message.contains("is already shorter than") { return }
+            // A reply that failed to start won't need cancelling.
+            cancelNextResponse = false
             // OpenAI ends every session after 60 minutes. That is routine: start
             // a fresh one quietly (the conversation is carried over as text),
             // unless a reply was on its way, which the user should hear about.
             if Self.isSessionExpiry(code: error?["code"] as? String, message: message) {
-                let busy = responseActive || phase == .thinking || phase == .working || phase == .speaking
+                let busy = responseActive || ilanPhase == .thinking || ilanPhase == .working || ilanPhase == .speaking
                 if !busy {
                     if phase != .recording { connect() }
                     return
@@ -824,7 +860,7 @@ final class VoiceSession: ObservableObject {
     /// and replies. The raw transcript is kept in `rawText`. Runs from either
     /// event (transcript done, final response done), whichever comes last.
     private func correctTranscript(_ convID: UUID) {
-        let finished = !responseActive && phase != .thinking && phase != .working
+        let finished = !responseActive && ilanPhase != .thinking && ilanPhase != .working
         guard let conv = store.conversations.first(where: { $0.id == convID }),
               let turn = TranscriptFixer.turnToCorrect(conv.messages, done: correctedTranscripts,
                                                        turnFinished: finished) else { return }
@@ -863,8 +899,11 @@ final class VoiceSession: ObservableObject {
         }
     }
 
+    /// Unit tests only: runs every tool call instead of the real tools.
+    var toolOverride: (@MainActor (_ name: String, _ arguments: String) async -> String)?
+
     private func runTools(_ calls: [[String: Any]], _ convID: UUID) {
-        phase = .working
+        setIlanPhase(.working)
         let generation = interruptGeneration
         Task {
             await withTaskGroup(of: Void.self) { group in
@@ -880,6 +919,7 @@ final class VoiceSession: ObservableObject {
                     group.addTask { @MainActor in
                         let output: String
                         switch name {
+                        case _ where self.toolOverride != nil: output = await self.toolOverride!(name, args)
                         case ShellTool.functionName: output = await self.runShell(arguments: args, conversation: convID)
                         case ShellTool.closeFunctionName:
                             output = ShellSessions.shared.close(convID)
@@ -897,8 +937,9 @@ final class VoiceSession: ObservableObject {
                     }
                 }
             }
-            guard conversationID == convID, phase == .working, interruptGeneration == generation else { return }
-            phase = .thinking
+            // A tap that only paused Ilan doesn't break the chain.
+            guard conversationID == convID, ilanPhase == .working, interruptGeneration == generation else { return }
+            setIlanPhase(.thinking)
             client?.send(["type": "response.create"])
         }
     }
