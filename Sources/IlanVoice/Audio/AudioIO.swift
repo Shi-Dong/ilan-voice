@@ -20,6 +20,10 @@ protocol VoiceOutput: AnyObject {
     func enqueue(_ pcm: Data)
     func flush()
     func stop()
+    /// Silence playback but keep everything queued (and keep queueing), so
+    /// `resume()` carries on from the same spot.
+    func pause()
+    func resume()
 }
 
 /// This Mac's microphone, following the microphone chosen in Settings.

@@ -62,6 +62,10 @@ final class RemoteSpeaker: VoiceOutput {
     }
 
     /// No more audio for now: report "drained" once the phone should be done.
+    // Talk-key double taps are a Mac thing; the iPhone never holds its speaker.
+    func pause() {}
+    func resume() {}
+
     func flush() {
         drainWork?.cancel()
         let remaining = Double(enqueuedFrames - playedFrames) / PCM.sampleRate

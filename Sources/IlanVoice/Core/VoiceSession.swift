@@ -325,12 +325,79 @@ final class VoiceSession: ObservableObject {
 
     // MARK: Push to talk
 
+    // MARK: Holding Ilan's speech during a tap
+    //
+    // A single tap of the talk key stops Ilan; a double tap opens the window
+    // and must not. The first press can't tell which it is, so it only
+    // *pauses* Ilan (silent at once, nothing lost). The pause becomes a real
+    // stop when the press turns into a hold (talking), or when no second tap
+    // follows in time; a double tap resumes from the same spot instead.
+
+    /// Ilan is paused by a press, waiting to know whether to stop or resume.
+    private(set) var speechHeld = false
+    private var phaseBeforeHold: Phase = .ready
+    private var stopHeldWork: DispatchWorkItem?
+    /// How long after a tap a second tap may still start (the double-tap window).
+    static let doubleTapWindow = DoubleTapDetector().maxGap + 0.05
+
+    /// Something a tap would stop: Ilan speaking or thinking, or a replay.
+    private var hasSpeechToStop: Bool {
+        speaker.isPlaying || responseActive || phase == .speaking || phase == .working || clips.playingID != nil
+    }
+
+    private func holdSpeech() {
+        phaseBeforeHold = phase
+        speaker.pause()
+        clips.pause()
+        speechHeld = true
+    }
+
+    private func scheduleStopHeld(after delay: TimeInterval) {
+        stopHeldWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.stopHeldSpeech() }
+        stopHeldWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// It was a single tap, or a hold: stop Ilan for good.
+    func stopHeldSpeech() {
+        guard speechHeld else { return }
+        speechHeld = false
+        stopHeldWork?.cancel()
+        let recording = phase == .recording
+        interrupt()
+        if !recording { pressEnded.send(.stoppedSpeech) }
+    }
+
+    /// A double tap: carry on speaking from where Ilan was paused.
+    func resumeHeldSpeech() {
+        guard speechHeld else { return }
+        speechHeld = false
+        stopHeldWork?.cancel()
+        speaker.resume()
+        clips.resume()
+        if phase != .recording { phase = phaseBeforeHold }
+    }
+
     func pressToTalk() {
+        // A second press within the double-tap window keeps the pause going,
+        // even if it lands while the first tap's recording is still closing.
+        if speechHeld { stopHeldWork?.cancel() }
         guard phase != .recording else { return }
         errorMessage = nil
-        // Stop Ilan the instant the key goes down, even for a quick tap that
-        // never becomes a recording. Remembered so the pill can say so.
-        interruptedThisPress = interrupt()
+        // Silence Ilan the instant the key goes down, even for a quick tap that
+        // never becomes a recording; whether that becomes a stop is decided
+        // later (see "Holding Ilan's speech"). Remembered so the pill can say so.
+        if speechHeld {
+            interruptedThisPress = true
+        } else if hasSpeechToStop {
+            holdSpeech()
+            interruptedThisPress = true
+        } else {
+            interruptedThisPress = interrupt()
+        }
+        // Held long enough to be talking: stop Ilan for good.
+        if speechHeld { scheduleStopHeld(after: Self.minRecordingSeconds) }
         talkKeyHeld = true
         Task {
             guard await mic.requestPermission() else {
@@ -340,7 +407,7 @@ final class VoiceSession: ObservableObject {
             // A quick tap can be over before permission comes back: then the
             // tap only interrupted Ilan, and nothing is recorded.
             guard talkKeyHeld else {
-                pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded)
+                if !speechHeld { pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded) }
                 return
             }
             beginRecording()
@@ -370,6 +437,9 @@ final class VoiceSession: ObservableObject {
     /// Returns true if there was something to stop.
     @discardableResult
     func interrupt() -> Bool {
+        // Anything that stops Ilan settles a pending tap too.
+        speechHeld = false
+        stopHeldWork?.cancel()
         let wasSpeaking = speaker.isPlaying || responseActive || phase == .speaking || phase == .working
         let wasReplaying = clips.playingID != nil
         clips.stop()
@@ -436,6 +506,8 @@ final class VoiceSession: ObservableObject {
 
     func releaseToTalk() {
         talkKeyHeld = false
+        // A tap with Ilan paused: stop for good unless a second tap follows.
+        if speechHeld { scheduleStopHeld(after: Self.doubleTapWindow) }
         guard phase == .recording, !finishingRecording else { return }
         mic.stop()
         // The microphone hands over audio in small batches; give the last one
@@ -456,8 +528,13 @@ final class VoiceSession: ObservableObject {
         // never shows up in the conversation or reaches the model.
         guard PCM.seconds(recording) >= Self.minRecordingSeconds, PCM.containsSpeech(recording) else {
             if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
-            pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded)
-            phase = sessionReady ? .ready : (client == nil ? .offline : .connecting)
+            if speechHeld {
+                // Paused, not stopped yet: the pill speaks up if it becomes a stop.
+                phase = phaseBeforeHold
+            } else {
+                pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded)
+                phase = sessionReady ? .ready : (client == nil ? .offline : .connecting)
+            }
             return
         }
         pressEnded.send(.sent)
@@ -649,7 +726,7 @@ final class VoiceSession: ObservableObject {
                     speakingItemStartFrame = speaker.enqueuedFrames
                 }
                 speaker.enqueue(pcm)
-                phase = .speaking
+                if phase != .recording { phase = .speaking }
             }
 
         case "response.output_audio.done":

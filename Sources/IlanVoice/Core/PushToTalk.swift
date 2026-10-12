@@ -174,8 +174,8 @@ final class PushToTalk: ObservableObject {
         if doubleTap.record(down: down, at: Date()) { onDoubleTap?() }
     }
 
-    /// Two quick taps of the talk key. Each tap still does what a single tap
-    /// does (it stops Ilan speaking); the second one also fires this.
+    /// Two quick taps of the talk key, fired on the second release. The taps
+    /// only pause Ilan (see `VoiceSession.pressToTalk`), so this can resume.
     var onDoubleTap: (() -> Void)?
     private var doubleTap = DoubleTapDetector()
 
