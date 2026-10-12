@@ -5,6 +5,9 @@ import Foundation
 protocol VoiceInput: AnyObject {
     /// 24 kHz mono PCM16 chunks and their level (0…1).
     var onChunk: ((Data, Float) -> Void)? { get set }
+    /// The microphone recording since the last `start`, as macOS names it
+    /// (e.g. "MacBook Pro Microphone"); nil if unknown.
+    var deviceName: String? { get }
     func requestPermission() async -> Bool
     func start() throws
     func stop()
@@ -30,6 +33,10 @@ final class MacMicrophone: VoiceInput {
         get { capture.onChunk }
         set { capture.onChunk = newValue }
     }
+
+    /// The device actually used: the chosen one, or the system default when
+    /// the chosen one is gone.
+    var deviceName: String? { capture.deviceName }
 
     func requestPermission() async -> Bool { await MicrophoneCapture.requestPermission() }
 

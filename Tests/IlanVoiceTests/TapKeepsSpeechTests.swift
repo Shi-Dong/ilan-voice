@@ -18,6 +18,7 @@ final class FakeSpeaker: VoiceOutput {
 /// A microphone that hands over 20 ms of loud audio every 20 ms while it runs.
 final class FakeMic: VoiceInput {
     var onChunk: ((Data, Float) -> Void)?
+    var deviceName: String? = "Test Microphone"
     var running = false
     var starts = 0
     /// How long the permission check takes (the first-run prompt is slow).
