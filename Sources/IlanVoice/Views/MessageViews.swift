@@ -72,14 +72,23 @@ struct MessageRow: View {
                 } else {
                     messageText(message.text, color: NSColor(white: 1, alpha: 0.92), lineSpacing: 3)
                 }
-                if message.audioFile != nil {
-                    PlayChip(message: message, session: session, clips: clips, dark: false)
-                }
-                if settings.showUsage, let usage = message.usage {
-                    Text(Pricing.describe(usage))
-                        .font(.system(size: 10)).monospacedDigit()
-                        .foregroundStyle(Theme.textDim)
-                        .help("Tokens this reply used (including any tool steps before it): input, of which cached, and output")
+                // The replay button on the left, this reply's tokens on the right of the same line.
+                let usage = settings.showUsage ? message.usage : nil
+                if message.audioFile != nil || usage != nil {
+                    HStack(alignment: .center, spacing: 12) {
+                        if message.audioFile != nil {
+                            PlayChip(message: message, session: session, clips: clips, dark: false)
+                        }
+                        Spacer(minLength: 0)
+                        if let usage {
+                            Text(Pricing.describe(usage))
+                                .font(.system(size: 10)).monospacedDigit()
+                                .foregroundStyle(Theme.textDim)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .help("Tokens this reply used (including any tool steps before it): input, of which cached, and output")
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 11)
