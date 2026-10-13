@@ -86,20 +86,18 @@ enum Pricing {
         return (sum, incomplete)
     }
 
-    /// "$0.42", "$0.004", "<$0.001"; a trailing "+" when part of it is unknown.
+    /// "$0.42" (two decimals); a trailing "+" when part of it is unknown.
     static func format(_ dollars: Double, incomplete: Bool = false) -> String {
-        let plus = incomplete ? "+" : ""
-        if dollars == 0 { return "$0" + plus }
-        if dollars < 0.001 { return "<$0.001" + plus }
-        if dollars < 0.1 { return String(format: "$%.3f", dollars) + plus }
-        return String(format: "$%.2f", dollars) + plus
+        String(format: "$%.2f", dollars) + (incomplete ? "+" : "")
     }
 
-    /// "in 12,345 (10,240 cached) · out 512".
+    /// "512", or "12.3k" from 1,000 tokens up.
+    static func tokens(_ n: Int) -> String {
+        n < 1000 ? "\(n)" : String(format: "%.1fk", Double(n) / 1000)
+    }
+
+    /// "in 12.3k (10.2k cached) · out 512".
     static func describe(_ t: TokenUsage) -> String {
-        let n = NumberFormatter()
-        n.numberStyle = .decimal
-        func f(_ v: Int) -> String { n.string(from: NSNumber(value: v)) ?? "\(v)" }
-        return "in \(f(t.input)) (\(f(t.cachedInput)) cached) · out \(f(t.output))"
+        "in \(tokens(t.input)) (\(tokens(t.cachedInput)) cached) · out \(tokens(t.output))"
     }
 }

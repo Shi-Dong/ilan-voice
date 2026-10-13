@@ -46,12 +46,15 @@ func registerUsageTests() {
             expectEqual(Pricing.format(total.dollars, incomplete: total.incomplete), "$4.00+")
         }
         test("costs and token counts read naturally") {
-            expectEqual(Pricing.format(0), "$0")
-            expectEqual(Pricing.format(0.0004), "<$0.001")
-            expectEqual(Pricing.format(0.0423), "$0.042")
+            expectEqual(Pricing.format(0), "$0.00")
+            expectEqual(Pricing.format(0.004), "$0.00")
+            expectEqual(Pricing.format(0.0463), "$0.05")
             expectEqual(Pricing.format(1.237), "$1.24")
+            expectEqual(Pricing.tokens(999), "999")
+            expectEqual(Pricing.tokens(1000), "1.0k")
+            expectEqual(Pricing.tokens(12345), "12.3k")
             expectEqual(Pricing.describe(TokenUsage(textInput: 12000, audioInput: 345, cachedTextInput: 10240, textOutput: 12, audioOutput: 500)),
-                        "in 12,345 (10,240 cached) · out 512")
+                        "in 12.3k (10.2k cached) · out 512")
         }
         test("a reply's tokens are recorded for the cost and shown on its message") {
             let (s, id) = makeSession()
