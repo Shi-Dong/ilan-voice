@@ -189,6 +189,10 @@ enum PhoneWebApp {
         border: 1px solid var(--rim); box-shadow: var(--glass-shadow); }
       .choice { border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.04));
         border: 1px solid var(--rim-soft); box-shadow: inset 0 1px 0 rgba(255,255,255,.18); }
+          /* Costs and token counts (shown when the Mac's setting is on). */
+      #cost { font-variant-numeric: tabular-nums; }
+      .usage { align-self: flex-start; margin: -6px 0 2px 8px; font-size: 11.5px; color: var(--dim);
+        font-variant-numeric: tabular-nums; }
     </style>
     </head>
     <body>
@@ -196,7 +200,7 @@ enum PhoneWebApp {
       <img src="/icon-180.png" alt="">
       <div style="min-width:0">
         <div class="title" id="title">Ilan Voice</div>
-        <div class="status"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
+        <div class="status"><span class="dot" id="dot"></span><span id="status">Connecting…</span><span id="cost"></span></div>
       </div>
       <button id="reconnect" aria-label="Reconnect">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -337,6 +341,8 @@ enum PhoneWebApp {
 
     function render(m) {
       if (m.title) $("title").textContent = m.title;
+      // The conversation's cost so far, when the Mac shows costs.
+      $("cost").textContent = m.cost ? "· " + m.cost : "";
       const list = $("list");
       const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
       list.innerHTML = "";
@@ -349,6 +355,11 @@ enum PhoneWebApp {
         d.className = "msg " + it.role + (it.pending ? " pending" : "");
         d.textContent = it.role === "tool" ? "⚙︎ " + it.text : (it.text || "…");
         list.appendChild(d);
+        if (it.usage) {
+          const u = document.createElement("div");
+          u.className = "usage"; u.textContent = it.usage;
+          list.appendChild(u);
+        }
       }
       if (atBottom || m.items.length) list.scrollTop = list.scrollHeight;
     }

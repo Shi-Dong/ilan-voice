@@ -36,6 +36,9 @@ final class PhoneClient {
         session.$errorMessage.removeDuplicates()
             .sink { [weak self] _ in DispatchQueue.main.async { self?.sendState() } }
             .store(in: &cancellables)
+        AppSettings.shared.$showUsage.dropFirst().removeDuplicates()
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.sendMessages(force: true) } }
+            .store(in: &cancellables)
         store.$conversations
             .debounce(for: .milliseconds(120), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in self?.sendMessages() }
@@ -144,16 +147,29 @@ final class PhoneClient {
     private func sendMessages(force: Bool = false) {
         guard let peer else { return }
         let conv = conversation(create: false).flatMap { id in store.conversations.first { $0.id == id } }
+        // Costs and token counts follow the Mac's "Show conversation costs and
+        // token counts" setting.
+        let showUsage = AppSettings.shared.showUsage
         let items: [[String: Any]] = (conv?.messages ?? []).suffix(80).map { m in
             switch m.role {
             case .user, .assistant:
-                return ["id": m.id, "role": m.role == .user ? "user" : "assistant", "text": m.text, "pending": m.pending]
+                var item: [String: Any] = ["id": m.id, "role": m.role == .user ? "user" : "assistant", "text": m.text, "pending": m.pending]
+                if showUsage, m.role == .assistant, let usage = m.usage { item["usage"] = Pricing.describe(usage) }
+                return item
             case .tool:
                 return ["id": m.id, "role": "tool", "text": m.toolName ?? "tool", "pending": m.pending]
             }
         }
-        guard force || !NSArray(array: items).isEqual(to: lastSentMessages) else { return }
-        lastSentMessages = items
-        peer.send(json: ["type": "messages", "title": conv?.title ?? "Ilan Voice", "items": items])
+        var cost: String?
+        if showUsage, let conv, conv.usage?.isEmpty == false {
+            cost = Pricing.format(conv.cost.dollars, incomplete: conv.cost.incomplete)
+        }
+        var all = items
+        all.append(["cost": cost ?? ""])  // so a change in cost alone is sent too
+        guard force || !NSArray(array: all).isEqual(to: lastSentMessages) else { return }
+        lastSentMessages = all
+        var payload: [String: Any] = ["type": "messages", "title": conv?.title ?? "Ilan Voice", "items": items]
+        if let cost { payload["cost"] = cost }
+        peer.send(json: payload)
     }
 }
