@@ -31,6 +31,11 @@ struct Sidebar: View {
     @ObservedObject var shells = ShellSessions.shared
     @Local private var renaming: UUID?
     @Local private var draft = ""
+    /// The sidebar's width, so the toolbar's New Conversation button can sit at its right edge.
+    @Local private var width: CGFloat = 240
+
+    /// Toolbar items start after the window's close/minimise/zoom buttons.
+    static let windowButtonsWidth: CGFloat = 78
 
     var body: some View {
         List(selection: $store.selectedID) {
@@ -94,10 +99,23 @@ struct Sidebar: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom, spacing: 0) { SidebarFooter(updater: updater) }
+        .background(GeometryReader { geo in
+            Color.clear
+                .onAppear { width = geo.size.width }
+                .onChange(of: geo.size.width) { _, new in width = new }
+        })
+        // No hide-sidebar button; New Conversation sits at the sidebar's right edge.
+        .toolbar(removing: .sidebarToggle)
         .toolbar {
             ToolbarItem {
-                Button { store.newConversation() } label: { Image(systemName: "square.and.pencil") }
-                    .help("New conversation (⇧⌘O)")
+                // Toolbar items don't stretch, so the item is as wide as the
+                // sidebar's free toolbar space, with the button at its end.
+                HStack {
+                    Spacer(minLength: 0)
+                    Button { store.newConversation() } label: { Image(systemName: "square.and.pencil") }
+                        .help("New conversation (⇧⌘O)")
+                }
+                .frame(width: max(30, width - Self.windowButtonsWidth - 40))
             }
         }
     }
