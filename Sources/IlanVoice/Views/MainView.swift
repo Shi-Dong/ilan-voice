@@ -36,6 +36,7 @@ struct Sidebar: View {
 
     /// Toolbar items start after the window's close/minimise/zoom buttons.
     static let windowButtonsWidth: CGFloat = 78
+    static let cardRadius: CGFloat = 14
 
     var body: some View {
         List(selection: $store.selectedID) {
@@ -98,7 +99,21 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
         .safeAreaInset(edge: .bottom, spacing: 0) { SidebarFooter(updater: updater) }
+        // A floating card: rounded, raised a little off the window's background.
+        // It reaches up behind the window buttons, like one panel.
+        .background(
+            RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous)
+                .fill(Theme.inkRaised)
+                .overlay(RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous).stroke(Theme.hairline))
+                .shadow(color: .black.opacity(0.4), radius: 12, y: 3)
+                .padding(.top, 8)
+                .ignoresSafeArea(edges: .top)
+        )
+        .padding(.leading, 8).padding(.trailing, 6).padding(.bottom, 8)
+        // The window's own background shows around the card, not the system sidebar grey.
+        .background(Theme.background.ignoresSafeArea())
         .background(GeometryReader { geo in
             Color.clear
                 .onAppear { width = geo.size.width }
