@@ -76,8 +76,7 @@ struct ComposerBar: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.hairline))
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func send() {

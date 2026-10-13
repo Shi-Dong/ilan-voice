@@ -99,13 +99,12 @@ struct Sidebar: View {
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
         .safeAreaInset(edge: .bottom, spacing: 0) { SidebarFooter(updater: updater) }
-        // A floating card: rounded, raised a little off the window's background.
-        // It reaches up behind the window buttons, like one panel.
+        // A floating Liquid Glass panel, tinted warm-dark; it reaches up behind
+        // the window buttons, like one panel.
         .background(
-            RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous)
-                .fill(Theme.inkRaised)
-                .overlay(RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous).stroke(Theme.hairline))
-                .shadow(color: .black.opacity(0.4), radius: 12, y: 3)
+            Color.clear
+                .glassEffect(.regular.tint(Theme.inkRaised.opacity(0.55)),
+                             in: RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous))
                 .padding(.top, 8)
                 .ignoresSafeArea(edges: .top)
         )
@@ -195,9 +194,9 @@ struct ChatView: View {
                     .foregroundStyle(Theme.textDim)
                     .rotationEffect(.degrees(session.phase == .connecting ? 180 : 0))
                     .animation(.easeInOut(duration: 0.4), value: session.phase == .connecting)
-                    .frame(width: 30, height: 26)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .contentShape(Rectangle())
+                    .frame(width: 30, height: 30)
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .disabled(session.phase == .recording || session.phase == .connecting)
@@ -266,11 +265,11 @@ struct ChatView: View {
                     Button { session.playNextUnheard() } label: {
                         Label("Play \(unheard) new", systemImage: "play.circle.fill")
                             .font(.system(size: 12, weight: .semibold))
-                            .padding(.horizontal, 11).padding(.vertical, 6)
-                            .background(Theme.orange, in: Capsule())
                             .foregroundStyle(Theme.ink)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.glassProminent)
+                    .buttonBorderShape(.capsule)
+                    .tint(Theme.orange)
                     .help("Play the next new reply (⇧⌘P)")
                     .transition(.scale.combined(with: .opacity))
                 }
