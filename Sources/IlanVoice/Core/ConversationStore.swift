@@ -23,6 +23,9 @@ struct Message: Codable, Identifiable, Equatable {
     /// Spoken message whose transcript is final but not yet through the
     /// Luna correction (TranscriptFixer): still shown grey.
     var awaitingCorrection: Bool?
+    /// Assistant replies: the tokens Ilan used to produce this message,
+    /// including any tool-calling steps since the previous reply.
+    var usage: TokenUsage?
 
     /// Grey in the conversation: still transcribing, or waiting for its correction.
     var isProvisional: Bool { pending || awaitingCorrection == true }
@@ -41,6 +44,11 @@ struct Conversation: Codable, Identifiable, Equatable {
     /// Which iPhone (the web page's device ID) and its name, e.g. "iPhone 2".
     var deviceID: String?
     var deviceName: String?
+    /// Every billed API call made for this conversation (see Pricing).
+    var usage: [UsageRecord]?
+
+    /// What the conversation has cost so far, and whether part of it is unknown.
+    var cost: (dollars: Double, incomplete: Bool) { Pricing.total(usage ?? []) }
 
     static let iPhoneOrigin = "iphone"
     var isFromIPhone: Bool { origin == Self.iPhoneOrigin }
@@ -154,6 +162,11 @@ final class ConversationStore: ObservableObject {
         try? FileManager.default.removeItem(at: Paths.conversation(id))
         if selectedID == id { selectedID = conversations.first?.id }
         if conversations.isEmpty { newConversation() }
+    }
+
+    /// Adds a billed call to the conversation's record (saved like any change).
+    func recordUsage(_ convID: UUID, _ record: UsageRecord) {
+        update(convID) { $0.usage = ($0.usage ?? []) + [record] }
     }
 
     func audioURL(_ convID: UUID, _ file: String) -> URL {

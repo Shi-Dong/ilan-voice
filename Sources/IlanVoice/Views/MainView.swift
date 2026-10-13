@@ -29,6 +29,7 @@ struct Sidebar: View {
     @ObservedObject var store: ConversationStore
     @ObservedObject var updater: Updater
     @ObservedObject var shells = ShellSessions.shared
+    @ObservedObject var settings = AppSettings.shared
     @Local private var renaming: UUID?
     @Local private var draft = ""
 
@@ -74,8 +75,17 @@ struct Sidebar: View {
                             }
                         }
                     }
-                    Text(conv.updatedAt, format: .relative(presentation: .named))
-                        .font(.system(size: 11)).foregroundStyle(Theme.textDim)
+                    HStack(spacing: 6) {
+                        Text(conv.updatedAt, format: .relative(presentation: .named))
+                        if settings.showUsage, conv.usage?.isEmpty == false {
+                            let cost = conv.cost
+                            Spacer(minLength: 4)
+                            Text(Pricing.format(cost.dollars, incomplete: cost.incomplete))
+                                .monospacedDigit()
+                                .help(cost.incomplete ? "Some calls used a model with no known price; they aren't included." : "What this conversation has cost so far, at OpenAI's list prices")
+                        }
+                    }
+                    .font(.system(size: 11)).foregroundStyle(Theme.textDim)
                 }
                 .padding(.vertical, 3)
                 .tag(conv.id)

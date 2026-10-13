@@ -88,6 +88,11 @@ private struct GeneralSettings: View {
             }
             WebSearchSection()
             PhoneSection(phone: phone)
+            Section("Cost") {
+                Toggle("Show conversation costs and token counts", isOn: $settings.showUsage)
+                Text("Each conversation's cost appears in the sidebar and each reply shows its input, cached and output tokens. Costs use OpenAI's list prices and are always recorded, even while hidden.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("App") {
                 Toggle("Hide from Dock when the window is closed", isOn: $settings.hideDockWhenClosed)
                     .onChange(of: settings.hideDockWhenClosed) { _, hide in
