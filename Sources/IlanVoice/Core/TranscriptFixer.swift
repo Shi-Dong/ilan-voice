@@ -116,7 +116,6 @@ enum TranscriptFixer {
 
     static func fix(_ transcript: String, dictionary: [String], history: [Message], tools: [Message] = [],
                     reply: String, apiKey: String, model: String,
-                    onUsage: (TokenUsage) -> Void = { _ in },
                     send: Send = { try await URLSession.shared.data(for: $0) },
                     sleep: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1e9)) }) async -> String? {
         guard !apiKey.isEmpty else { return nil }
@@ -144,7 +143,6 @@ enum TranscriptFixer {
                 failure = nil
                 if status == 200 {
                     guard let obj = try? JSONSerialization.jsonObject(with: reply) as? [String: Any] else { return nil }
-                    if let usage = obj["usage"] as? [String: Any] { onUsage(.responses(usage)) }  // billed either way
                     let text = (obj["output_text"] as? String) ?? (obj["output"] as? [[String: Any]] ?? [])
                         .filter { $0["type"] as? String == "message" }
                         .flatMap { $0["content"] as? [[String: Any]] ?? [] }

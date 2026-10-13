@@ -44,7 +44,7 @@ struct Conversation: Codable, Identifiable, Equatable {
     /// Which iPhone (the web page's device ID) and its name, e.g. "iPhone 2".
     var deviceID: String?
     var deviceName: String?
-    /// Every billed API call made for this conversation (see Pricing).
+    /// Every Realtime reply billed in this conversation (see Pricing).
     var usage: [UsageRecord]?
 
     /// What the conversation has cost so far, and whether part of it is unknown.

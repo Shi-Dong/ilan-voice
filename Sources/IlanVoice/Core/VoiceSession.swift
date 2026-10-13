@@ -735,7 +735,6 @@ final class VoiceSession: ObservableObject {
 
         case "conversation.item.input_audio_transcription.completed":
             guard let itemID = event["item_id"] as? String else { return }
-            recordTranscriptionUsage(convID, itemID, event["usage"] as? [String: Any])
             let text = (event["transcript"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else {
                 discardSilentTurn(convID, itemID)
@@ -864,8 +863,7 @@ final class VoiceSession: ObservableObject {
         let key = settings.apiKey
         let model = settings.titleModel
         Task {
-            guard let title = await ConversationTitler.title(for: messages, apiKey: key, model: model,
-                                                             onUsage: usageRecorder(convID, .title, model: model)),
+            guard let title = await ConversationTitler.title(for: messages, apiKey: key, model: model),
                   titleRequests[convID] == ticket else { return }
             store.setAutoTitle(convID, title)
         }
@@ -878,7 +876,7 @@ final class VoiceSession: ObservableObject {
     private func recordReplyUsage(_ convID: UUID, _ response: [String: Any]) {
         guard let raw = response["usage"] as? [String: Any] else { return }
         let tokens = TokenUsage.realtime(raw)
-        store.recordUsage(convID, UsageRecord(kind: .reply, model: sessionModel.isEmpty ? settings.model : sessionModel, tokens: tokens))
+        store.recordUsage(convID, UsageRecord(model: sessionModel.isEmpty ? settings.model : sessionModel, tokens: tokens))
         let total = unshownReplyUsage + tokens
         let said = (response["output"] as? [[String: Any]] ?? []).last { $0["type"] as? String == "message" }
         guard let itemID = said?["id"] as? String, store.message(convID, itemID) != nil else {
@@ -887,30 +885,6 @@ final class VoiceSession: ObservableObject {
         }
         unshownReplyUsage = TokenUsage()
         store.updateMessage(convID, itemID) { $0.usage = total }
-    }
-
-    /// Transcription is billed per minute of audio (gpt-transcribe) or per
-    /// token; the event's own usage is used, else the recording's length.
-    private func recordTranscriptionUsage(_ convID: UUID, _ itemID: String, _ usage: [String: Any]?) {
-        let seconds = (usage?["seconds"] as? NSNumber)?.doubleValue ?? store.message(convID, itemID)?.audioSeconds
-        var tokens: TokenUsage?
-        if let usage, usage["input_tokens"] != nil {
-            let details = usage["input_token_details"] as? [String: Any] ?? [:]
-            var t = TokenUsage()
-            t.audioInput = (details["audio_tokens"] as? NSNumber)?.intValue ?? (usage["input_tokens"] as? NSNumber)?.intValue ?? 0
-            t.textInput = (details["text_tokens"] as? NSNumber)?.intValue ?? 0
-            t.textOutput = (usage["output_tokens"] as? NSNumber)?.intValue ?? 0
-            tokens = t
-        }
-        store.recordUsage(convID, UsageRecord(kind: .transcription, model: settings.transcriptionModel,
-                                              tokens: tokens, audioSeconds: seconds))
-    }
-
-    /// For calls finished off the main thread (Luna corrections, titles).
-    private func usageRecorder(_ convID: UUID, _ kind: UsageRecord.Kind, model: String) -> @Sendable (TokenUsage) -> Void {
-        { [weak self] tokens in
-            Task { @MainActor in self?.store.recordUsage(convID, UsageRecord(kind: kind, model: model, tokens: tokens)) }
-        }
     }
 
     /// User messages already sent for correction (each one only once).
@@ -941,8 +915,7 @@ final class VoiceSession: ObservableObject {
         let key = settings.apiKey, model = settings.titleModel, terms = UserDictionary.terms()
         Task {
             let fixed = await TranscriptFixer.fix(user.text, dictionary: terms, history: history,
-                                                  tools: turn.tools, reply: reply, apiKey: key, model: model,
-                                                  onUsage: usageRecorder(convID, .correction, model: model))
+                                                  tools: turn.tools, reply: reply, apiKey: key, model: model)
             // Final either way: corrected, unchanged, or every attempt failed.
             store.updateMessage(convID, user.id) { message in
                 message.awaitingCorrection = nil

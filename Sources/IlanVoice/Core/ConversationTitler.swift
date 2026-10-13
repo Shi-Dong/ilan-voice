@@ -18,9 +18,7 @@ enum ConversationTitler {
     /// How many times Luna is asked for a shorter title before the app trims it.
     static let shortenAttempts = 2
 
-    /// `onUsage` is called with the tokens of every call made (one, or more when shortening).
-    static func title(for messages: [Message], apiKey: String, model: String,
-                      onUsage: @escaping (TokenUsage) -> Void = { _ in }) async -> String? {
+    static func title(for messages: [Message], apiKey: String, model: String) async -> String? {
         let turns = messages
             .filter { $0.role != .tool && !$0.pending && !$0.text.isEmpty }
             .suffix(turnsConsidered)
@@ -29,7 +27,7 @@ enum ConversationTitler {
             .map { "\($0.role == .user ? "User" : "Assistant"): \($0.text)" }
             .joined(separator: "\n")
 
-        guard var title = await ask(transcript, apiKey: apiKey, model: model, onUsage: onUsage).flatMap(normalize) else { return nil }
+        guard var title = await ask(transcript, apiKey: apiKey, model: model).flatMap(normalize) else { return nil }
         // Too long: ask Luna to rephrase it shorter rather than chopping words off.
         var attempt = 0
         while title.count > maxLength && attempt < shortenAttempts {
@@ -41,15 +39,14 @@ enum ConversationTitler {
             Write a different, shorter title of at most \(maxLength) characters. Don't cut \
             words off; rephrase or use fewer words.
             """
-            guard let shorter = await ask(followUp, apiKey: apiKey, model: model, onUsage: onUsage).flatMap(normalize) else { break }
+            guard let shorter = await ask(followUp, apiKey: apiKey, model: model).flatMap(normalize) else { break }
             title = shorter
         }
         return clean(title)
     }
 
     /// One Responses API call; returns the model's text or nil on failure.
-    private static func ask(_ input: String, apiKey: String, model: String,
-                            onUsage: (TokenUsage) -> Void) async -> String? {
+    private static func ask(_ input: String, apiKey: String, model: String) async -> String? {
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/responses")!, timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -68,7 +65,6 @@ enum ConversationTitler {
         guard let (reply, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let obj = try? JSONSerialization.jsonObject(with: reply) as? [String: Any] else { return nil }
-        if let usage = obj["usage"] as? [String: Any] { onUsage(.responses(usage)) }
         return outputText(obj)
     }
 

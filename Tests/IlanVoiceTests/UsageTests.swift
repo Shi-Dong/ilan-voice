@@ -30,28 +30,17 @@ func registerUsageTests() {
             let t = TokenUsage.realtime(["input_tokens": 70, "output_tokens": 9])
             expectEqual(t.input, 70); expectEqual(t.output, 9)
         }
-        test("Responses API usage (Luna, titles) is read with its cached part") {
-            let t = TokenUsage.responses(["input_tokens": 400, "input_tokens_details": ["cached_tokens": 128], "output_tokens": 12])
-            expectEqual(t, TokenUsage(textInput: 400, cachedTextInput: 128, textOutput: 12))
-        }
         test("a Realtime reply is priced per kind of token, cached tokens at the cached rate") {
             let t = TokenUsage(textInput: 1_000_000, audioInput: 1_000_000, cachedTextInput: 500_000,
                                cachedAudioInput: 250_000, textOutput: 100_000, audioOutput: 200_000)
             // text: 0.5M × $4 + 0.5M × $0.40 + 0.1M × $24; audio: 0.75M × $32 + 0.25M × $0.40 + 0.2M × $64
             let expected = 2.0 + 0.2 + 2.4 + 24.0 + 0.1 + 12.8
-            let cost = Pricing.cost(UsageRecord(kind: .reply, model: "gpt-realtime-2.1", tokens: t))!
+            let cost = Pricing.cost(UsageRecord(model: "gpt-realtime-2.1", tokens: t))!
             expect(abs(cost - expected) < 1e-9, "\(cost)")
         }
-        test("Luna is priced per token; minute-billed transcription by audio length") {
-            let luna = Pricing.cost(UsageRecord(kind: .correction, model: "gpt-6-luna",
-                                                tokens: TokenUsage(textInput: 2_000_000, textOutput: 1_000_000)))!
-            expect(abs(luna - (0.2 + 0.5)) < 1e-9, "\(luna)")
-            let minute = Pricing.cost(UsageRecord(kind: .transcription, model: "gpt-transcribe", audioSeconds: 120))!
-            expect(abs(minute - 0.009) < 1e-12, "\(minute)")
-        }
         test("an unknown model is never guessed: the total says it is incomplete") {
-            let records = [UsageRecord(kind: .reply, model: "gpt-realtime-2.1", tokens: TokenUsage(textInput: 1_000_000)),
-                           UsageRecord(kind: .reply, model: "some-new-model", tokens: TokenUsage(textInput: 5))]
+            let records = [UsageRecord(model: "gpt-realtime-2.1", tokens: TokenUsage(textInput: 1_000_000)),
+                           UsageRecord(model: "some-new-model", tokens: TokenUsage(textInput: 5))]
             let total = Pricing.total(records)
             expect(abs(total.dollars - 4) < 1e-9); expect(total.incomplete)
             expectEqual(Pricing.format(total.dollars, incomplete: total.incomplete), "$4.00+")
@@ -71,7 +60,6 @@ func registerUsageTests() {
                       "usage": realtimeUsage(textIn: 900, audioIn: 0, cachedText: 600, cachedAudio: 0, textOut: 10, audioOut: 200)]])
             let c = conversation(s, id)
             expectEqual(c.usage?.count, 1)
-            expectEqual(c.usage?.first?.kind, .reply)
             expectEqual(c.messages.first { $0.id == "a1" }?.usage?.input, 900)
             expect(c.cost.dollars > 0 && !c.cost.incomplete)
         }
@@ -98,24 +86,24 @@ func registerUsageTests() {
                       "usage": realtimeUsage(textIn: 50, audioIn: 0, cachedText: 0, cachedAudio: 0, textOut: 0, audioOut: 30)]])
             expectEqual(conversation(s, id).usage?.count, 1)
         }
-        test("transcription is billed by the recording's length when the event gives none") {
-            let (s, id) = makeSession()
-            var m = Message(id: "u1", role: .user, text: "", pending: true)
-            m.audioSeconds = 30
-            s.store.update(id) { $0.messages.append(m) }
-            s.handle(["type": "conversation.item.input_audio_transcription.completed", "item_id": "u1", "transcript": "hello"])
-            let r = conversation(s, id).usage?.first
-            expectEqual(r?.kind, .transcription)
-            expectEqual(r?.audioSeconds, 30)
-        }
         test("conversations saved before this keep loading, with no cost") {
             let old = #"{"id":"6B1D4C2E-0000-4000-8000-000000000001","title":"Old","createdAt":0,"updatedAt":0,"messages":[{"id":"a","role":"assistant","text":"hi","createdAt":0,"pending":false,"listened":true}]}"#
             let c = try JSONDecoder().decode(Conversation.self, from: Data(old.utf8))
             expect(c.usage == nil && c.messages[0].usage == nil)
             expectEqual(c.cost.dollars, 0)
             let round = try JSONDecoder().decode(Conversation.self, from: JSONEncoder().encode(
-                Conversation(usage: [UsageRecord(kind: .title, model: "gpt-6-luna", tokens: TokenUsage(textInput: 3))])))
+                Conversation(usage: [UsageRecord(model: "gpt-realtime-2.1", tokens: TokenUsage(textInput: 3))])))
             expectEqual(round.usage?.first?.tokens?.textInput, 3)
+        }
+        test("only the realtime model counts: transcription, Luna and titles are left out") {
+            let (s, id) = makeSession()
+            var m = Message(id: "u1", role: .user, text: "", pending: true)
+            m.audioSeconds = 30
+            s.store.update(id) { $0.messages.append(m) }
+            s.handle(["type": "conversation.item.input_audio_transcription.completed", "item_id": "u1", "transcript": "hello",
+                      "usage": ["type": "duration", "seconds": 30]])
+            expect(conversation(s, id).usage == nil)
+            expect(Pricing.tokens["gpt-6-luna"] == nil && Pricing.tokens["gpt-transcribe"] == nil)
         }
         test("the usage display is on by default") {
             expect(AppSettings.shared.showUsage)

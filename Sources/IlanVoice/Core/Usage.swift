@@ -39,29 +39,19 @@ struct TokenUsage: Codable, Equatable {
         if u.cachedInput == 0 { u.cachedTextInput = int(input["cached_tokens"]) }
         return u
     }
-
-    /// A Responses API usage object: input_tokens (with input_tokens_details.cached_tokens) and output_tokens.
-    static func responses(_ usage: [String: Any]) -> TokenUsage {
-        let details = usage["input_tokens_details"] as? [String: Any] ?? [:]
-        return TokenUsage(textInput: int(usage["input_tokens"]), cachedTextInput: int(details["cached_tokens"]),
-                          textOutput: int(usage["output_tokens"]))
-    }
 }
 
-/// One billed API call in a conversation. Kept with the conversation so the
-/// cost can always be recomputed (e.g. after a price correction).
+/// One Realtime reply in a conversation, as billed. Kept with the
+/// conversation so the cost can always be recomputed (e.g. after a price
+/// correction). Only the Realtime model is counted: transcription and the
+/// text model (corrections, titles) are left out.
 struct UsageRecord: Codable, Equatable {
-    enum Kind: String, Codable { case reply, transcription, correction, title }
-    var kind: Kind
     var model: String
     var tokens: TokenUsage?
-    /// For transcription models billed by the minute.
-    var audioSeconds: Double?
     var at = Date()
 }
 
-/// OpenAI list prices in US dollars per million tokens (or per minute of
-/// audio for the minute-billed transcribers), from
+/// OpenAI list prices for the Realtime models, in US dollars per million tokens, from
 /// https://developers.openai.com/api/docs/pricing (checked 2026-10-13).
 /// A model missing here has no known price: its calls are recorded but the
 /// cost is shown as incomplete rather than guessed.
@@ -74,19 +64,10 @@ enum Pricing {
     static let tokens: [String: TokenPrices] = [
         "gpt-realtime-2.1": TokenPrices(textInput: 4, cachedTextInput: 0.4, textOutput: 24,
                                         audioInput: 32, cachedAudioInput: 0.4, audioOutput: 64),
-        "gpt-6-luna": TokenPrices(textInput: 0.10, cachedTextInput: 0.01, textOutput: 0.50),
-    ]
-    static let perMinute: [String: Double] = [
-        "gpt-transcribe": 0.0045,
-        "gpt-live-transcribe": 0.017,
     ]
 
     /// The call's cost in dollars, or nil when its model has no known price.
     static func cost(_ r: UsageRecord) -> Double? {
-        if let rate = perMinute[r.model] {
-            guard let seconds = r.audioSeconds else { return nil }
-            return rate * seconds / 60
-        }
         guard let p = tokens[r.model], let t = r.tokens else { return nil }
         // Cached tokens are counted inside the input totals; bill them at the cached rate.
         let text = Double(t.textInput - t.cachedTextInput) * p.textInput + Double(t.cachedTextInput) * p.cachedTextInput
