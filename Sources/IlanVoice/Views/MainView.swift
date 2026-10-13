@@ -16,6 +16,8 @@ struct MainView: View {
             ChatView(store: store, session: session, ptt: ptt, mcp: mcp, updater: updater)
         }
         .background(Theme.background)
+        // The sidebar card floats on the same background as the chat.
+        .containerBackground(Theme.background, for: .window)
         .preferredColorScheme(.dark)
         .tint(Theme.accent)
         .onChange(of: store.selectedID) { _, _ in
@@ -31,11 +33,7 @@ struct Sidebar: View {
     @ObservedObject var shells = ShellSessions.shared
     @Local private var renaming: UUID?
     @Local private var draft = ""
-    /// The sidebar's width, so the toolbar's New Conversation button can sit at its right edge.
-    @Local private var width: CGFloat = 240
 
-    /// Toolbar items start after the window's close/minimise/zoom buttons.
-    static let windowButtonsWidth: CGFloat = 78
     static let cardRadius: CGFloat = 14
 
     var body: some View {
@@ -114,23 +112,14 @@ struct Sidebar: View {
         .padding(.leading, 8).padding(.trailing, 6).padding(.bottom, 8)
         // The window's own background shows around the card, not the system sidebar grey.
         .background(Theme.background.ignoresSafeArea())
-        .background(GeometryReader { geo in
-            Color.clear
-                .onAppear { width = geo.size.width }
-                .onChange(of: geo.size.width) { _, new in width = new }
-        })
         // No hide-sidebar button; New Conversation sits at the sidebar's right edge.
         .toolbar(removing: .sidebarToggle)
         .toolbar {
+            // A flexible spacer pushes New Conversation to the sidebar's right edge.
+            ToolbarSpacer(.flexible)
             ToolbarItem {
-                // Toolbar items don't stretch, so the item is as wide as the
-                // sidebar's free toolbar space, with the button at its end.
-                HStack {
-                    Spacer(minLength: 0)
-                    Button { store.newConversation() } label: { Image(systemName: "square.and.pencil") }
-                        .help("New conversation (⇧⌘O)")
-                }
-                .frame(width: max(30, width - Self.windowButtonsWidth - 40))
+                Button { store.newConversation() } label: { Image(systemName: "square.and.pencil") }
+                    .help("New conversation (⇧⌘O)")
             }
         }
     }

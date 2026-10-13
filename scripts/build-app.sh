@@ -45,7 +45,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleVersion</key><string>${VERSION}</string>
     <key>IlanVoiceCommit</key><string>${COMMIT}</string>
     <key>IlanVoiceBuildDate</key><string>${BUILD_DATE}</string>
-    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSAppSleepDisabled</key><true/>
