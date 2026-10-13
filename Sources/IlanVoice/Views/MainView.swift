@@ -16,6 +16,8 @@ struct MainView: View {
             ChatView(store: store, session: session, ptt: ptt, mcp: mcp, updater: updater)
         }
         .background(Theme.background)
+        // The sidebar card floats on the same background as the chat.
+        .containerBackground(Theme.background, for: .window)
         .preferredColorScheme(.dark)
         .tint(Theme.accent)
         .onChange(of: store.selectedID) { _, _ in
@@ -31,6 +33,8 @@ struct Sidebar: View {
     @ObservedObject var shells = ShellSessions.shared
     @Local private var renaming: UUID?
     @Local private var draft = ""
+
+    static let cardRadius: CGFloat = 14
 
     var body: some View {
         List(selection: $store.selectedID) {
@@ -93,8 +97,26 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
         .safeAreaInset(edge: .bottom, spacing: 0) { SidebarFooter(updater: updater) }
+        // A floating card: rounded, raised a little off the window's background.
+        // It reaches up behind the window buttons, like one panel.
+        .background(
+            RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous)
+                .fill(Theme.inkRaised)
+                .overlay(RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous).stroke(Theme.hairline))
+                .shadow(color: .black.opacity(0.4), radius: 12, y: 3)
+                .padding(.top, 8)
+                .ignoresSafeArea(edges: .top)
+        )
+        .padding(.leading, 8).padding(.trailing, 6).padding(.bottom, 8)
+        // The window's own background shows around the card, not the system sidebar grey.
+        .background(Theme.background.ignoresSafeArea())
+        // No hide-sidebar button; New Conversation sits at the sidebar's right edge.
+        .toolbar(removing: .sidebarToggle)
         .toolbar {
+            // A flexible spacer pushes New Conversation to the sidebar's right edge.
+            ToolbarSpacer(.flexible)
             ToolbarItem {
                 Button { store.newConversation() } label: { Image(systemName: "square.and.pencil") }
                     .help("New conversation (⇧⌘O)")

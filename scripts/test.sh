@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT=".build/unit-tests"
 mkdir -p "$OUT"
-TARGET="arm64-apple-macos14.0"
+TARGET="arm64-apple-macos26.0"
 JOBS="$(sysctl -n hw.ncpu)"
 
 SOURCES=()
