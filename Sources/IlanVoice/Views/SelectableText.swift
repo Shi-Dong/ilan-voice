@@ -43,15 +43,29 @@ struct SelectableText: NSViewRepresentable {
     /// As wide as the text needs (up to the space offered) and as tall as it wraps.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: MessageNSTextView, context: Context) -> CGSize? {
         let maxWidth = proposal.width ?? 600
-        guard let container = view.textContainer, let layout = view.layoutManager, maxWidth > 0 else { return nil }
-        container.containerSize = NSSize(width: maxWidth, height: .greatestFiniteMagnitude)
-        layout.ensureLayout(for: container)
-        let used = layout.usedRect(for: container)
-        return CGSize(width: min(maxWidth, ceil(used.width)), height: ceil(used.height))
+        guard maxWidth > 0, let text = view.textStorage else { return nil }
+        return MessageNSTextView.fittingSize(of: text, maxWidth: maxWidth)
     }
 }
 
 final class MessageNSTextView: NSTextView {
+    /// The size `text` needs when wrapped at `maxWidth`. Laid out on its own,
+    /// not in the view's text container: SwiftUI measures at several trial
+    /// widths and the view re-fits that container to its frame, so measuring
+    /// there made the same message come out a different width depending on
+    /// what had been measured before (bubbles changed width with no new words).
+    static func fittingSize(of text: NSAttributedString, maxWidth: CGFloat) -> CGSize {
+        let storage = NSTextStorage(attributedString: text)
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(size: NSSize(width: maxWidth, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        layout.ensureLayout(for: container)
+        let used = layout.usedRect(for: container)
+        return CGSize(width: min(maxWidth, ceil(used.width)), height: ceil(used.height))
+    }
+
     /// What the view is showing. Any change, colour included, redraws it: a
     /// spoken message turns from grey to its normal colour once Luna's
     /// correction is done, even when its words don't change.

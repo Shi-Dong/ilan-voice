@@ -118,6 +118,19 @@ func registerMessageTextTests() {
             expect(v.show(.init(text: "hello there", fontSize: 14, color: dark, lineSpacing: 0)), "colour change ignored")
             expectEqual(colour(v), dark)
         }
+        test("a message measures the same width whatever was measured before") {
+            let v = MessageNSTextView()
+            v.show(.init(text: "Can you check the training job on the cluster for me?", fontSize: 14, color: dark, lineSpacing: 0))
+            let text = v.textStorage!
+            let fresh = MessageNSTextView.fittingSize(of: text, maxWidth: 400)
+            // SwiftUI's trial measurements and the view's own resizing in between:
+            _ = MessageNSTextView.fittingSize(of: text, maxWidth: 90)
+            v.textContainer?.containerSize = NSSize(width: 120, height: CGFloat.greatestFiniteMagnitude)
+            v.frame = NSRect(x: 0, y: 0, width: 150, height: 300)
+            v.layout()
+            expectEqual(MessageNSTextView.fittingSize(of: text, maxWidth: 400), fresh)
+            expect(fresh.width <= 400 && fresh.width > 200, "\(fresh)")
+        }
         test("nothing is redone when nothing changed") {
             let v = MessageNSTextView()
             let c = MessageNSTextView.Content(text: "hi", fontSize: 14, color: dark, lineSpacing: 3)
