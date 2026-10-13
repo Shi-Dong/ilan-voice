@@ -30,11 +30,12 @@ struct TalkOrb: View {
                     .onAppear { spin = true }
                     .onDisappear { spin = false }
             }
-            // A Liquid Glass sphere tinted with the phase colour, with a soft glow.
+            // A Liquid Glass sphere in the app's light red; the rings and spinner
+            // around it carry the phase colour.
             Color.clear
                 .frame(width: 86, height: 86)
-                .glassEffect(.regular.tint(tint.opacity(0.75)).interactive(), in: Circle())
-                .shadow(color: tint.opacity(0.4), radius: pressing ? 24 : 12)
+                .glassEffect(.regular.tint(Theme.accent.opacity(0.8)).interactive(), in: Circle())
+                .shadow(color: Theme.accent.opacity(0.4), radius: pressing ? 24 : 12)
                 .scaleEffect(pressing ? 0.94 : (session.phase == .speaking && breathe ? 1.05 : 1))
                 .animation(.spring(response: 0.25, dampingFraction: 0.6), value: pressing)
             Image(systemName: icon)
