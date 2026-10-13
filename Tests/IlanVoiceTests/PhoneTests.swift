@@ -169,6 +169,43 @@ func registerPhoneTests() {
             waitFor(0.2) { false }  // let the server see the close
         }
 
+        test("costs and token counts reach the page only while the Mac shows them") {
+            let settings = AppSettings.shared
+            let before = settings.showUsage
+            defer { settings.showUsage = before }
+            settings.showUsage = true
+            let store = ConversationStore()
+            let phone = PhoneServer(store: store, mcp: MCPManager())
+            let conv = store.iPhoneConversation(device: "usage-phone", create: true)!
+            let tokens = TokenUsage(textInput: 1200, audioInput: 800, cachedTextInput: 1000, textOutput: 50, audioOutput: 400)
+            store.update(conv) {
+                var reply = Message(id: "r1", role: .assistant, text: "Hello")
+                reply.usage = tokens
+                $0.messages.append(reply)
+            }
+            store.recordUsage(conv, UsageRecord(model: "gpt-realtime-2.1", tokens: tokens))
+            let port = try startOnSparePort(phone.http)
+            defer { phone.http.stop() }
+            let ws = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:\(port)/ws")!)
+            ws.resume()
+            defer { ws.cancel(with: .goingAway, reason: nil) }
+            let hello = try JSONSerialization.data(withJSONObject: ["type": "hello", "token": phone.token, "device": "usage-phone"])
+            send(ws, .string(String(decoding: hello, as: UTF8.self)))
+            @MainActor func nextMessages() -> [String: Any] {
+                for _ in 0..<8 { let m = json(receive(ws)); if m["type"] as? String == "messages" { return m } }
+                return [:]
+            }
+            let shown = nextMessages()
+            let reply = (shown["items"] as? [[String: Any]])?.first { $0["id"] as? String == "r1" }
+            expectEqual(reply?["usage"] as? String, Pricing.describe(tokens))
+            expect((shown["cost"] as? String)?.hasPrefix("$") == true, "conversation cost missing: \(shown)")
+
+            settings.showUsage = false
+            let hidden = nextMessages()
+            let plain = (hidden["items"] as? [[String: Any]])?.first { $0["id"] as? String == "r1" }
+            expect(plain != nil && plain?["usage"] == nil, "token counts should be hidden")
+            expect(hidden["cost"] == nil, "cost should be hidden")
+        }
         test("each iPhone keeps a stable number") {
             let a = "phone-a-\(UUID().uuidString)", b = "phone-b-\(UUID().uuidString)"
             expect(!PhoneServer.isKnown(a))
