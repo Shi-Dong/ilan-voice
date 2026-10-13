@@ -15,34 +15,36 @@ struct TalkOrb: View {
         ZStack {
             ForEach(0..<3) { i in
                 Circle()
-                    .stroke(tint.opacity(0.22 - Double(i) * 0.06), lineWidth: 1.5)
-                    .frame(width: 92, height: 92)
+                    .stroke(tint.opacity(0.3 - Double(i) * 0.08), lineWidth: 1)
+                    .frame(width: 42, height: 42)
                     .scaleEffect(ringScale(i))
                     .animation(.easeOut(duration: 0.12), value: session.inputLevel)
             }
             if session.phase == .thinking || session.phase == .working || session.phase == .connecting {
                 Circle()
                     .trim(from: 0, to: 0.28)
-                    .stroke(tint, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    .frame(width: 104, height: 104)
+                    .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .frame(width: 48, height: 48)
                     .rotationEffect(.degrees(spin ? 360 : 0))
                     .animation(.linear(duration: 1).repeatForever(autoreverses: false), value: spin)
                     .onAppear { spin = true }
                     .onDisappear { spin = false }
             }
-            // A Liquid Glass sphere tinted with the phase colour, with a soft glow.
+            // Clear Liquid Glass like the app's other glass buttons, with a light
+            // red icon, drawn at its real size (scaling glass down flattens it
+            // into a sticker). The rings and spinner carry the phase colour;
+            // while pressed the glass takes a touch of light red.
             Color.clear
-                .frame(width: 86, height: 86)
-                .glassEffect(.regular.tint(tint.opacity(0.75)).interactive(), in: Circle())
-                .shadow(color: tint.opacity(0.4), radius: pressing ? 24 : 12)
+                .frame(width: 42, height: 42)
+                .glassEffect(.regular.tint(pressing ? Theme.accent.opacity(0.25) : .clear).interactive(), in: Circle())
                 .scaleEffect(pressing ? 0.94 : (session.phase == .speaking && breathe ? 1.05 : 1))
                 .animation(.spring(response: 0.25, dampingFraction: 0.6), value: pressing)
             Image(systemName: icon)
-                .font(.system(size: 30, weight: .semibold))
-                .foregroundStyle(Theme.ink.opacity(0.85))
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.accent)
                 .contentTransition(.symbolEffect(.replace))
         }
-        .frame(width: 150, height: 150)
+        .frame(width: 60, height: 60)
         .contentShape(Circle())
         .gesture(
             DragGesture(minimumDistance: 0)

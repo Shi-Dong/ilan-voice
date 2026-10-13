@@ -198,17 +198,7 @@ struct ChatView: View {
             .labelsHidden()
             .frame(width: 210)
             .help("Real-time plays replies as they arrive; Cached keeps them until you press play.")
-            Button { session.connect() } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.textDim)
-                    .rotationEffect(.degrees(session.phase == .connecting ? 180 : 0))
-                    .animation(.easeInOut(duration: 0.4), value: session.phase == .connecting)
-                    .frame(width: 30, height: 30)
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
+            ReconnectButton(session: session)
             .disabled(session.phase == .recording || session.phase == .connecting)
             .help("Reconnect (⇧⌘R): start a fresh session so changes to agent.md, the dictionary, tools and voice take effect. The conversation is kept.")
         }
@@ -283,10 +273,7 @@ struct ChatView: View {
                     .help("Play the next new reply (⇧⌘P)")
                     .transition(.scale.combined(with: .opacity))
                 }
-                // The orb is drawn at 150 pt; scaled down to a ~56 pt corner button.
                 TalkOrb(session: session)
-                    .scaleEffect(0.4)
-                    .frame(width: 60, height: 60)
                     .help(hint)
             }
         }
@@ -432,5 +419,29 @@ extension Updater.State {
         case .available, .readyToRestart: true
         default: false
         }
+    }
+}
+
+/// The round glass Reconnect button. On hover it brightens and grows a little,
+/// like the toolbar's New Conversation button.
+private struct ReconnectButton: View {
+    @ObservedObject var session: VoiceSession
+    @Local private var hovering = false
+
+    var body: some View {
+        Button { session.connect() } label: {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(hovering ? Theme.accent : Theme.textDim)
+                .rotationEffect(.degrees(session.phase == .connecting ? 180 : 0))
+                .animation(.easeInOut(duration: 0.4), value: session.phase == .connecting)
+                .frame(width: 30, height: 30)
+                .glassEffect(.regular.tint(hovering ? .white.opacity(0.14) : .clear).interactive(), in: .circle)
+                .scaleEffect(hovering ? 1.08 : 1)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.15), value: hovering)
     }
 }
