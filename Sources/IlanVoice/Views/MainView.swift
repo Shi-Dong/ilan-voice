@@ -247,7 +247,7 @@ struct ChatView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.orange)
                     Text(err).font(.system(size: 12)).lineLimit(2)
-                    Button { session.errorMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
+                    Button { session.errorMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).hoverLift(1.15)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 7)
                 .background(Theme.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
@@ -258,6 +258,7 @@ struct ChatView: View {
                         .font(.system(size: 11.5))
                 }
                 .buttonStyle(.plain).foregroundStyle(Theme.textDim)
+                .hoverLift(1.02)
             }
             HStack(alignment: .center, spacing: 10) {
                 ComposerBar(session: session, talkKey: settings.talkTrigger.shortLabel)
@@ -271,6 +272,7 @@ struct ChatView: View {
                     .buttonBorderShape(.capsule)
                     .tint(Theme.orange)
                     .help("Play the next new reply (⇧⌘P)")
+                    .hoverLift()
                     .transition(.scale.combined(with: .opacity))
                 }
                 TalkOrb(session: session)
@@ -384,6 +386,7 @@ private struct SidebarFooterRow: View {
         .background(hovering ? Theme.card : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .pointerStyle(.link)
         .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
@@ -442,6 +445,7 @@ private struct ReconnectButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .pointerStyle(.link)
         .animation(.easeOut(duration: 0.15), value: hovering)
     }
 }

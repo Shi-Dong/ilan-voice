@@ -128,6 +128,7 @@ struct PlayChip: View {
             }
         }
         .buttonStyle(.plain)
+        .hoverLift(1.04)
     }
 }
 
@@ -155,6 +156,7 @@ struct ToolRow: View {
                 .background(Theme.card, in: Capsule())
             }
             .buttonStyle(.plain)
+            .hoverLift(1.03)
             if expanded {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(message.toolArguments ?? "{}")

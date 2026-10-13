@@ -5,6 +5,7 @@ import SwiftUI
 struct TalkOrb: View {
     @ObservedObject var session: VoiceSession
     @Local private var pressing = false
+    @Local private var hovering = false
     @Local private var spin = false
     @Local private var breathe = false
 
@@ -36,7 +37,8 @@ struct TalkOrb: View {
             // while pressed the glass takes a touch of light red.
             Color.clear
                 .frame(width: 42, height: 42)
-                .glassEffect(.regular.tint(pressing ? Theme.accent.opacity(0.25) : .clear).interactive(), in: Circle())
+                .glassEffect(.regular.tint(glassTint).interactive(), in: Circle())
+                .scaleEffect(hovering && !pressing ? 1.1 : 1)
                 .scaleEffect(pressing ? 0.94 : (session.phase == .speaking && breathe ? 1.05 : 1))
                 .animation(.spring(response: 0.25, dampingFraction: 0.6), value: pressing)
             Image(systemName: icon)
@@ -46,6 +48,10 @@ struct TalkOrb: View {
         }
         .frame(width: 60, height: 60)
         .contentShape(Circle())
+        // Hover: the glass grows, lightens and glows faintly light red.
+        .onHover { hovering = $0 }
+        .pointerStyle(.link)
+        .animation(.easeOut(duration: 0.15), value: hovering)
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in
@@ -60,6 +66,11 @@ struct TalkOrb: View {
             withAnimation(.easeInOut(duration: 0.9).repeatForever()) { breathe = true }
         }
         .help("Hold to talk")
+    }
+
+    private var glassTint: Color {
+        if pressing { return Theme.accent.opacity(0.25) }
+        return hovering ? Theme.accent.opacity(0.12) : .clear
     }
 
     private func ringScale(_ i: Int) -> CGFloat {

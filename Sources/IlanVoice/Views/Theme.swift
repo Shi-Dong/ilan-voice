@@ -70,3 +70,23 @@ struct Local<Value>: DynamicProperty {
 
     var projectedValue: Binding<Value> { $box.value }
 }
+
+/// Hover feedback for anything clickable: it grows a little, brightens, and
+/// the pointer becomes a hand, so the app answers the mouse before a click.
+struct HoverLift: ViewModifier {
+    var scale: CGFloat
+    @Local private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(hovering ? scale : 1)
+            .brightness(hovering ? 0.08 : 0)
+            .animation(.easeOut(duration: 0.15), value: hovering)
+            .onHover { hovering = $0 }
+            .pointerStyle(.link)
+    }
+}
+
+extension View {
+    func hoverLift(_ scale: CGFloat = 1.06) -> some View { modifier(HoverLift(scale: scale)) }
+}
