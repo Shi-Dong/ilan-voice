@@ -65,6 +65,7 @@ struct ComposerBar: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.textDim)
                 .help("Clear the message")
+                .hoverLift(1.15)
                 .padding(.bottom, 3)
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 20))
@@ -73,6 +74,7 @@ struct ComposerBar: View {
                 .foregroundStyle(Theme.accent)
                 .disabled(session.phase == .recording)
                 .help("Send (Enter). Shift+Enter adds a line.")
+                .hoverLift(1.12)
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
