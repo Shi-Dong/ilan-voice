@@ -118,6 +118,77 @@ enum PhoneWebApp {
       .choice.new { border-style: dashed; color: var(--accent); justify-content: center; font-weight: 600; }
       .banner { margin: 10px 16px 0; padding: 9px 12px; border-radius: 10px; font-size: 13.5px;
         background: rgba(242,140,42,.14); color: var(--orange); display: none; }
+    
+      /* ---- Liquid Glass ----
+         Bars, buttons, bubbles and sheets are translucent glass floating over
+         a softly lit background: a real backdrop blur with extra saturation,
+         a faint white tint, a bright rim on the top edge and a darker one at
+         the bottom (light from above), and a soft drop shadow. The header and
+         footer float as rounded panels and the conversation scrolls beneath
+         them, so the glass always has something to refract. */
+      :root {
+        --glass: rgba(255,255,255,.075); --glass-strong: rgba(255,255,255,.11);
+        --rim: rgba(255,255,255,.22); --rim-soft: rgba(255,255,255,.10);
+        --glass-blur: blur(22px) saturate(185%);
+        --glass-shadow: inset 0 1px 0 rgba(255,255,255,.28), inset 0 -1px 0 rgba(0,0,0,.25),
+                        0 10px 30px rgba(0,0,0,.35);
+      }
+      body { background:
+          radial-gradient(60% 40% at 15% 18%, rgba(244,167,163,.30), transparent 70%),
+          radial-gradient(55% 38% at 90% 45%, rgba(169,220,203,.20), transparent 70%),
+          radial-gradient(70% 45% at 40% 95%, rgba(224,112,106,.28), transparent 70%),
+          var(--ink); }
+      header { position: fixed; z-index: 3; left: 10px; right: 10px; top: calc(env(safe-area-inset-top) + 8px);
+        padding: 10px 12px 10px 10px; border-radius: 24px; border-bottom: 1px solid var(--rim-soft);
+        background: linear-gradient(180deg, var(--glass-strong), var(--glass));
+        -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--rim-soft); box-shadow: var(--glass-shadow); }
+      header img { border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+      #reconnect { background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,.06));
+        border: 1px solid var(--rim); color: var(--text); box-shadow: inset 0 1px 0 rgba(255,255,255,.3); }
+      main { padding: calc(var(--head-h, 72px) + env(safe-area-inset-top) + 18px) 14px calc(var(--foot-h, 150px) + 16px); }
+      .banner { position: fixed; z-index: 3; left: 16px; right: 16px; top: calc(env(safe-area-inset-top) + var(--head-h, 72px) + 16px);
+        margin: 0; border-radius: 14px; background: rgba(242,140,42,.16); border: 1px solid rgba(242,140,42,.35);
+        -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
+      .msg { border-radius: 20px; }
+      .msg.assistant { background: linear-gradient(180deg, var(--glass-strong), var(--glass));
+        -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--rim-soft); box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 4px 14px rgba(0,0,0,.18);
+        border-bottom-left-radius: 6px; }
+      /* Your messages: the same flat coral glass as the talk button. */
+      .msg.user { color: #FFF1F0; background: rgba(244,167,163,.36);
+        -webkit-backdrop-filter: blur(20px) saturate(190%); backdrop-filter: blur(20px) saturate(190%);
+        border: 1px solid rgba(255,255,255,.26); box-shadow: inset 0 1px 0 rgba(255,255,255,.40), 0 4px 14px rgba(0,0,0,.18);
+        border-bottom-right-radius: 6px; }
+      .msg.tool { background: var(--glass); border: 1px solid var(--rim-soft); border-radius: 999px; padding: 3px 10px; }
+      footer { position: fixed; z-index: 3; left: 10px; right: 10px; bottom: max(8px, calc(env(safe-area-inset-bottom) - 10px));
+        padding: 8px 18px 14px; border-radius: 30px; border-top: 1px solid var(--rim-soft);
+        background: linear-gradient(180deg, var(--glass-strong), var(--glass));
+        -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--rim-soft); box-shadow: var(--glass-shadow); }
+      /* The talk button: a flat pane of coral glass. An even, see-through
+         tint over a uniform backdrop blur, a thin crisp edge and one fine
+         highlight along the top edge; no curved shine. Held: the pane turns
+         red; swipe-to-cancel armed: grey. */
+      #talk { color: #FFE3E1;
+        background: rgba(244,167,163,.24);
+        -webkit-backdrop-filter: blur(20px) saturate(190%); backdrop-filter: blur(20px) saturate(190%);
+        border: 1px solid rgba(255,255,255,.30);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 12px 28px rgba(0,0,0,.35); }
+      #talk svg { color: #FFE3E1; }
+      #talk.held { color: #fff; background: rgba(255,107,107,.48);
+        border-color: rgba(255,255,255,.40);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 12px 30px rgba(0,0,0,.35), 0 0 26px rgba(255,107,107,.35); }
+      #talk.held svg { color: #fff; }
+      #talk.held.cancel { background: rgba(150,160,158,.40); box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 12px 28px rgba(0,0,0,.35); }
+      #talk.held.cancel svg { color: #EEF2F1; }
+      .sheet { background: rgba(8,5,5,.45); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+      .sheet .panel { margin: 0 8px 8px; border-radius: 30px;
+        background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.07));
+        -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--rim); box-shadow: var(--glass-shadow); }
+      .choice { border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.04));
+        border: 1px solid var(--rim-soft); box-shadow: inset 0 1px 0 rgba(255,255,255,.18); }
     </style>
     </head>
     <body>
@@ -548,6 +619,15 @@ enum PhoneWebApp {
       if (document.hidden) { if (held) release(); }
       else if (!ws && !replaced) connect();
     });
+    // The header and footer float over the conversation (Liquid Glass); keep
+    // the list's padding equal to their real heights.
+    const sizeBars = () => {
+      document.documentElement.style.setProperty("--head-h", document.querySelector("header").offsetHeight + "px");
+      document.documentElement.style.setProperty("--foot-h", document.querySelector("footer").offsetHeight + "px");
+    };
+    new ResizeObserver(sizeBars).observe(document.querySelector("header"));
+    new ResizeObserver(sizeBars).observe(document.querySelector("footer"));
+    sizeBars();
     connect();
     </script>
     </body>

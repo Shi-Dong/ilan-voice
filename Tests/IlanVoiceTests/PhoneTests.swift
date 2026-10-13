@@ -89,6 +89,14 @@ func registerPhoneTests() {
             expect(html.contains(#"send({ type: "reconnect" })"#), "reconnect button should send a reconnect command")
             expect(!html.contains(#"id="replay""#), "the replay button was removed")
         }
+        test("the page uses Liquid Glass: blurred, floating header and footer") {
+            let html = PhoneWebApp.html
+            expect(html.contains("---- Liquid Glass ----"), "glass layer missing")
+            expect(html.contains("backdrop-filter: var(--glass-blur)"), "glass surfaces need a backdrop blur")
+            expect(html.contains("header { position: fixed;") && html.contains("footer { position: fixed;"),
+                   "header and footer should float over the conversation")
+            expect(html.contains("--head-h") && html.contains("--foot-h"), "the list must be padded by the bars' real heights")
+        }
         test("serves the page, manifest and icons; unknown paths are 404") {
             let server = MiniHTTPServer()
             server.route = { PhoneServer.file(for: $0) }
