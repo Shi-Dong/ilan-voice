@@ -164,21 +164,31 @@ enum PhoneWebApp {
         background: linear-gradient(180deg, var(--glass-strong), var(--glass));
         -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
         border: 1px solid var(--rim-soft); box-shadow: var(--glass-shadow); }
-      /* The talk button: a glass orb tinted coral, with a specular highlight
-         across its top and a bright rim. */
-      #talk { background:
-          radial-gradient(70% 45% at 50% 18%, rgba(255,255,255,.75), rgba(255,255,255,0) 70%),
-          radial-gradient(circle at 50% 60%, rgba(244,167,163,.95), rgba(224,112,106,.9) 70%);
-        box-shadow: inset 0 1px 1px rgba(255,255,255,.8), inset 0 -6px 14px rgba(120,30,25,.35),
-                    0 0 0 1px rgba(255,255,255,.35), 0 12px 30px rgba(224,112,106,.45); }
-      #talk.held { background:
-          radial-gradient(70% 45% at 50% 18%, rgba(255,255,255,.7), rgba(255,255,255,0) 70%),
-          radial-gradient(circle at 50% 60%, rgba(255,120,120,.95), rgba(201,68,68,.95) 70%);
-        box-shadow: inset 0 1px 1px rgba(255,255,255,.8), inset 0 -6px 14px rgba(90,10,10,.4),
-                    0 0 0 1px rgba(255,255,255,.35), 0 12px 30px rgba(255,107,107,.45); }
-      #talk.held.cancel { background:
-          radial-gradient(70% 45% at 50% 18%, rgba(255,255,255,.7), rgba(255,255,255,0) 70%),
-          radial-gradient(circle at 50% 60%, #9aa3a1, #5f6866 70%); }
+      /* The talk button: a lens of clear glass. Mostly see-through with a light
+         coral tint and a strong backdrop blur; a crisp bright rim; a curved
+         specular highlight across the top (::before); colour gathering along
+         the bottom edge as light refracts through it; the microphone floats
+         inside in coral. Held: the glass fills with red light. */
+      #talk { overflow: hidden; color: var(--accent);
+        background: radial-gradient(120% 90% at 50% 110%, rgba(244,167,163,.42), rgba(244,167,163,.08) 60%, rgba(255,255,255,.06));
+        -webkit-backdrop-filter: blur(16px) saturate(210%) brightness(1.12); backdrop-filter: blur(16px) saturate(210%) brightness(1.12);
+        border: 1.5px solid rgba(255,255,255,.42);
+        box-shadow: inset 0 2px 1px rgba(255,255,255,.65), inset 0 -2px 2px rgba(255,190,185,.35),
+                    inset 0 -14px 24px rgba(244,167,163,.30), 0 14px 32px rgba(0,0,0,.40), 0 0 24px rgba(244,167,163,.18); }
+      #talk::before { content: ""; position: absolute; left: 18%; right: 18%; top: 5%; height: 34%; border-radius: 50%;
+        background: linear-gradient(180deg, rgba(255,255,255,.48), rgba(255,255,255,.06) 70%, rgba(255,255,255,0));
+        pointer-events: none; }
+      #talk::after { content: ""; position: absolute; left: 24%; right: 24%; bottom: 7%; height: 12%; border-radius: 50%;
+        background: radial-gradient(closest-side, rgba(255,215,210,.55), rgba(255,215,210,0)); pointer-events: none; }
+      #talk svg { position: relative; z-index: 1; color: var(--accent); filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
+      #talk.held { color: #fff;
+        background: radial-gradient(120% 90% at 50% 105%, rgba(255,107,107,.85), rgba(255,107,107,.35) 60%, rgba(255,255,255,.08));
+        box-shadow: inset 0 2px 1px rgba(255,255,255,.7), inset 0 -16px 26px rgba(255,90,90,.45),
+                    0 14px 34px rgba(0,0,0,.40), 0 0 34px rgba(255,107,107,.45); }
+      #talk.held svg { color: #fff; }
+      #talk.held.cancel { background: radial-gradient(120% 90% at 50% 105%, rgba(160,170,168,.7), rgba(160,170,168,.25) 60%, rgba(255,255,255,.06));
+        box-shadow: inset 0 2px 1px rgba(255,255,255,.6), 0 14px 32px rgba(0,0,0,.4); }
+      #talk.held.cancel svg { color: #e9eeed; }
       .sheet { background: rgba(8,5,5,.45); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
       .sheet .panel { margin: 0 8px 8px; border-radius: 30px;
         background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.07));
