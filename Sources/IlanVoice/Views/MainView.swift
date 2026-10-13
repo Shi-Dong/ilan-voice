@@ -263,10 +263,7 @@ struct ChatView: View {
                     .help("Play the next new reply (⇧⌘P)")
                     .transition(.scale.combined(with: .opacity))
                 }
-                // The orb is drawn at 150 pt; scaled down to a ~56 pt corner button.
                 TalkOrb(session: session)
-                    .scaleEffect(0.4)
-                    .frame(width: 60, height: 60)
                     .help(hint)
             }
         }
