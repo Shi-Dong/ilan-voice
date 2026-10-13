@@ -204,11 +204,8 @@ private struct HUDView: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 38)
-        .background(
-            Capsule().fill(Theme.ink.opacity(0.92))
-                .overlay(Capsule().stroke(Theme.accent.opacity(0.35), lineWidth: 1))
-        )
-        .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+        // Liquid Glass over whatever app is below, tinted dark so the bars read.
+        .glassEffect(.regular.tint(Theme.ink.opacity(0.6)), in: Capsule())
         .frame(width: Self.panelSize.width, height: Self.panelSize.height)
         .animation(.easeInOut(duration: 0.15), value: model.mode)
     }
