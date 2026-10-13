@@ -78,6 +78,11 @@ final class VoiceSession: ObservableObject {
     private var currentResponseID: String?
     /// Audio for this response is dropped: the user interrupted it.
     private var mutedResponseID: String?
+    /// The Realtime model of the open session (what its replies are billed as).
+    private var sessionModel = ""
+    /// Tokens of replies that produced no message (tool-calling steps), to
+    /// show with the next message Ilan says.
+    private var unshownReplyUsage = TokenUsage()
     /// Interrupted after asking for a reply but before it started (e.g. right
     /// after a tool result went back): cancel that reply as soon as it starts.
     private var cancelNextResponse = false
@@ -164,6 +169,7 @@ final class VoiceSession: ObservableObject {
         self.client = client
         connectedFingerprint = settings.sessionFingerprint
         sessionStartedAt = Date()
+        sessionModel = settings.model
         client.connect(apiKey: settings.apiKey, model: settings.model)
     }
 
@@ -192,6 +198,7 @@ final class VoiceSession: ObservableObject {
         sessionReady = false
         responseActive = false
         cancelNextResponse = false
+        unshownReplyUsage = TokenUsage()
         speaker.stop()
         phase = .offline
     }
@@ -794,6 +801,8 @@ final class VoiceSession: ObservableObject {
 
         case "response.done":
             let response = event["response"] as? [String: Any] ?? [:]
+            // Billed even when the user cut it off, so recorded first.
+            recordReplyUsage(convID, response)
             // The reply the user cut off: no tools, no state changes.
             if let id = response["id"] as? String, id == mutedResponseID {
                 mutedResponseID = nil
@@ -858,6 +867,24 @@ final class VoiceSession: ObservableObject {
                   titleRequests[convID] == ticket else { return }
             store.setAutoTitle(convID, title)
         }
+    }
+
+    // MARK: Usage and cost
+
+    /// Records a reply's tokens for the conversation's cost, and shows them on
+    /// the message it produced (with any earlier tool-calling steps).
+    private func recordReplyUsage(_ convID: UUID, _ response: [String: Any]) {
+        guard let raw = response["usage"] as? [String: Any] else { return }
+        let tokens = TokenUsage.realtime(raw)
+        store.recordUsage(convID, UsageRecord(model: sessionModel.isEmpty ? settings.model : sessionModel, tokens: tokens))
+        let total = unshownReplyUsage + tokens
+        let said = (response["output"] as? [[String: Any]] ?? []).last { $0["type"] as? String == "message" }
+        guard let itemID = said?["id"] as? String, store.message(convID, itemID) != nil else {
+            unshownReplyUsage = total
+            return
+        }
+        unshownReplyUsage = TokenUsage()
+        store.updateMessage(convID, itemID) { $0.usage = total }
     }
 
     /// User messages already sent for correction (each one only once).

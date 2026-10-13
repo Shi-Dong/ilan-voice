@@ -111,6 +111,8 @@ final class AppSettings: ObservableObject {
     @Published var outputMode: OutputMode { didSet { defaults.set(outputMode.rawValue, forKey: "outputMode") } }
     /// Drop the Dock icon while the main window is closed.
     @Published var hideDockWhenClosed: Bool { didSet { defaults.set(hideDockWhenClosed, forKey: "hideDockWhenClosed") } }
+    /// Show each conversation's cost in the sidebar and token counts under Ilan's replies.
+    @Published var showUsage: Bool { didSet { defaults.set(showUsage, forKey: "showUsage") } }
     /// The iPhone web server; started again at launch if it was running.
     @Published var phoneServerEnabled: Bool { didSet { defaults.set(phoneServerEnabled, forKey: "phoneServerEnabled") } }
     @Published var talkTrigger: TalkTrigger { didSet { defaults.set(try? JSONEncoder().encode(talkTrigger), forKey: "talkTrigger") } }
@@ -143,6 +145,7 @@ final class AppSettings: ObservableObject {
         reasoningEffort = defaults.string(forKey: "reasoningEffort") ?? "default"
         outputMode = OutputMode(rawValue: defaults.string(forKey: "outputMode") ?? "") ?? .realtime
         hideDockWhenClosed = defaults.object(forKey: "hideDockWhenClosed") as? Bool ?? true
+        showUsage = defaults.object(forKey: "showUsage") as? Bool ?? true
         phoneServerEnabled = defaults.bool(forKey: "phoneServerEnabled")
         replayTrigger = defaults.data(forKey: "replayTrigger").flatMap { try? JSONDecoder().decode(TalkTrigger.self, from: $0) }
         talkTrigger = defaults.data(forKey: "talkTrigger").flatMap { try? JSONDecoder().decode(TalkTrigger.self, from: $0) }

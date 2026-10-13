@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MessageRow: View {
+    @ObservedObject var settings = AppSettings.shared
     let message: Message
     @ObservedObject var session: VoiceSession
     @ObservedObject var clips: ClipPlayer
@@ -73,6 +74,12 @@ struct MessageRow: View {
                 }
                 if message.audioFile != nil {
                     PlayChip(message: message, session: session, clips: clips, dark: false)
+                }
+                if settings.showUsage, let usage = message.usage {
+                    Text(Pricing.describe(usage))
+                        .font(.system(size: 10)).monospacedDigit()
+                        .foregroundStyle(Theme.textDim)
+                        .help("Tokens this reply used (including any tool steps before it): input, of which cached, and output")
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 11)
