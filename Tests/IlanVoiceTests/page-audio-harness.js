@@ -25,11 +25,14 @@ class FakeAudioContext {
 }
 const sent = [];
 const audioSessionTypes = [];
+const wakeLocks = [];
 const g = {
   window: null, console,
   document: { getElementById: el, querySelector: () => el("q"), createElement: () => el("x" + Math.random()),
               body: el("body"), documentElement: el("html"), addEventListener() {}, hidden: false },
-  navigator: { audioSession: { set type(v) { audioSessionTypes.push(v); }, get type() { return audioSessionTypes.at(-1); } },
+  navigator: { wakeLock: { request: async type => { const l = { type, released: false, release: async () => { l.released = true; } };
+                                                    wakeLocks.push(l); return l; } },
+               audioSession: { set type(v) { audioSessionTypes.push(v); }, get type() { return audioSessionTypes.at(-1); } },
                mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } },
   localStorage: { getItem: k => (k === "ilanToken" ? "t" : k === "ilanDevice" ? "d" : null), setItem() {}, removeItem() {} },
   location: { protocol: "https:", host: "h", search: "" }, URLSearchParams: class { get() { return null; } },
@@ -48,9 +51,11 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   const tap = () => (handlers["talk:click"] || []).forEach(fn => fn({ preventDefault() {} }));
   tap();                                   // start a conversation
   await new Promise(r => setImmediate(r)); run();
-  const during = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length };
+  const during = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length,
+                   screenKeptOn: wakeLocks.some(l => l.type === "screen" && !l.released) };
   tap();                                   // end it
   run();                                   // the end chime rings out, then the page lets go
-  const after = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length };
+  const after = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length,
+                  screenKeptOn: wakeLocks.some(l => !l.released) };
   console.log(JSON.stringify({ atLoad: audioSessionTypes[0], during, after }));
 })();

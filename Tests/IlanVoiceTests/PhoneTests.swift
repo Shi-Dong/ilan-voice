@@ -257,7 +257,7 @@ func registerPhoneTests() {
     }
 
     suite("Phone web page") { test in
-        test("after a conversation the page lets go of the phone's audio (needs Node.js)") {
+        test("the screen stays on during a conversation; afterwards the page lets go of audio and screen (needs Node.js)") {
             let html = PhoneWebApp.html
             guard let open = html.range(of: "<script>"), let close = html.range(of: "</script>", range: open.upperBound..<html.endIndex) else {
                 expect(false, "no <script> in the page"); return
@@ -290,6 +290,8 @@ func registerPhoneTests() {
             let during = json["during"] as? [String: Any], after = json["after"] as? [String: Any]
             expectEqual(json["atLoad"] as? String, "auto")              // no claim before a conversation
             expectEqual(during?["session"] as? String, "play-and-record")
+            expectEqual(during?["screenKeptOn"] as? Bool, true)         // auto-lock would end the conversation
+            expectEqual(after?["screenKeptOn"] as? Bool, false)         // Auto-Lock works again afterwards
             expectEqual(after?["session"] as? String, "auto")           // let go afterwards…
             expectEqual(after?["openContexts"] as? Int, 0)              // …and nothing left running (no Now Playing)
         }

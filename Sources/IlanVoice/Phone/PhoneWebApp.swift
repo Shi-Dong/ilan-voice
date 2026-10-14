@@ -259,6 +259,7 @@ enum PhoneWebApp {
           held = false; sending = false;
           $("talk").classList.remove("held");
           stopMic();
+          letScreenSleep();
           releaseAudio(0);
           banner("Connection lost — the conversation ended. Tap the button to start again.");
         }
@@ -389,6 +390,18 @@ enum PhoneWebApp {
     // holds a "playback" session or a running audio context shows up in iOS's
     // Now Playing (and the mic/speaker stay taken) even when it is silent.
     setAudioSession("auto");
+
+    // Keep the screen on during a conversation: when the iPhone auto-locks,
+    // the page is hidden, iOS cuts its microphone, and the conversation ends.
+    // Released when the conversation ends, so Auto-Lock works again.
+    let wakeLock = null;
+    async function keepScreenOn() {
+      try { if (navigator.wakeLock && !wakeLock) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+      if (!held) letScreenSleep();  // ended while the request was pending
+    }
+    function letScreenSleep() {
+      if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+    }
 
     // After a conversation (and its end chime): let go of the speaker too.
     function releaseAudio(afterMs) {
@@ -594,6 +607,7 @@ enum PhoneWebApp {
       $("talk").classList.add("held");
       stopAudio();
       send({ type: "conversation_start" });
+      keepScreenOn();
       showState();
       chime(true);
       startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
@@ -604,6 +618,7 @@ enum PhoneWebApp {
       $("talk").classList.remove("held");
       stopAudio();  // Ilan goes quiet at once, before the Mac even hears about it
       send({ type: "conversation_stop" });
+      letScreenSleep();
       stopMic();
       audioContext();
       showState();
