@@ -62,12 +62,12 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   // A real tap: finger down and up in place, then the click.
   const tap = () => { fire("pointerdown", { clientY: 500, timeStamp: 0 }); fire("pointerup", { clientY: 500, timeStamp: 80 }); fire("click", {}); };
   const conversing = () => sent.filter(m => m.includes("conversation_start")).length > sent.filter(m => m.includes("conversation_stop")).length;
-  // Hold, then slide up `px`, then let go.
-  const holdAndSlide = (holdMs, px) => {
-    fire("pointerdown", { clientY: 500, timeStamp: 0 });
-    fire("pointermove", { clientY: 500 - px / 2, timeStamp: holdMs });
-    fire("pointermove", { clientY: 500 - px, timeStamp: holdMs + 50 });
-    fire("pointerup", { clientY: 500 - px, timeStamp: holdMs + 80 });
+  // Press, push up `px` (drifting `side` px sideways at the end), let go. No holding.
+  const push = (px, side = 0) => {
+    fire("pointerdown", { clientX: 200, clientY: 500, timeStamp: 0 });
+    fire("pointermove", { clientX: 200, clientY: 500 - px / 2, timeStamp: 40 });
+    fire("pointermove", { clientX: 200 + side, clientY: 500 - px, timeStamp: 80 });
+    fire("pointerup", { clientX: 200 + side, clientY: 500 - px, timeStamp: 100 });
   };
   tap();                                   // start a conversation
   await new Promise(r => setImmediate(r)); run();
@@ -75,16 +75,18 @@ new Function(...Object.keys(g), script)(...Object.values(g));
                    screenKeptOn: wakeLocks.some(l => l.type === "screen" && !l.released) };
   tap();                                   // a stray touch (e.g. in a pocket)
   const afterStrayTap = conversing();
-  holdAndSlide(100, 120);                  // a quick swipe up without holding first
-  const afterQuickSwipe = conversing();
-  holdAndSlide(600, 40);                   // held, but slid only a little
-  const afterShortSlide = conversing();
-  holdAndSlide(600, 120);                  // the real gesture: hold, slide up, let go
+  push(120);                               // a flick up, short of the End target
+  const afterShortPush = conversing();
+  push(40);                                // a small push
+  const afterSmallPush = conversing();
+  push(140, 100);                          // pushed up but drifted well off the track
+  const afterDrift = conversing();
+  push(170);                               // the real gesture: push all the way up, let go
   const afterEndGesture = conversing();
   run();                                   // the end chime rings out, then the page lets go
   const after = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length,
                   screenKeptOn: wakeLocks.some(l => !l.released) };
   const viewport = sent.map(m => { try { return JSON.parse(m); } catch (e) { return {}; } }).find(m => m.type === "viewport");
   console.log(JSON.stringify({ atLoad: audioSessionTypes[0], during, after, gapVar: cssVars["--gap"], viewport,
-    pocket: { afterStrayTap, afterQuickSwipe, afterShortSlide, afterEndGesture } }));
+    pocket: { afterStrayTap, afterShortPush, afterSmallPush, afterDrift, afterEndGesture } }));
 })();

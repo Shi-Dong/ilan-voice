@@ -108,6 +108,23 @@ enum PhoneWebApp {
          talk button only ends it with a hold-and-slide-up. */
       body.conversing #reconnect, body.conversing .banner, body.conversing .sheet { pointer-events: none; opacity: .35; }
       #talk.sliding { transition: none; }
+      /* The way out of a conversation: shown while a finger is on the button,
+         a track rising above it to a stop target. */
+      .endtrack { position: absolute; left: 50%; bottom: 0; width: 104px; margin-left: -52px; height: 104px;
+        border-radius: 52px; opacity: 0; pointer-events: none; z-index: 0;
+        background: linear-gradient(0deg, rgba(255,255,255,.05), rgba(255,107,107,.16));
+        border: 1.5px dashed rgba(255,255,255,.35); box-shadow: 0 8px 28px rgba(0,0,0,.35);
+        -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+        transition: opacity .15s, height .2s cubic-bezier(.2,.8,.2,1); }
+      .endtrack.show { opacity: 1; height: calc(var(--end-px, 160px) + 104px); }
+      .endtrack .chev { position: absolute; left: 0; right: 0; text-align: center; color: rgba(255,255,255,.45);
+        font-size: 14px; line-height: 1; }
+      .endtrack .target { position: absolute; top: 18px; left: 50%; width: 68px; height: 68px; margin-left: -34px;
+        border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-direction: column;
+        background: rgba(255,107,107,.18); border: 1px solid rgba(255,107,107,.5); color: #FFD9D6;
+        font-size: 10px; font-weight: 600; letter-spacing: .02em; transition: background .12s, transform .12s; }
+      .endtrack .target i { width: 14px; height: 14px; border-radius: 3px; background: currentColor; margin-bottom: 3px; }
+      .endtrack.ready .target { background: rgba(255,107,107,.75); color: #fff; transform: scale(1.1); }
       #halo { position: absolute; left: 50%; top: 50%; width: 240px; height: 240px; margin: -120px 0 0 -120px;
         pointer-events: none; z-index: 0; }
       #talk.held svg { color: #2A0B0B; }
@@ -235,6 +252,8 @@ enum PhoneWebApp {
       <div class="hint" id="hint">Tap to start a conversation</div>
       <span></span>
       <div class="talkwrap"><canvas id="halo"></canvas>
+      <div class="endtrack" id="endtrack" aria-hidden="true"><div class="target"><i></i>End</div>
+        <div class="chev" style="top: 108px">︿</div><div class="chev" style="top: 128px">︿</div><div class="chev" style="top: 148px">︿</div></div>
       <button id="talk" aria-label="Start or end a conversation">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/>
           <path d="M18.5 11.5a.9.9 0 1 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 1 0-1.8 0 6.5 6.5 0 0 0 5.6 6.4V20H8.8a.9.9 0 1 0 0 1.8h6.4a.9.9 0 1 0 0-1.8H12.9v-2.1a6.5 6.5 0 0 0 5.6-6.4Z"/></svg>
@@ -352,9 +371,9 @@ enum PhoneWebApp {
         const cls = m.phase === "Listening" ? "rec" : m.busy ? "busy" : m.phase === "Offline" ? "" : "ok";
         setStatus(m.phase, cls);
         $("hint").textContent = held
-          ? (m.phase === "Speaking" ? "Speak to interrupt · hold and slide up to end"
-             : m.phase === "Thinking" || m.phase === "Using tools" ? m.phase + "… · hold and slide up to end"
-             : "Listening — just talk · hold and slide up to end")
+          ? (m.phase === "Speaking" ? "Speak to interrupt · push the button up to end"
+             : m.phase === "Thinking" || m.phase === "Using tools" ? m.phase + "… · push the button up to end"
+             : "Listening — just talk · push the button up to end")
           : "Tap to start a conversation";
       }
       if (m.error || !soundBanner) banner(m.error || "");
@@ -701,31 +720,37 @@ enum PhoneWebApp {
     }
 
     // Starting is a tap. Ending is deliberate, so a phone in a pocket (screen
-    // on) can't end it by a stray touch: hold the button for END_HOLD_MS, then
-    // slide up END_SLIDE_PX. The button follows the finger while sliding.
-    const END_HOLD_MS = 500, END_SLIDE_PX = 90;
-    let endGesture = null;  // { id, y, t } while a finger is on the button mid-conversation
+    // on) can't end it by a stray touch: touching the button shows a track
+    // rising to an "End" target; push the button all the way up it
+    // (END_SLIDE_PX) and let go. Anything shorter, or drifting well off to the
+    // side, springs back.
+    const END_SLIDE_PX = 160, END_SIDE_PX = 70;
+    document.documentElement.style.setProperty("--end-px", END_SLIDE_PX + "px");
+    let endGesture = null;  // { id, x, y } while a finger is on the button mid-conversation
     function resetEndGesture() {
       endGesture = null;
       $("talk").classList.remove("sliding");
       $("talk").style.transform = "";
+      $("endtrack").classList.remove("show", "ready");
       if (held) showState();
     }
     function endDown(e) {
       if (!held) return;
       e.preventDefault();
-      endGesture = { id: e.pointerId, y: e.clientY, t: e.timeStamp };
+      endGesture = { id: e.pointerId, x: e.clientX, y: e.clientY };
       try { $("talk").setPointerCapture(e.pointerId); } catch (err) {}
-      $("hint").textContent = "Keep holding, then slide up to end";
+      $("endtrack").classList.add("show");
+      $("hint").textContent = "Push up to End";
     }
     function endMove(e) {
       if (!held || !endGesture || e.pointerId !== endGesture.id) return;
-      const up = Math.max(0, endGesture.y - e.clientY), heldLong = e.timeStamp - endGesture.t >= END_HOLD_MS;
-      if (!heldLong) { if (up > 20) resetEndGesture(); return; }  // slid before holding: a brush, not a gesture
+      if (Math.abs(e.clientX - (endGesture.x || 0)) > END_SIDE_PX) { resetEndGesture(); return; }  // off the track
+      const up = Math.max(0, Math.min(END_SLIDE_PX, endGesture.y - e.clientY));
       $("talk").classList.add("sliding");
-      $("talk").style.transform = "translateY(" + (-Math.min(up, END_SLIDE_PX)) + "px)";
-      $("hint").textContent = up >= END_SLIDE_PX ? "Let go to end" : "Slide up to end";
-      if (up >= END_SLIDE_PX) endGesture.ready = true;
+      $("talk").style.transform = "translateY(" + (-up) + "px)";
+      endGesture.ready = up >= END_SLIDE_PX;
+      $("endtrack").classList.toggle("ready", endGesture.ready);
+      $("hint").textContent = endGesture.ready ? "Let go to end" : "Push up to End";
     }
     function endUp(e) {
       if (!endGesture || e.pointerId !== endGesture.id) return;
