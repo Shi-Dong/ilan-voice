@@ -59,10 +59,8 @@ final class PhoneClient {
             self.input.deliver(data)
         }
         newPeer.onText = { [weak self, weak newPeer] text in
-            guard let self, newPeer === self.peer,
-                  let obj = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
-                  let type = obj["type"] as? String else { return }
-            self.command(type)
+            guard let self, newPeer === self.peer else { return }
+            self.handleText(text)
         }
         newPeer.onClose = { [weak self, weak newPeer] in
             guard let self, newPeer === self.peer else { return }
@@ -84,6 +82,35 @@ final class PhoneClient {
         peer?.close()
         peer = nil
         session.disconnect()
+    }
+
+    /// A message from the page: a command, or a viewport report.
+    private func handleText(_ text: String) {
+        guard let obj = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
+              let type = obj["type"] as? String else { return }
+        if type == "viewport" { logViewport(obj); return }
+        command(type)
+    }
+
+    /// Unit tests only: a message as if the page had sent it.
+    func receiveForTesting(_ text: String) { handleText(text) }
+
+    /// The page's screen and viewport sizes, one JSON line per report, in
+    /// phone-viewport.log next to agent.md: for diagnosing iOS layout bugs
+    /// (like a page shorter than the screen) on a phone we can't look at.
+    static var viewportLog: URL { Paths.root.appendingPathComponent("phone-viewport.log") }
+
+    private func logViewport(_ report: [String: Any]) {
+        var entry = report
+        entry["time"] = ISO8601DateFormatter().string(from: Date())
+        entry["device"] = device
+        guard var line = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]) else { return }
+        line.append(0x0A)
+        if let handle = try? FileHandle(forWritingTo: Self.viewportLog) {
+            handle.seekToEndOfFile(); handle.write(line); try? handle.close()
+        } else {
+            try? line.write(to: Self.viewportLog)
+        }
     }
 
     private func command(_ type: String) {

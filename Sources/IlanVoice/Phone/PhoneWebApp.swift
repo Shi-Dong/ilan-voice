@@ -58,6 +58,7 @@ enum PhoneWebApp {
       body::before { content: ""; position: fixed; z-index: 4; top: 0; left: 0; right: 0;
         height: env(safe-area-inset-top); background: var(--ink); pointer-events: none; }
       body { display: flex; flex-direction: column; overflow: hidden; position: fixed; inset: 0;
+        bottom: calc(-1 * var(--gap, 0px));  /* see measureViewport */
         background: radial-gradient(120% 60% at 50% 30%, #231918 0%, var(--ink) 60%); }
       header { padding: calc(env(safe-area-inset-top) + 12px) 20px 12px; display: flex; align-items: center; gap: 12px;
         flex: none; position: relative; z-index: 2; background: var(--raised);
@@ -174,7 +175,8 @@ enum PhoneWebApp {
         border: 1px solid rgba(255,255,255,.26); box-shadow: inset 0 1px 0 rgba(255,255,255,.40), 0 4px 14px rgba(0,0,0,.18);
         border-bottom-right-radius: 6px; }
       .msg.tool { background: var(--glass); border: 1px solid var(--rim-soft); border-radius: 999px; padding: 3px 10px; }
-      footer { position: fixed; z-index: 3; left: 10px; right: 10px; bottom: max(8px, calc(env(safe-area-inset-bottom) - 10px));
+      footer { position: fixed; z-index: 3; left: 10px; right: 10px;
+        bottom: calc(max(8px, calc(env(safe-area-inset-bottom) - 10px)) - var(--gap, 0px));
         padding: 8px 18px 14px; border-radius: 30px; border-top: 1px solid var(--rim-soft);
         background: linear-gradient(180deg, var(--glass-strong), var(--glass));
         -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
@@ -284,7 +286,7 @@ enum PhoneWebApp {
     function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 
     function onJSON(m) {
-      if (m.type === "hello_ok") { replaced = false; banner(""); }
+      if (m.type === "hello_ok") { replaced = false; banner(""); measureViewport(true); }
       else if (m.type === "choose_phone") { choosePhone(m.phones); }
       else if (m.type === "replaced") { replaced = true;
         banner("Ilan was opened in another window on this phone. Tap here to use it in this one."); }
@@ -764,6 +766,33 @@ enum PhoneWebApp {
       document.documentElement.style.setProperty("--head-h", document.querySelector("header").offsetHeight + "px");
       document.documentElement.style.setProperty("--foot-h", document.querySelector("footer").offsetHeight + "px");
     };
+    // Some iOS versions give a home-screen web app a page a little shorter
+    // than the screen (by about the status bar's height), leaving a black
+    // band at the bottom. Measure the shortfall (upright only: in landscape
+    // screen.height is the long side) and stretch the background and drop the
+    // floating footer by it. The numbers also go to the Mac, which logs them
+    // (phone-viewport.log in Ilan Voice's data folder) to diagnose such bugs.
+    function measureViewport(report) {
+      const upright = window.innerHeight > window.innerWidth;
+      const screenH = Math.max(screen.width, screen.height);
+      const standalone = !!navigator.standalone || matchMedia("(display-mode: standalone)").matches;
+      const gap = standalone && upright ? Math.max(0, Math.round(screenH - window.innerHeight)) : 0;
+      document.documentElement.style.setProperty("--gap", gap + "px");
+      if (!report) return;
+      const probe = document.createElement("div");
+      probe.style.cssText = "position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)";
+      document.body.appendChild(probe);
+      const cs = getComputedStyle(probe);
+      send({ type: "viewport", innerHeight: window.innerHeight, innerWidth: window.innerWidth,
+             screenHeight: screen.height, screenWidth: screen.width,
+             visualHeight: window.visualViewport ? Math.round(window.visualViewport.height) : null,
+             docHeight: document.documentElement.clientHeight,
+             safeTop: parseFloat(cs.paddingTop), safeBottom: parseFloat(cs.paddingBottom),
+             standalone, gap, dpr: window.devicePixelRatio });
+      probe.remove();
+    }
+    window.addEventListener("resize", () => measureViewport(true));
+    measureViewport(false);
     new ResizeObserver(sizeBars).observe(document.querySelector("header"));
     new ResizeObserver(sizeBars).observe(document.querySelector("footer"));
     sizeBars();
