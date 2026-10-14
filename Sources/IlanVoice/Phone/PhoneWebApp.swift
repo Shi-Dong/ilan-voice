@@ -259,6 +259,7 @@ enum PhoneWebApp {
           held = false; sending = false;
           $("talk").classList.remove("held");
           stopMic();
+          releaseAudio(0);
           banner("Connection lost — the conversation ended. Tap the button to start again.");
         }
         if (replaced) { setStatus("Open in another window", ""); return; }
@@ -377,14 +378,28 @@ enum PhoneWebApp {
     // ---- Audio routing ----
     // iOS sends sound to the quiet earpiece whenever a page's audio session
     // is in "play and record" mode, which is what using the microphone
-    // switches it to. So: replies play from their own audio context with the
-    // session set to "playback" (the loudspeaker); the microphone gets a
-    // separate context that only exists while the button is held, and the
-    // session goes back to "playback" as soon as it is closed.
+    // switches it to. Replies play from their own audio context; the
+    // microphone gets a separate one that only exists during a conversation.
+    // When a conversation ends, both are closed and the session goes back to
+    // "auto" (see releaseAudio).
     function setAudioSession(type) {
       try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (e) {}
     }
-    setAudioSession("playback");
+    // No claim on the phone's audio until a conversation starts: a page that
+    // holds a "playback" session or a running audio context shows up in iOS's
+    // Now Playing (and the mic/speaker stay taken) even when it is silent.
+    setAudioSession("auto");
+
+    // After a conversation (and its end chime): let go of the speaker too.
+    function releaseAudio(afterMs) {
+      setTimeout(() => {
+        if (held) return;  // a new conversation started meanwhile
+        stopAudio();
+        if (ctx) { ctx.onstatechange = null; ctx.close().catch(() => {}); ctx = null; }
+        chimeOut = null;
+        setAudioSession("auto");
+      }, afterMs);
+    }
 
     // ---- Playback ----
     // Switching the audio session for the microphone and back leaves the
@@ -395,7 +410,9 @@ enum PhoneWebApp {
     function audioContext() {
       if (!ctx || ctx.state === "closed") {
         ctx = new (window.AudioContext || window.webkitAudioContext)();
-        ctx.onstatechange = () => { if (ctx.state !== "running") ctx.resume().catch(() => {}); };
+        // iOS pauses it when the mic switches routes; resume it, but only
+        // during a conversation (otherwise a paused context is what we want).
+        ctx.onstatechange = () => { if (held && ctx && ctx.state !== "running") ctx.resume().catch(() => {}); };
       }
       if (ctx.state !== "running") ctx.resume().catch(() => {});
       return ctx;
@@ -407,6 +424,7 @@ enum PhoneWebApp {
     }
     let soundBanner = false;
     function playPCM(buf) {
+      if (!held) return;  // a stray bit of reply after the conversation ended
       const c = audioContext(), pcm = new Int16Array(buf);
       if (c.state !== "running") setTimeout(() => { if (c.state !== "running") needSoundTap(); }, 400);
       if (!pcm.length) return;
@@ -477,7 +495,6 @@ enum PhoneWebApp {
       if (micStream) micStream.getTracks().forEach(t => t.stop());
       if (micCtx) { micCtx.close().catch(() => {}); micCtx = null; }
       micStream = micNode = micSource = null;
-      setAudioSession("playback");
       analyser = null;
     }
 
@@ -591,6 +608,7 @@ enum PhoneWebApp {
       audioContext();
       showState();
       chime(false);
+      releaseAudio(1500);  // once the end chime has rung out
     }
     // ---- Sound feedback for starting and ending a conversation ----
     // Sounds, made on the spot (no files). Start: a bright rising C major

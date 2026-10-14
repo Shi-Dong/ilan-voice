@@ -257,6 +257,42 @@ func registerPhoneTests() {
     }
 
     suite("Phone web page") { test in
+        test("after a conversation the page lets go of the phone's audio (needs Node.js)") {
+            let html = PhoneWebApp.html
+            guard let open = html.range(of: "<script>"), let close = html.range(of: "</script>", range: open.upperBound..<html.endIndex) else {
+                expect(false, "no <script> in the page"); return
+            }
+            let path = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init)
+            guard let node = (path + ["/opt/homebrew/bin", "/usr/local/bin"]).map({ $0 + "/node" })
+                .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+                print("  (skipped: Node.js not installed)"); return
+            }
+            // page-audio-harness.js runs the page with fake browser objects and
+            // reports the iOS audio session and open audio contexts.
+            let harness = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("page-audio-harness.js")
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("ilan-voice-page-\(UUID().uuidString).js")
+            try String(html[open.upperBound..<close.lowerBound]).write(to: file, atomically: true, encoding: .utf8)
+            defer { try? FileManager.default.removeItem(at: file) }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: node)
+            process.arguments = [harness.path, file.path]
+            let out = Pipe(), errors = Pipe()
+            process.standardOutput = out
+            process.standardError = errors
+            try process.run()
+            process.waitUntilExit()
+            let line = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            guard process.terminationStatus == 0,
+                  let json = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {
+                expect(false, "harness failed: " + String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+                return
+            }
+            let during = json["during"] as? [String: Any], after = json["after"] as? [String: Any]
+            expectEqual(json["atLoad"] as? String, "auto")              // no claim before a conversation
+            expectEqual(during?["session"] as? String, "play-and-record")
+            expectEqual(after?["session"] as? String, "auto")           // let go afterwards…
+            expectEqual(after?["openContexts"] as? Int, 0)              // …and nothing left running (no Now Playing)
+        }
         test("the page's JavaScript parses (needs Node.js; skipped without it)") {
             let html = PhoneWebApp.html
             guard let open = html.range(of: "<script>"), let close = html.range(of: "</script>", range: open.upperBound..<html.endIndex) else {
