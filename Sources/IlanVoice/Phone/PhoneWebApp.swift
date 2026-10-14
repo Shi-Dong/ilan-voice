@@ -104,6 +104,9 @@ enum PhoneWebApp {
          talk button only ends it with a hold-and-slide-up. */
       body.conversing #reconnect, body.conversing .banner, body.conversing .sheet { pointer-events: none; opacity: .35; }
       #talk.sliding { transition: none; }
+      /* Microphone not allowed yet: a crossed-out mic (a tap asks for it). */
+      #talk .icon-nomic, #talk.nomic .icon-mic { display: none; }
+      #talk.nomic .icon-nomic { display: inline; }  /* inline like the mic icon, so the button centres it */
       /* The way out of a conversation: shown while a finger is on the button,
          a track rising above it to a stop target. */
       .endtrack { position: absolute; left: 50%; bottom: 0; width: 104px; margin-left: -52px; height: 104px;
@@ -264,8 +267,13 @@ enum PhoneWebApp {
       <div class="endtrack" id="endtrack" aria-hidden="true"><div class="target"><i></i>End</div>
         <div class="chev" style="top: 108px">︿</div><div class="chev" style="top: 128px">︿</div><div class="chev" style="top: 148px">︿</div></div>
       <button id="talk" aria-label="Start or end a conversation">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/>
+        <svg class="icon-mic" viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/>
           <path d="M18.5 11.5a.9.9 0 1 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 1 0-1.8 0 6.5 6.5 0 0 0 5.6 6.4V20H8.8a.9.9 0 1 0 0 1.8h6.4a.9.9 0 1 0 0-1.8H12.9v-2.1a6.5 6.5 0 0 0 5.6-6.4Z"/></svg>
+      <svg class="icon-nomic" viewBox="0 0 24 24"><defs><mask id="nomic-cut"><rect width="24" height="24" fill="#fff"/>
+          <path d="M4.5 3.5 20.5 19.5" stroke="#000" stroke-width="4.6" stroke-linecap="round"/></mask></defs>
+          <g fill="currentColor" mask="url(#nomic-cut)"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/>
+          <path d="M18.5 11.5a.9.9 0 1 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 1 0-1.8 0 6.5 6.5 0 0 0 5.6 6.4V20H8.8a.9.9 0 1 0 0 1.8h6.4a.9.9 0 1 0 0-1.8H12.9v-2.1a6.5 6.5 0 0 0 5.6-6.4Z"/></g>
+          <path d="M4.5 3.5 20.5 19.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" fill="none"/></svg>
       </button></div>
       <span></span>
     </footer>
@@ -364,6 +372,8 @@ enum PhoneWebApp {
       }).catch(() => {});
     }
     function showState() {
+      // Without the microphone the button shows a crossed-out mic: a tap only asks for it.
+      $("talk").classList.toggle("nomic", micPermission !== "granted" && !held);
       const m = lastState;
       if (!m) return;
       phase = m.phase;
@@ -376,7 +386,7 @@ enum PhoneWebApp {
         $("hint").textContent = "Open the link from the Mac (https) to use the microphone";
       } else if (idle && micPermission === "prompt") {
         setStatus("Microphone not enabled yet", "busy");
-        $("hint").textContent = "Tap the button and allow the microphone";
+        $("hint").textContent = "Tap the button to allow the microphone";
       } else {
         const cls = m.phase === "Listening" ? "rec" : m.busy ? "busy" : m.phase === "Offline" ? "" : "ok";
         setStatus(m.phase, cls);
@@ -773,11 +783,26 @@ enum PhoneWebApp {
     }
     function tap(e) {
       e.preventDefault();
-      if (!held) startConversation();  // during a conversation a tap does nothing
+      if (held) return;  // during a conversation a tap does nothing
+      // No microphone yet: this tap only asks for it. Starting is a second tap.
+      if (micPermission !== "granted") { askForMic(); return; }
+      startConversation();
+    }
+    // Ask iOS for the microphone, then let it go straight away: the point is
+    // the permission, not a recording.
+    async function askForMic() {
+      if (micPermission === "unavailable") return;
+      try {
+        const stream = await getMic({ audio: true });
+        stream.getTracks().forEach(t => t.stop());
+      } catch (err) {}
+      setAudioSession("auto");
+      showState();
     }
 
     const talk = $("talk");
     talk.addEventListener("click", tap);
+    showState();  // the button's icon reflects the microphone permission from the start
     talk.addEventListener("pointerdown", endDown);
     talk.addEventListener("pointermove", endMove);
     talk.addEventListener("pointerup", endUp);

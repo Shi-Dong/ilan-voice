@@ -41,7 +41,8 @@ const g = {
   navigator: { standalone: true, wakeLock: { request: async type => { const l = { type, released: false, release: async () => { l.released = true; } };
                                                     wakeLocks.push(l); return l; } },
                audioSession: { set type(v) { audioSessionTypes.push(v); }, get type() { return audioSessionTypes.at(-1); } },
-               mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } },
+               mediaDevices: { getUserMedia: async () => { g.micAsks = (g.micAsks || 0) + 1;
+                 return { getTracks: () => [{ stop() { g.micStops = (g.micStops || 0) + 1; } }] }; } } },
   localStorage: { getItem: k => (k === "ilanToken" ? "t" : k === "ilanDevice" ? "d" : null), setItem() {}, removeItem() {} },
   location: { protocol: "https:", host: "h", search: "" }, URLSearchParams: class { get() { return null; } },
   // Opens, and answers the page's hello the way the Mac does.
@@ -71,7 +72,12 @@ new Function(...Object.keys(g), script)(...Object.values(g));
     fire("pointermove", { clientX: 200 + side, clientY: 500 - px, timeStamp: 80 });
     fire("pointerup", { clientX: 200 + side, clientY: 500 - px, timeStamp: 100 });
   };
-  tap();                                   // start a conversation
+  // No microphone permission yet: the first tap only asks for it.
+  const nomicAtLoad = el("talk").classes.has("nomic");
+  tap(); await new Promise(r => setImmediate(r)); run();
+  const allowTap = { started: conversing(), asked: g.micAsks || 0, released: g.micStops || 0,
+                     nomicAfter: el("talk").classes.has("nomic") };
+  tap();                                   // start a conversation (the second tap)
   await new Promise(r => setImmediate(r)); run();
   const during = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length,
                    screenKeptOn: wakeLocks.some(l => l.type === "screen" && !l.released) };
@@ -99,6 +105,6 @@ new Function(...Object.keys(g), script)(...Object.values(g));
                   screenKeptOn: wakeLocks.some(l => !l.released) };
   const viewport = sent.map(m => { try { return JSON.parse(m); } catch (e) { return {}; } }).find(m => m.type === "viewport");
   const shortPage = el("html").classes.has("short-page");
-  console.log(JSON.stringify({ endedByIlan, atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
+  console.log(JSON.stringify({ nomicAtLoad, allowTap, endedByIlan, atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
     pocket: { afterStrayTap, afterShortPush, afterSmallPush, afterDrift, afterEndGesture } }));
 })();
