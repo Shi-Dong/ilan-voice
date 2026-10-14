@@ -307,6 +307,12 @@ func registerPhoneTests() {
             expectEqual(json["shortPage"] as? Bool, true)  // footer drops its home-bar spacing
             expectEqual(viewport?["innerHeight"] as? Int, 790)
             expectEqual(viewport?["safeTop"] as? Int, 62)
+            // Ilan ended it by voice: the page ends too, with the closing sound, without echoing a stop.
+            let byIlan = json["endedByIlan"] as? [String: Any]
+            expectEqual(byIlan?["sentStop"] as? Bool, false)
+            expectEqual(byIlan?["chimed"] as? Bool, true)
+            expectEqual(byIlan?["session"] as? String, "auto")
+            expectEqual(byIlan?["screenKeptOn"] as? Bool, false)
             // Pocket mode: only pushing the button all the way up the track ends it (no holding).
             let pocket = json["pocket"] as? [String: Any]
             expectEqual(pocket?["afterStrayTap"] as? Bool, true)        // still on

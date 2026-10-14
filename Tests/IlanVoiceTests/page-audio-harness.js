@@ -22,7 +22,7 @@ class FakeAudioContext {
     this.destination = any(); this.audioWorklet = { addModule: async () => {} }; contexts.push(this); }
   resume() { if (!this.closed) this.state = "running"; return Promise.resolve(); }
   close() { this.closed = true; this.state = "closed"; return Promise.resolve(); }
-  createOscillator() { return any(); } createGain() { return any(); } createDynamicsCompressor() { return any(); }
+  createOscillator() { g.oscillators = (g.oscillators || 0) + 1; return any(); } createGain() { return any(); } createDynamicsCompressor() { return any(); }
   createDelay() { return any(); } createBuffer() { return { getChannelData: () => new Float32Array(1), duration: 0 }; }
   createBufferSource() { return any(); } createMediaStreamSource() { return any(); } createAnalyser() { return any(); }
 }
@@ -46,7 +46,7 @@ const g = {
   location: { protocol: "https:", host: "h", search: "" }, URLSearchParams: class { get() { return null; } },
   // Opens, and answers the page's hello the way the Mac does.
   // (On the harness's own timers, so it opens when run() drains them.)
-  WebSocket: class { constructor() { this.readyState = 1; g.setTimeout(() => this.onopen && this.onopen(), 0); }
+  WebSocket: class { constructor() { this.readyState = 1; g.socket = this; g.setTimeout(() => this.onopen && this.onopen(), 0); }
                      send(m) { sent.push(m);
                        if (m.includes('"hello"')) g.setTimeout(() => this.onmessage && this.onmessage({ data: JSON.stringify({ type: "hello_ok" }) }), 0); }
                      close() {} },
@@ -86,10 +86,19 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   push(170);                               // the real gesture: push all the way up, let go
   const afterEndGesture = conversing();
   run();                                   // the end chime rings out, then the page lets go
+  // Ilan ends a conversation itself (its end_conversation tool): the Mac tells the page.
+  tap(); await new Promise(r => setImmediate(r)); run();
+  const stopsBefore = sent.filter(m => m.includes("conversation_stop")).length, oscBefore = g.oscillators || 0;
+  g.socket.onmessage({ data: JSON.stringify({ type: "conversation_ended" }) });
+  run();
+  const endedByIlan = { conversing: conversing() && sent.filter(m => m.includes("conversation_stop")).length === stopsBefore,
+                        sentStop: sent.filter(m => m.includes("conversation_stop")).length > stopsBefore,
+                        chimed: (g.oscillators || 0) > oscBefore, session: audioSessionTypes.at(-1),
+                        screenKeptOn: wakeLocks.some(l => !l.released) };
   const after = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length,
                   screenKeptOn: wakeLocks.some(l => !l.released) };
   const viewport = sent.map(m => { try { return JSON.parse(m); } catch (e) { return {}; } }).find(m => m.type === "viewport");
   const shortPage = el("html").classes.has("short-page");
-  console.log(JSON.stringify({ atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
+  console.log(JSON.stringify({ endedByIlan, atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
     pocket: { afterStrayTap, afterShortPush, afterSmallPush, afterDrift, afterEndGesture } }));
 })();

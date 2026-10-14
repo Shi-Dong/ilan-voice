@@ -30,6 +30,7 @@ final class PhoneClient {
 
         output.sendAudio = { [weak self] pcm in self?.peer?.send(binary: pcm) }
         output.sendStop = { [weak self] in self?.peer?.send(json: ["type": "audio_stop"]) }
+        session.onConversationEndedByIlan = { [weak self] in self?.peer?.send(json: ["type": "conversation_ended"]) }
         session.$phase.removeDuplicates()
             .sink { [weak self] _ in DispatchQueue.main.async { self?.sendState() } }
             .store(in: &cancellables)
