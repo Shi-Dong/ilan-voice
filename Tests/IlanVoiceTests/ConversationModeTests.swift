@@ -18,8 +18,9 @@ func registerConversationModeTests() {
     suite("Conversation mode") { test in
         test("turns are detected by meaning, and OpenAI answers by itself") {
             expectEqual(VoiceSession.semanticTurns["type"] as? String, "semantic_vad")
-            expectEqual(VoiceSession.semanticTurns["create_response"] as? Bool, true)
-            expectEqual(VoiceSession.semanticTurns["interrupt_response"] as? Bool, true)
+            // The app interrupts and asks for replies itself, after checking the turn was speech.
+            expectEqual(VoiceSession.semanticTurns["create_response"] as? Bool, false)
+            expectEqual(VoiceSession.semanticTurns["interrupt_response"] as? Bool, false)
         }
         test("starting opens the microphone and listens; stopping closes it") {
             let (session, _, mic) = makeSession()
@@ -35,6 +36,7 @@ func registerConversationModeTests() {
             let (session, _, _) = makeSession()
             session.startConversation()
             session.handle(["type": "input_audio_buffer.speech_started"])
+            waitFor(0.4) { false }  // 0.2 s of voice makes it a turn
             expectEqual(session.phase, .recording)
             session.handle(["type": "input_audio_buffer.speech_stopped"])
             expectEqual(session.phase, .thinking)
@@ -53,7 +55,7 @@ func registerConversationModeTests() {
             expectEqual(session.phase, .speaking)
             let stopsBefore = speaker.stops
             session.handle(["type": "input_audio_buffer.speech_started"])
-            expect(speaker.stops > stopsBefore, "reply not stopped")
+            expect(waitFor(1) { speaker.stops > stopsBefore }, "reply not stopped")
             expectEqual(session.phase, .recording)
             session.stopConversation()
         }
@@ -154,7 +156,7 @@ func registerConversationTranscriptTests() {
             session.conversationID = conv.id
             session.startConversation()
             session.handle(["type": "input_audio_buffer.speech_started"])
-            waitFor(0.6) { false }  // the fake mic delivers 0.6 s of audio
+            waitFor(0.4) { false }  // the fake mic delivers 0.4 s of audio
             session.handle(["type": "input_audio_buffer.speech_stopped"])
             session.handle(["type": "input_audio_buffer.committed", "item_id": "u1"])
             let m = store.message(conv.id, "u1")
@@ -238,9 +240,9 @@ func registerConversationEdgeTests() {
         }
         test("a phone still sending audio is never ended for silence") {
             let (session, _, _, _, _) = makeSession()
-            session.conversationSilenceLimit = 0.5
+            session.conversationSilenceLimit = 0.25
             session.startConversation()
-            waitFor(1.1) { false }
+            waitFor(0.6) { false }
             expect(session.conversationActive)
             session.stopConversation()
         }
@@ -248,6 +250,7 @@ func registerConversationEdgeTests() {
             let (session, _, _, store, convID) = makeSession()
             session.startConversation()
             session.handle(["type": "input_audio_buffer.speech_started"])
+            waitFor(0.4) { false }  // some voice
             session.handle(["type": "input_audio_buffer.speech_stopped"])
             session.handle(["type": "input_audio_buffer.committed", "item_id": "u1"])
             session.handle(["type": "response.created", "response": ["id": "r1"]])
@@ -283,6 +286,69 @@ func registerConversationStopTests() {
             session.handle(["type": "response.output_audio.delta", "response_id": "r1", "item_id": "i1",
                             "delta": Data(count: 4800).base64EncodedString()])
             expectEqual(speaker.enqueued, enqueued)
+        }
+    }
+}
+
+/// Noise (room sound, Ilan's own voice leaking into the mic) never counts as a turn.
+@MainActor
+func registerConversationNoiseTests() {
+    func makeSession() -> (VoiceSession, FakeSpeaker, FakeMic, ConversationStore, UUID) {
+        let store = ConversationStore()
+        let conv = store.newConversation()
+        let speaker = FakeSpeaker(), mic = FakeMic()
+        speaker.isPlaying = false
+        let session = VoiceSession(store: store, mcp: MCPManager(), input: mic, output: speaker,
+                                   isRemote: true, target: { conv.id })
+        session.conversationID = conv.id
+        return (session, speaker, mic, store, conv.id)
+    }
+    suite("Conversation noise") { test in
+        test("a noise turn doesn't cut Ilan off, gets no reply and leaves no message") {
+            let (session, speaker, mic, store, convID) = makeSession()
+            mic.loud = false
+            session.startConversation()
+            session.handle(["type": "response.created", "response": ["id": "r1"]])
+            speaker.isPlaying = true
+            session.handle(["type": "response.output_audio.delta", "response_id": "r1", "item_id": "i1",
+                            "delta": Data(count: 4800).base64EncodedString()])
+            let stops = speaker.stops
+            session.handle(["type": "input_audio_buffer.speech_started"])
+            waitFor(0.3) { false }
+            session.handle(["type": "input_audio_buffer.speech_stopped"])
+            session.handle(["type": "input_audio_buffer.committed", "item_id": "n1"])
+            expectEqual(speaker.stops, stops)          // Ilan kept talking
+            expectEqual(session.phase, .speaking)
+            expect(store.message(convID, "n1") == nil) // no "(no words heard)" turn
+            // Ilan's reply keeps playing.
+            let enqueued = speaker.enqueued
+            session.handle(["type": "response.output_audio.delta", "response_id": "r1", "item_id": "i1",
+                            "delta": Data(count: 4800).base64EncodedString()])
+            expectEqual(speaker.enqueued, enqueued + 1)
+            session.stopConversation()
+        }
+        test("real speech over Ilan still interrupts, and becomes a turn") {
+            let (session, speaker, _, store, convID) = makeSession()
+            session.startConversation()
+            session.handle(["type": "response.created", "response": ["id": "r1"]])
+            speaker.isPlaying = true
+            session.handle(["type": "response.output_audio.delta", "response_id": "r1", "item_id": "i1",
+                            "delta": Data(count: 4800).base64EncodedString()])
+            let stops = speaker.stops
+            session.handle(["type": "input_audio_buffer.speech_started"])
+            expect(waitFor(1) { speaker.stops > stops }, "not interrupted")
+            session.handle(["type": "input_audio_buffer.speech_stopped"])
+            session.handle(["type": "input_audio_buffer.committed", "item_id": "u1"])
+            expect(store.message(convID, "u1") != nil)
+            expectEqual(session.phase, .thinking)
+            session.stopConversation()
+        }
+        test("a quick backchannel (under 0.2 s of voice) isn't a turn") {
+            expectEqual(VoiceSession.minTurnVoicedFrames, 10)
+            let yeah = Data((0..<(7 * 480)).flatMap { i -> [UInt8] in
+                let v = Int16(i % 2 == 0 ? 3000 : -3000); return [UInt8(truncatingIfNeeded: v), UInt8(truncatingIfNeeded: v >> 8)] })
+            expectEqual(PCM.voicedFrames(yeah), 7)
+            expect(PCM.voicedFrames(yeah) < VoiceSession.minTurnVoicedFrames)
         }
     }
 }
