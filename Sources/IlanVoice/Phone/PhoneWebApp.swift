@@ -316,6 +316,7 @@ enum PhoneWebApp {
       }
       else if (m.type === "messages") { render(m); }
       else if (m.type === "audio_stop") { stopAudio(); }
+      else if (m.type === "conversation_ended") { stopConversation(true); }
     }
 
     // Taking over an earlier iPhone's ID resumes its conversation.
@@ -647,13 +648,16 @@ enum PhoneWebApp {
       chime(true);
       startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
     }
-    function stopConversation() {
+    // byIlan: Ilan ended it (its end_conversation tool, after its goodbye),
+    // so the Mac already knows; everything else is the same, closing sound too.
+    function stopConversation(byIlan) {
       if (!held) return;
       held = false; sending = false;
       document.body.classList.remove("conversing");
       $("talk").classList.remove("held");
+      if (endGesture) resetEndGesture();
       stopAudio();  // Ilan goes quiet at once, before the Mac even hears about it
-      send({ type: "conversation_stop" });
+      if (!byIlan) send({ type: "conversation_stop" });
       letScreenSleep();
       stopMic();
       audioContext();

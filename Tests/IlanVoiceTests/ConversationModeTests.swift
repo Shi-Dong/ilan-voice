@@ -332,8 +332,9 @@ func registerConversationEchoTests() {
         mic.loud = false
         session.handle(["type": "input_audio_buffer.speech_started"])
         let start = mic.ticks
+        mic.framesPerTick = 3  // the same frames, delivered three times as fast
         mic.loud = true
-        expect(waitFor(3) { mic.ticks >= start + frames }, "mic stalled")
+        expect(waitFor(3) { (mic.ticks - start) * mic.framesPerTick >= frames }, "mic stalled")
         mic.loud = false
         waitFor(0.05) { false }
         session.handle(["type": "input_audio_buffer.speech_stopped"])
@@ -385,6 +386,55 @@ func registerConversationEchoTests() {
             expectEqual(VoiceSession.minBargeInVoicedFrames, 40)  // 0.8 s of 20 ms frames
             expectEqual(VoiceSession.minTurnVoicedFrames, 10)     // 0.2 s
             expect(VoiceSession.minBargeInVoicedFrames > 15)      // the two echo turns: 13 and 15
+        }
+    }
+}
+
+/// Saying "let's end this conversation": Ilan's end_conversation tool.
+@MainActor
+func registerEndByVoiceTests() {
+    func toolNames(_ s: VoiceSession) -> [String] { s.builtInTools().compactMap { $0["name"] as? String } }
+    func makeSession(remote: Bool = true) -> (VoiceSession, FakeSpeaker) {
+        let store = ConversationStore()
+        let conv = store.newConversation()
+        let speaker = FakeSpeaker()
+        speaker.isPlaying = false
+        let session = VoiceSession(store: store, mcp: MCPManager(), input: FakeMic(), output: speaker,
+                                   isRemote: remote, target: { conv.id })
+        session.conversationID = conv.id
+        return (session, speaker)
+    }
+    suite("Ending a conversation by voice") { test in
+        test("the end_conversation tool exists only during a live iPhone conversation") {
+            let (phone, _) = makeSession()
+            expect(!toolNames(phone).contains(VoiceSession.endConversationName))
+            phone.startConversation()
+            expect(toolNames(phone).contains(VoiceSession.endConversationName))
+            phone.stopConversation()
+            expect(!toolNames(phone).contains(VoiceSession.endConversationName))
+            let (mac, _) = makeSession(remote: false)  // the desktop app never gets it
+            expect(!toolNames(mac).contains(VoiceSession.endConversationName))
+        }
+        test("its description forbids calling it unless the user asks to end") {
+            let text = VoiceSession.endConversationDefinition["description"] as? String ?? ""
+            expect(text.contains("NEVER call this unless the user has clearly said they want to end"))
+            expect(text.contains("finish, close or stop"))
+        }
+        test("Ilan's goodbye finishes playing, then the conversation ends; no reply follows") {
+            let (session, speaker) = makeSession()
+            var endedByIlan = 0
+            session.onConversationEndedByIlan = { endedByIlan += 1 }
+            session.startConversation()
+            speaker.isPlaying = true  // "Okay, talk to you later!" still playing
+            session.handle(["type": "response.done", "response": ["id": "r1", "output": [
+                ["type": "function_call", "name": VoiceSession.endConversationName, "arguments": "{}", "call_id": "c1"]]]])
+            waitFor(0.25) { false }  // more than one 0.2 s check while it plays
+            expect(session.conversationActive, "ended before the goodbye finished")
+            expectEqual(endedByIlan, 0)
+            speaker.isPlaying = false  // goodbye done
+            expect(waitFor(2) { !session.conversationActive }, "never ended")
+            expectEqual(endedByIlan, 1)
+            expect(session.phase != .thinking, "asked for another reply")
         }
     }
 }

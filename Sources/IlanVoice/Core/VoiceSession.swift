@@ -477,6 +477,7 @@ final class VoiceSession: ObservableObject {
     private func sendTurnDetection() {
         client?.send(["type": "session.update", "session": [
             "type": "realtime", "audio": ["input": ["turn_detection": turnDetection, "noise_reduction": noiseReduction]],
+            "tools": builtInTools(),  // end_conversation only while a conversation is on
         ]])
     }
 
@@ -1146,6 +1147,43 @@ final class VoiceSession: ObservableObject {
         }
     }
 
+    // MARK: Ending a conversation by voice
+
+    static let endConversationName = "end_conversation"
+    static var endConversationDefinition: [String: Any] {
+        [
+            "type": "function",
+            "name": endConversationName,
+            "description": """
+            End this live voice conversation: the user's iPhone stops listening and plays its \
+            closing sound. NEVER call this unless the user has clearly said they want to end, \
+            finish, close or stop the conversation (for example "let's end this conversation"). \
+            Pauses, silence, thanks, "that's all for now" without asking to end, or finishing \
+            a task are NOT reasons to call it; if unsure, ask. Say a short goodbye first, then call it.
+            """,
+            "parameters": ["type": "object", "properties": [String: Any]()] as [String: Any],
+        ]
+    }
+    /// Set while a tool batch contains end_conversation.
+    private var endRequested = false
+    /// Tells the iPhone page that Ilan ended the conversation (it plays the closing sound).
+    var onConversationEndedByIlan: (() -> Void)?
+
+    /// Waits for Ilan's goodbye to finish playing (at most 15 s), then ends the conversation.
+    private func endConversationAfterGoodbye() {
+        let deadline = Date().addingTimeInterval(15)
+        func check() {
+            guard conversationActive else { return }  // the user ended it meanwhile
+            if (speaker.isPlaying || responseActive) && Date() < deadline {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { check() }
+                return
+            }
+            onConversationEndedByIlan?()
+            stopConversation()
+        }
+        check()
+    }
+
     /// Unit tests only: runs every tool call instead of the real tools.
     var toolOverride: (@MainActor (_ name: String, _ arguments: String) async -> String)?
 
@@ -1166,6 +1204,9 @@ final class VoiceSession: ObservableObject {
                     group.addTask { @MainActor in
                         let output: String
                         switch name {
+                        case Self.endConversationName where self.conversationActive:
+                            self.endRequested = true
+                            output = "The conversation ends as soon as your goodbye has finished playing."
                         case _ where self.toolOverride != nil: output = await self.toolOverride!(name, args)
                         case ShellTool.functionName: output = await self.runShell(arguments: args, conversation: convID)
                         case ShellTool.closeFunctionName:
@@ -1183,6 +1224,12 @@ final class VoiceSession: ObservableObject {
                                            "item": ["type": "function_call_output", "call_id": callID, "output": output]])
                     }
                 }
+            }
+            // Asked to end the conversation: no follow-up reply, just let the goodbye finish.
+            if endRequested {
+                endRequested = false
+                endConversationAfterGoodbye()
+                return
             }
             guard conversationID == convID, phase == .working, interruptGeneration == generation else { return }
             phase = .thinking
@@ -1202,8 +1249,11 @@ final class VoiceSession: ObservableObject {
     }
 
     /// MCP tools plus the built-in ones that are turned on.
-    private func builtInTools() -> [[String: Any]] {
+    /// Internal (not private) so the unit tests can check which tools Ilan gets.
+    func builtInTools() -> [[String: Any]] {
         var tools: [[String: Any]] = mcp.realtimeTools
+        // Only during a live iPhone conversation: hands-free, so it can be ended by voice.
+        if isRemote && conversationActive { tools.append(Self.endConversationDefinition) }
         if settings.shellEnabled { tools += [ShellTool.definition(bypass: settings.bypassActive), ShellTool.closeDefinition] }
         if settings.webSearchAvailable { tools.append(WebSearchTool.definition) }
         tools.append(FileTools.readDefinition)
