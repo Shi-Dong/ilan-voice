@@ -799,11 +799,16 @@ enum PhoneWebApp {
       else if (!ws && !replaced) connect();
     });
     // The header and footer float over the conversation (Liquid Glass); keep
-    // the list's padding equal to their real heights.
+    // the list's padding equal to the room they take. For the footer that is
+    // its height plus the gap under it (it floats above the bottom edge), so
+    // the last message clears its top edge when scrolled to the bottom.
     const sizeBars = () => {
       document.documentElement.style.setProperty("--head-h", document.querySelector("header").offsetHeight + "px");
-      document.documentElement.style.setProperty("--foot-h", document.querySelector("footer").offsetHeight + "px");
+      const foot = document.querySelector("footer");
+      const fromBottom = Math.round(window.innerHeight - foot.getBoundingClientRect().top);
+      document.documentElement.style.setProperty("--foot-h", Math.max(foot.offsetHeight, fromBottom) + "px");
     };
+    window.addEventListener("resize", sizeBars);
     // Some iOS versions give a home-screen web app a page a little shorter
     // than the screen (by about the status bar's height), leaving a black
     // band at the bottom that is outside the page (iOS doesn't draw the page
@@ -818,6 +823,7 @@ enum PhoneWebApp {
       const gap = standalone && upright ? Math.max(0, Math.round(screenH - window.innerHeight)) : 0;
       // Short by more than a status bar's slack: the page ends above the home bar.
       document.documentElement.classList.toggle("short-page", gap > 30);
+      if (typeof sizeBars === "function") sizeBars();  // the footer's gap just changed
       if (!report) return;
       const probe = document.createElement("div");
       probe.style.cssText = "position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)";

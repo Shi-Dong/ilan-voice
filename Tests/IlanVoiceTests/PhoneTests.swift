@@ -267,6 +267,13 @@ func registerPhoneTests() {
     }
 
     suite("Phone web page") { test in
+        test("the last message clears the floating footer: its room counts the gap under it") {
+            let html = PhoneWebApp.html
+            expect(html.contains("window.innerHeight - foot.getBoundingClientRect().top"),
+                   "the list must leave room for the footer's height plus the gap below it")
+            expect(html.contains("if (typeof sizeBars === \"function\") sizeBars();  // the footer's gap just changed"),
+                   "re-measure when the short-page spacing changes")
+        }
         test("no hard line under the status bar: messages fade out, and the bar melts into the page") {
             let html = PhoneWebApp.html
             expect(html.contains("mask-image: linear-gradient(to bottom, transparent 0, #000 56px)"), "messages aren't faded at the top")
