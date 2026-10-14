@@ -257,7 +257,7 @@ func registerPhoneTests() {
     }
 
     suite("Phone web page") { test in
-        test("the screen stays on during a conversation; afterwards the page lets go of audio and screen (needs Node.js)") {
+        test("pocket mode: screen on, only hold-and-slide-up ends; then audio and screen are let go (needs Node.js)") {
             let html = PhoneWebApp.html
             guard let open = html.range(of: "<script>"), let close = html.range(of: "</script>", range: open.upperBound..<html.endIndex) else {
                 expect(false, "no <script> in the page"); return
@@ -292,6 +292,12 @@ func registerPhoneTests() {
             expectEqual(during?["session"] as? String, "play-and-record")
             expectEqual(during?["screenKeptOn"] as? Bool, true)         // auto-lock would end the conversation
             expectEqual(after?["screenKeptOn"] as? Bool, false)         // Auto-Lock works again afterwards
+            // Pocket mode: only a hold-and-slide-up ends the conversation.
+            let pocket = json["pocket"] as? [String: Any]
+            expectEqual(pocket?["afterStrayTap"] as? Bool, true)        // still on
+            expectEqual(pocket?["afterQuickSwipe"] as? Bool, true)
+            expectEqual(pocket?["afterShortSlide"] as? Bool, true)
+            expectEqual(pocket?["afterEndGesture"] as? Bool, false)     // ended
             expectEqual(after?["session"] as? String, "auto")           // let go afterwards…
             expectEqual(after?["openContexts"] as? Int, 0)              // …and nothing left running (no Now Playing)
         }

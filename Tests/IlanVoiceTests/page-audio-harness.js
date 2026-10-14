@@ -48,14 +48,32 @@ const run = () => { while (timers.length) { timers.sort((a, b) => a.at - b.at); 
 new Function(...Object.keys(g), script)(...Object.values(g));
 (async () => {
   run();
-  const tap = () => (handlers["talk:click"] || []).forEach(fn => fn({ preventDefault() {} }));
+  const fire = (type, e) => (handlers["talk:" + type] || []).forEach(fn => fn({ preventDefault() {}, pointerId: 1, ...e }));
+  // A real tap: finger down and up in place, then the click.
+  const tap = () => { fire("pointerdown", { clientY: 500, timeStamp: 0 }); fire("pointerup", { clientY: 500, timeStamp: 80 }); fire("click", {}); };
+  const conversing = () => sent.filter(m => m.includes("conversation_start")).length > sent.filter(m => m.includes("conversation_stop")).length;
+  // Hold, then slide up `px`, then let go.
+  const holdAndSlide = (holdMs, px) => {
+    fire("pointerdown", { clientY: 500, timeStamp: 0 });
+    fire("pointermove", { clientY: 500 - px / 2, timeStamp: holdMs });
+    fire("pointermove", { clientY: 500 - px, timeStamp: holdMs + 50 });
+    fire("pointerup", { clientY: 500 - px, timeStamp: holdMs + 80 });
+  };
   tap();                                   // start a conversation
   await new Promise(r => setImmediate(r)); run();
   const during = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length,
                    screenKeptOn: wakeLocks.some(l => l.type === "screen" && !l.released) };
-  tap();                                   // end it
+  tap();                                   // a stray touch (e.g. in a pocket)
+  const afterStrayTap = conversing();
+  holdAndSlide(100, 120);                  // a quick swipe up without holding first
+  const afterQuickSwipe = conversing();
+  holdAndSlide(600, 40);                   // held, but slid only a little
+  const afterShortSlide = conversing();
+  holdAndSlide(600, 120);                  // the real gesture: hold, slide up, let go
+  const afterEndGesture = conversing();
   run();                                   // the end chime rings out, then the page lets go
   const after = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length,
                   screenKeptOn: wakeLocks.some(l => !l.released) };
-  console.log(JSON.stringify({ atLoad: audioSessionTypes[0], during, after }));
+  console.log(JSON.stringify({ atLoad: audioSessionTypes[0], during, after,
+    pocket: { afterStrayTap, afterQuickSwipe, afterShortSlide, afterEndGesture } }));
 })();

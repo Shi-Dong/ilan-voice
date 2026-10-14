@@ -95,6 +95,10 @@ enum PhoneWebApp {
          microphone's live spectrum (see "Voice halo" in the script). */
       .talkwrap { position: relative; width: 96px; height: 96px; }
       .talkwrap #talk { z-index: 1; }
+      /* Pocket mode: during a conversation everything else is locked, and the
+         talk button only ends it with a hold-and-slide-up. */
+      body.conversing #reconnect, body.conversing .banner, body.conversing .sheet { pointer-events: none; opacity: .35; }
+      #talk.sliding { transition: none; }
       #halo { position: absolute; left: 50%; top: 50%; width: 240px; height: 240px; margin: -120px 0 0 -120px;
         pointer-events: none; z-index: 0; }
       #talk.held svg { color: #2A0B0B; }
@@ -257,6 +261,7 @@ enum PhoneWebApp {
         // so the mic closes and the button doesn't claim one is still on.
         if (held) {
           held = false; sending = false;
+          document.body.classList.remove("conversing");
           $("talk").classList.remove("held");
           stopMic();
           letScreenSleep();
@@ -336,9 +341,9 @@ enum PhoneWebApp {
         const cls = m.phase === "Listening" ? "rec" : m.busy ? "busy" : m.phase === "Offline" ? "" : "ok";
         setStatus(m.phase, cls);
         $("hint").textContent = held
-          ? (m.phase === "Speaking" ? "Speak to interrupt · tap to end"
-             : m.phase === "Thinking" || m.phase === "Using tools" ? m.phase + "… · tap to end"
-             : "Listening — just talk · tap to end")
+          ? (m.phase === "Speaking" ? "Speak to interrupt · hold and slide up to end"
+             : m.phase === "Thinking" || m.phase === "Using tools" ? m.phase + "… · hold and slide up to end"
+             : "Listening — just talk · hold and slide up to end")
           : "Tap to start a conversation";
       }
       if (m.error || !soundBanner) banner(m.error || "");
@@ -603,6 +608,7 @@ enum PhoneWebApp {
     function startConversation() {
       if (held || !ws || ws.readyState !== 1) return;
       held = true; sending = true;
+      document.body.classList.add("conversing");
       audioContext();  // unlocks reply playback; iOS only allows that inside a touch
       $("talk").classList.add("held");
       stopAudio();
@@ -615,6 +621,7 @@ enum PhoneWebApp {
     function stopConversation() {
       if (!held) return;
       held = false; sending = false;
+      document.body.classList.remove("conversing");
       $("talk").classList.remove("held");
       stopAudio();  // Ilan goes quiet at once, before the Mac even hears about it
       send({ type: "conversation_stop" });
@@ -682,13 +689,50 @@ enum PhoneWebApp {
       }
     }
 
-    function toggle(e) {
+    // Starting is a tap. Ending is deliberate, so a phone in a pocket (screen
+    // on) can't end it by a stray touch: hold the button for END_HOLD_MS, then
+    // slide up END_SLIDE_PX. The button follows the finger while sliding.
+    const END_HOLD_MS = 500, END_SLIDE_PX = 90;
+    let endGesture = null;  // { id, y, t } while a finger is on the button mid-conversation
+    function resetEndGesture() {
+      endGesture = null;
+      $("talk").classList.remove("sliding");
+      $("talk").style.transform = "";
+      if (held) showState();
+    }
+    function endDown(e) {
+      if (!held) return;
       e.preventDefault();
-      if (held) stopConversation(); else startConversation();
+      endGesture = { id: e.pointerId, y: e.clientY, t: e.timeStamp };
+      try { $("talk").setPointerCapture(e.pointerId); } catch (err) {}
+      $("hint").textContent = "Keep holding, then slide up to end";
+    }
+    function endMove(e) {
+      if (!held || !endGesture || e.pointerId !== endGesture.id) return;
+      const up = Math.max(0, endGesture.y - e.clientY), heldLong = e.timeStamp - endGesture.t >= END_HOLD_MS;
+      if (!heldLong) { if (up > 20) resetEndGesture(); return; }  // slid before holding: a brush, not a gesture
+      $("talk").classList.add("sliding");
+      $("talk").style.transform = "translateY(" + (-Math.min(up, END_SLIDE_PX)) + "px)";
+      $("hint").textContent = up >= END_SLIDE_PX ? "Let go to end" : "Slide up to end";
+      if (up >= END_SLIDE_PX) endGesture.ready = true;
+    }
+    function endUp(e) {
+      if (!endGesture || e.pointerId !== endGesture.id) return;
+      const ready = endGesture.ready;
+      resetEndGesture();
+      if (ready && held) stopConversation();
+    }
+    function tap(e) {
+      e.preventDefault();
+      if (!held) startConversation();  // during a conversation a tap does nothing
     }
 
     const talk = $("talk");
-    talk.addEventListener("click", toggle);
+    talk.addEventListener("click", tap);
+    talk.addEventListener("pointerdown", endDown);
+    talk.addEventListener("pointermove", endMove);
+    talk.addEventListener("pointerup", endUp);
+    talk.addEventListener("pointercancel", resetEndGesture);
     talk.addEventListener("contextmenu", e => e.preventDefault());
     // Reconnect, like the Mac's button: a fresh session for this phone's
     // conversation (the conversation itself is kept). If the page has lost
