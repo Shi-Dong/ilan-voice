@@ -81,7 +81,9 @@ func registerPhoneTests() {
         }
         test("a page shorter than the screen drops the home-bar spacing under the footer") {
             let html = PhoneWebApp.html
-            expect(html.contains("html.short-page footer { bottom: 8px; }"))
+            // Clear of the screen's rounded corners (8px clipped them).
+            expect(html.contains("html.short-page footer { bottom: 22px; }"))
+            expect(html.contains("bottom: max(22px, calc(env(safe-area-inset-bottom) - 10px));"))
             expect(html.contains(#"classList.toggle("short-page", gap > 30)"#))
         }
         test("the conversation title has room above its letters (no clipped top)") {

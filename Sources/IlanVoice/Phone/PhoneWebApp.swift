@@ -189,14 +189,16 @@ enum PhoneWebApp {
         border-bottom-right-radius: 6px; }
       .msg.tool { background: var(--glass); border: 1px solid var(--rim-soft); border-radius: 999px; padding: 3px 10px; }
       footer { position: fixed; z-index: 3; left: 10px; right: 10px;
-        bottom: max(8px, calc(env(safe-area-inset-bottom) - 10px));
+        bottom: max(22px, calc(env(safe-area-inset-bottom) - 10px));
         padding: 8px 18px 14px; border-radius: 30px; border-top: 1px solid var(--rim-soft);
         background: linear-gradient(180deg, var(--glass-strong), var(--glass));
         -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
         border: 1px solid var(--rim-soft); box-shadow: var(--glass-shadow); }
       /* If iOS still hands the page less than the screen (see measureViewport),
-         the page's bottom is not at the home bar: no home-bar spacing then. */
-      html.short-page footer { bottom: 8px; }
+         it reports no safe areas either, yet the page still ends at the
+         screen's rounded bottom corners: 22px keeps the panel's corners clear
+         of them (8px clipped them on an iPhone 17 Pro Max). */
+      html.short-page footer { bottom: 22px; }
       /* The talk button: a flat pane of coral glass. An even, see-through
          tint over a uniform backdrop blur, a thin crisp edge and one fine
          highlight along the top edge; no curved shine. Held: the pane turns
