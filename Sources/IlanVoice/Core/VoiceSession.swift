@@ -369,13 +369,22 @@ final class VoiceSession: ObservableObject {
     /// backchannel shouldn't cut Ilan off).
     static let minTurnVoicedFrames = 10
     private var turnVoicedFrames = 0
+    /// How far into `conversationAudio` the turn's 20 ms frames have been counted.
+    /// The phone sends tiny pieces (64 samples, under 3 ms), far shorter than a
+    /// frame, so frames are counted over the turn's audio, not piece by piece.
+    private var turnScanned = 0
     /// This turn has enough voice to count. (Read by the tests.)
     private(set) var turnIsSpeech = false
 
     /// Enough voice in this turn: now it interrupts Ilan.
-    private func countTurnVoice(_ data: Data) {
+    private func countTurnVoice() {
         guard inTurn, !turnIsSpeech else { return }
-        turnVoicedFrames += PCM.voicedFrames(data)
+        let frameBytes = 480 * 2
+        while turnScanned + frameBytes <= conversationAudio.count {
+            let start = conversationAudio.startIndex + turnScanned
+            turnVoicedFrames += PCM.voicedFrames(conversationAudio[start..<start + frameBytes])
+            turnScanned += frameBytes
+        }
         guard turnVoicedFrames >= Self.minTurnVoicedFrames else { return }
         turnIsSpeech = true
         interrupt()  // speaking over Ilan stops its reply
@@ -737,7 +746,7 @@ final class VoiceSession: ObservableObject {
             lastConversationAudio = Date()
             inputLevel = inputLevel * 0.6 + level * 0.4
             conversationAudio.append(data)
-            countTurnVoice(data)
+            countTurnVoice()
             // Between turns keep only the last moment, the start of the next turn.
             if !inTurn, conversationAudio.count > 2 * Self.turnLeadBytes {
                 conversationAudio = conversationAudio.suffix(Self.turnLeadBytes)
@@ -868,9 +877,10 @@ final class VoiceSession: ObservableObject {
             // Maybe speech, maybe noise: Ilan is only interrupted once the turn
             // has real voice in it (countTurnVoice).
             inTurn = true
-            turnVoicedFrames = PCM.voicedFrames(conversationAudio)  // what came just before
+            turnVoicedFrames = 0
+            turnScanned = 0  // counts from the moment just before, kept in conversationAudio
             turnIsSpeech = false
-            countTurnVoice(Data())
+            countTurnVoice()
 
         case "input_audio_buffer.speech_stopped":
             guard conversationActive, turnIsSpeech else { return }

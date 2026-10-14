@@ -38,11 +38,16 @@ final class FakeMic: VoiceInput {
     private func tick() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
             guard let self, self.running else { return }
-            self.onChunk?(self.loud ? Self.speech : Data(count: Self.speech.count), self.loud ? 0.3 : 0)
+            // 20 ms of audio in phone-sized pieces (the iPhone page sends 64 samples at a time).
+            let audio = self.loud ? Self.speech : Data(count: Self.speech.count)
+            stride(from: 0, to: audio.count, by: Self.pieceBytes).forEach { offset in
+                self.onChunk?(audio.subdata(in: offset..<min(offset + Self.pieceBytes, audio.count)), self.loud ? 0.3 : 0)
+            }
             self.tick()
         }
     }
     /// 20 ms of a loud tone: counts as speech.
+    static let pieceBytes = 60 * 2
     static let speech: Data = {
         let samples = (0..<480).map { i -> Int16 in i % 2 == 0 ? 8000 : -8000 }
         return samples.withUnsafeBufferPointer { Data(buffer: $0) }
