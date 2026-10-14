@@ -71,14 +71,18 @@ func json(_ message: URLSessionWebSocketTask.Message?) -> [String: Any] {
 @MainActor
 func registerPhoneTests() {
     suite("Phone web server") { test in
-        test("the page covers the whole screen, with a solid band under the status bar") {
+        test("the page sits below an opaque status bar and does not ask to extend under it") {
             let html = PhoneWebApp.html
-            // "black" made current iOS cut a status bar's height off the bottom.
-            expect(html.contains(#"name="apple-mobile-web-app-status-bar-style" content="black-translucent">"#),
-                   "the status bar must be translucent so the page gets the full screen height")
-            // The clock and battery sit on a solid band, not on scrolling messages.
-            expect(html.contains("body::before") && html.contains("height: env(safe-area-inset-top); background: var(--ink)"),
-                   "no solid band behind the status bar")
+            // viewport-fit=cover made iOS draw the page from the top while sizing it
+            // a status bar short: a black band at the bottom, outside the page.
+            expect(html.contains(#"<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">"#),
+                   "the viewport must not use viewport-fit=cover")
+            expect(html.contains(#"name="apple-mobile-web-app-status-bar-style" content="black">"#), "status bar should be opaque")
+        }
+        test("a page shorter than the screen drops the home-bar spacing under the footer") {
+            let html = PhoneWebApp.html
+            expect(html.contains("html.short-page footer { bottom: 8px; }"))
+            expect(html.contains(#"classList.toggle("short-page", gap > 30)"#))
         }
         test("the conversation title has room above its letters (no clipped top)") {
             let html = PhoneWebApp.html
@@ -300,6 +304,7 @@ func registerPhoneTests() {
             // applied (background stretched, footer moved down), and reported to the Mac.
             let viewport = json["viewport"] as? [String: Any]
             expectEqual(viewport?["gap"] as? Int, 62)
+            expectEqual(json["shortPage"] as? Bool, true)  // footer drops its home-bar spacing
             expectEqual(viewport?["innerHeight"] as? Int, 790)
             expectEqual(viewport?["safeTop"] as? Int, 62)
             // Pocket mode: only pushing the button all the way up the track ends it (no holding).
