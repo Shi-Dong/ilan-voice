@@ -173,7 +173,15 @@ enum PhoneWebApp {
       header img { border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
       #reconnect { background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,.06));
         border: 1px solid var(--rim); color: var(--text); box-shadow: inset 0 1px 0 rgba(255,255,255,.3); }
-      main { padding: calc(var(--head-h, 72px) + env(safe-area-inset-top) + 18px) 14px calc(var(--foot-h, 150px) + 16px); }
+      main { padding: calc(var(--head-h, 72px) + env(safe-area-inset-top) + 18px) 14px calc(var(--foot-h, 150px) + 16px);
+        /* Messages fade out at the very top instead of being sliced off by
+           the edge under iOS's black status bar. */
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 56px);
+        mask-image: linear-gradient(to bottom, transparent 0, #000 56px); }
+      /* The page starts right under iOS's opaque black status bar; this soft
+         black-to-clear band melts the bar into the page instead of a hard line. */
+      body::after { content: ""; position: fixed; z-index: 2; top: 0; left: 0; right: 0; height: 32px;
+        background: linear-gradient(to bottom, #000, rgba(0,0,0,0)); pointer-events: none; }
       .banner { position: fixed; z-index: 3; left: 16px; right: 16px; top: calc(env(safe-area-inset-top) + var(--head-h, 72px) + 16px);
         margin: 0; border-radius: 14px; background: rgba(242,140,42,.16); border: 1px solid rgba(242,140,42,.35);
         -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }

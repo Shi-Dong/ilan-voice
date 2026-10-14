@@ -265,6 +265,11 @@ func registerPhoneTests() {
     }
 
     suite("Phone web page") { test in
+        test("no hard line under the status bar: messages fade out, and the bar melts into the page") {
+            let html = PhoneWebApp.html
+            expect(html.contains("mask-image: linear-gradient(to bottom, transparent 0, #000 56px)"), "messages aren't faded at the top")
+            expect(html.contains("background: linear-gradient(to bottom, #000, rgba(0,0,0,0))"), "no soft band under the status bar")
+        }
         test("pocket mode: screen on, only a full push up the track ends; then audio and screen are let go (needs Node.js)") {
             let html = PhoneWebApp.html
             guard let open = html.range(of: "<script>"), let close = html.range(of: "</script>", range: open.upperBound..<html.endIndex) else {
