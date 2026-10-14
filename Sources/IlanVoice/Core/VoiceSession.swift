@@ -135,7 +135,7 @@ final class VoiceSession: ObservableObject {
         }
         speaker.onDrained = { [weak self] in
             guard let self, self.phase == .speaking, !self.responseActive else { return }
-            self.phase = .ready
+            self.phase = self.idlePhase
         }
     }
 
@@ -160,6 +160,13 @@ final class VoiceSession: ObservableObject {
             self.sessionReady = false
             self.cancelWatchdog()
             if self.retryUnsentTurn() { return }
+            // A conversation carries on: reconnect (configured for it) after a moment.
+            if self.conversationActive {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                    guard let self, self.conversationActive, self.client == nil else { return }
+                    self.connect()
+                }
+            }
             if self.phase != .recording { self.phase = .offline }
             if report, let reason {
                 self.errorMessage = reason
@@ -276,8 +283,9 @@ final class VoiceSession: ObservableObject {
             "audio": [
                 "input": [
                     "format": ["type": "audio/pcm", "rate": 24000],
-                    "turn_detection": NSNull(),
-                    "transcription": transcriptionConfig(dictionary, context: lastAssistantText()),
+                    "turn_detection": turnDetection,
+                    // In a conversation nothing is transcribed live (see stopConversation).
+                    "transcription": conversationActive ? NSNull() as Any : transcriptionConfig(dictionary, context: lastAssistantText()) as Any,
                 ],
                 "output": [
                     "format": ["type": "audio/pcm", "rate": 24000],
@@ -306,6 +314,7 @@ final class VoiceSession: ObservableObject {
     func sendText(_ raw: String) -> Bool {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, phase != .recording, !talkKeyHeld, let convID = target() else { return false }
+        guard !targetLiveOnPhone else { errorMessage = Self.liveOnPhoneMessage; return false }
         errorMessage = nil
         interrupt()
         ensureSession()
@@ -339,6 +348,140 @@ final class VoiceSession: ObservableObject {
     /// Realtime item ids may be chosen by the client (at most 32 characters).
     static func newItemID() -> String {
         "msg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(24)
+    }
+
+    // MARK: Conversation mode (the iPhone app)
+
+    /// Hands-free: the microphone streams the whole time and OpenAI decides
+    /// from what was said when each turn is over (semantic turn detection),
+    /// then answers by itself. Speaking over Ilan stops its reply.
+    private(set) var conversationActive = false
+
+    static let semanticTurns: [String: Any] = [
+        "type": "semantic_vad", "eagerness": "auto", "create_response": true, "interrupt_response": true,
+    ]
+
+    /// Off (push to talk: the app says when a turn ends) or semantic.
+    private var turnDetection: Any { conversationActive ? Self.semanticTurns : NSNull() }
+
+    /// Listening between turns in a conversation, else ready.
+    private var idlePhase: Phase { conversationActive ? .recording : .ready }
+
+    /// The Mac's conversation is live on an iPhone: read-only here.
+    var targetLiveOnPhone: Bool { !isRemote && target().map(store.liveOnPhone.contains) == true }
+    static let liveOnPhoneMessage = "This conversation is live on your iPhone. You can follow it here, and talk again once the iPhone ends it."
+
+    func startConversation() {
+        guard !conversationActive else { return }
+        errorMessage = nil
+        interrupt()
+        conversationActive = true
+        if let id = target() { store.liveOnPhone.insert(id) }
+        lastConversationAudio = Date()
+        watchConversationAudio()
+        conversationAudio = Data()
+        inTurn = false
+        conversationTurns = []
+        ensureSession()  // a new session is configured for conversation from the start
+        if sessionReady {
+            client?.send(["type": "input_audio_buffer.clear"])
+            sendTurnDetection()
+        }
+        do {
+            try mic.start()
+        } catch {
+            errorMessage = error.localizedDescription
+            stopConversation()
+            return
+        }
+        phase = .recording
+    }
+
+    func stopConversation() {
+        guard conversationActive else { return }
+        conversationActive = false
+        if let id = conversationID ?? target() { store.liveOnPhone.remove(id) }
+        mic.stop()
+        inputLevel = 0
+        if let convID = conversationID { transcribeConversation(convID, conversationTurns) }
+        conversationTurns = []
+        conversationAudio = Data()
+        if sessionReady {
+            client?.send(["type": "input_audio_buffer.clear"])
+            sendTurnDetection()
+        }
+        if phase == .recording { phase = sessionReady ? .ready : (client == nil ? .offline : .connecting) }
+    }
+
+    /// A conversation streams audio all the time; none for this long means the
+    /// phone is gone without saying so (no network, switched off).
+    /// (Tests shorten it.)
+    var conversationSilenceLimit: TimeInterval = 6
+    private var lastConversationAudio = Date()
+
+    private func watchConversationAudio() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + min(1, conversationSilenceLimit / 4)) { [weak self] in
+            guard let self, self.conversationActive else { return }
+            if Date().timeIntervalSince(self.lastConversationAudio) > self.conversationSilenceLimit {
+                self.errorMessage = "Lost the iPhone's microphone, so the conversation ended."
+                self.stopConversation()
+            } else {
+                self.watchConversationAudio()
+            }
+        }
+    }
+
+    private func sendTurnDetection() {
+        let transcription: Any = conversationActive ? NSNull() : transcriptionConfig(UserDictionary.terms(), context: lastAssistantText())
+        client?.send(["type": "session.update", "session": [
+            "type": "realtime", "audio": ["input": ["turn_detection": turnDetection, "transcription": transcription]],
+        ]])
+    }
+
+    /// The conversation's audio since the last turn (plus a moment before the
+    /// next one), so each turn is saved as its own recording.
+    private var conversationAudio = Data()
+    private var inTurn = false
+    /// The user's turns in this conversation, transcribed when it ends.
+    private var conversationTurns: [String] = []
+    /// Kept from just before OpenAI noticed speech: it hears the start a moment late.
+    static let turnLeadBytes = Int(PCM.sampleRate) * 2 / 2  // 0.5 s
+
+    /// Cuts the finished turn's audio out of the conversation audio.
+    private func takeTurnAudio() -> Data {
+        let turn = conversationAudio
+        conversationAudio = Data()
+        inTurn = false
+        return turn
+    }
+
+    /// Each turn: speech to text from its recording, then Luna's repair.
+    private func transcribeConversation(_ convID: UUID, _ turns: [String]) {
+        guard !turns.isEmpty else { return }
+        let key = settings.apiKey, sttModel = settings.transcriptionModel, lunaModel = settings.titleModel
+        let terms = UserDictionary.terms(), store = store
+        Task {
+            // Right away, even if Ilan is still answering: Luna sees what it has so far.
+            guard let conv = store.conversations.first(where: { $0.id == convID }) else { return }
+            let results = await ConversationTranscriber.finish(
+                turns, messages: conv.messages,
+                audio: { m in m.audioFile.flatMap { try? Data(contentsOf: store.audioURL(convID, $0)) } },
+                transcribe: { wav, context in
+                    await SpeechToText.transcribe(wav: wav, model: sttModel,
+                                                  prompt: UserDictionary.transcriptionPrompt(terms, context: context), apiKey: key)
+                },
+                fix: { raw, history, tools, reply in
+                    await TranscriptFixer.fix(raw, dictionary: terms, history: history, tools: tools,
+                                              reply: reply, apiKey: key, model: lunaModel)
+                })
+            for (id, result) in results {
+                store.updateMessage(convID, id) { message in
+                    message.text = result.text
+                    if !result.raw.isEmpty, result.raw != result.text { message.rawText = result.raw }
+                    message.awaitingCorrection = nil
+                }
+            }
+        }
     }
 
     // MARK: Push to talk
@@ -411,6 +554,7 @@ final class VoiceSession: ObservableObject {
     ///   to open the window (see above).
     func pressToTalk(waitForDoubleTap: Bool = false) {
         guard phase != .recording else { return }
+        guard !targetLiveOnPhone else { errorMessage = Self.liveOnPhoneMessage; return }
         errorMessage = nil
         pressCount += 1
         if waitForDoubleTap && (tapStop != nil || ilanBusy) {
@@ -497,7 +641,9 @@ final class VoiceSession: ObservableObject {
                 store.updateMessage(convID, m.id) { $0.pending = false }
             }
         }
-        if phase == .speaking || phase == .working || phase == .thinking { phase = sessionReady ? .ready : .offline }
+        if phase == .speaking || phase == .working || phase == .thinking {
+            phase = conversationActive ? .recording : (sessionReady ? .ready : .offline)
+        }
         return true
     }
 
@@ -596,6 +742,18 @@ final class VoiceSession: ObservableObject {
     }
 
     private func handleMic(_ data: Data, _ level: Float) {
+        if conversationActive {
+            lastConversationAudio = Date()
+            inputLevel = inputLevel * 0.6 + level * 0.4
+            conversationAudio.append(data)
+            // Between turns keep only the last moment, the start of the next turn.
+            if !inTurn, conversationAudio.count > 2 * Self.turnLeadBytes {
+                conversationAudio = conversationAudio.suffix(Self.turnLeadBytes)
+            }
+            // While (re)connecting, audio is dropped: stale speech mustn't start a turn later.
+            if sessionReady { sendAudio(data) }
+            return
+        }
         guard phase == .recording || quietRecording else { return }
         inputLevel = inputLevel * 0.6 + level * 0.4
         recording.append(data)
@@ -712,11 +870,29 @@ final class VoiceSession: ObservableObject {
                 phase = .ready
             }
 
+        // Conversation mode: OpenAI heard the user start or finish a turn.
+        case "input_audio_buffer.speech_started":
+            guard conversationActive else { return }
+            interrupt()  // speaking over Ilan stops its reply (OpenAI cancels it too)
+            inTurn = true
+            phase = .recording
+
+        case "input_audio_buffer.speech_stopped":
+            guard conversationActive else { return }
+            phase = .thinking
+
         case "input_audio_buffer.committed":
             unsentTurn = nil
             turnRetried = false
             guard let itemID = event["item_id"] as? String else { return }
             var msg = Message(id: itemID, role: .user, text: "", pending: true)
+            if conversationActive {
+                // Not transcribed live: grey "Transcribing…" until the conversation ends.
+                pendingUserAudio = takeTurnAudio()
+                msg.pending = false
+                msg.awaitingCorrection = true
+                conversationTurns.append(itemID)
+            }
             if let pcm = pendingUserAudio {
                 let file = "\(itemID).wav"
                 try? PCM.wav(pcm).write(to: store.audioURL(convID, file))
@@ -724,8 +900,10 @@ final class VoiceSession: ObservableObject {
                 msg.audioSeconds = PCM.seconds(pcm)
                 pendingUserAudio = nil
             }
+            let conversing = conversationActive
             store.update(convID) { conv in
-                Self.settleEarlierCorrections(&conv)
+                // A conversation's earlier turns stay grey until it ends and they are transcribed.
+                if !conversing { Self.settleEarlierCorrections(&conv) }
                 conv.messages.append(msg)
             }
 
@@ -814,7 +992,7 @@ final class VoiceSession: ObservableObject {
             if !calls.isEmpty {
                 runTools(calls, convID)
             } else {
-                if !speaker.isPlaying { phase = .ready }
+                if !speaker.isPlaying { phase = idlePhase }
                 // Ilan's whole answer (replies and tool calls) is in: fix the transcript.
                 correctTranscript(convID)
             }
@@ -839,7 +1017,8 @@ final class VoiceSession: ObservableObject {
             if Self.isSessionExpiry(code: error?["code"] as? String, message: message) {
                 let busy = responseActive || phase == .thinking || phase == .working || phase == .speaking
                 if !busy {
-                    if phase != .recording { connect() }
+                    // A conversation keeps going on the fresh session.
+                    if phase != .recording || conversationActive { connect() }
                     return
                 }
             }

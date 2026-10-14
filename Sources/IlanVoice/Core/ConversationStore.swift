@@ -62,6 +62,9 @@ struct Conversation: Codable, Identifiable, Equatable {
 final class ConversationStore: ObservableObject {
     @Published private(set) var conversations: [Conversation] = []
     @Published var selectedID: UUID?
+    /// Conversations an iPhone is in a live, hands-free conversation in. The
+    /// Mac can read them but not talk or type in them until it ends.
+    @Published var liveOnPhone: Set<UUID> = []
 
     private var pendingSaves: [UUID: DispatchWorkItem] = [:]
     private let encoder: JSONEncoder = {

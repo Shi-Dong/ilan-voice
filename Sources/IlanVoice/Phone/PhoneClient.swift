@@ -51,6 +51,7 @@ final class PhoneClient {
         if let old = peer, old !== newPeer {
             old.send(json: ["type": "replaced"])
             old.close()
+            session.stopConversation()  // the old page's conversation ends with it
         }
         peer = newPeer
         newPeer.onBinary = { [weak self, weak newPeer] data in
@@ -66,6 +67,7 @@ final class PhoneClient {
         newPeer.onClose = { [weak self, weak newPeer] in
             guard let self, newPeer === self.peer else { return }
             self.peer = nil
+            self.session.stopConversation()  // the phone is gone: stop listening
             if self.session.phase == .recording { self.session.releaseToTalk() }
             self.onConnectionChange?()
         }
@@ -86,6 +88,8 @@ final class PhoneClient {
 
     private func command(_ type: String) {
         switch type {
+        case "conversation_start": session.startConversation()
+        case "conversation_stop": session.stopConversation()
         case "press": session.pressToTalk()
         case "release": session.releaseToTalk()
         case "cancel": session.cancelRecording()
