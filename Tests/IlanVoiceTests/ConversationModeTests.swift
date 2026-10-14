@@ -244,7 +244,7 @@ func registerConversationEdgeTests() {
             expect(session.conversationActive)
             session.stopConversation()
         }
-        test("ending while Ilan is still answering waits for its reply before transcribing") {
+        test("ending while Ilan is still answering transcribes right away") {
             let (session, _, _, store, convID) = makeSession()
             session.startConversation()
             session.handle(["type": "input_audio_buffer.speech_started"])
@@ -252,11 +252,8 @@ func registerConversationEdgeTests() {
             session.handle(["type": "input_audio_buffer.committed", "item_id": "u1"])
             session.handle(["type": "response.created", "response": ["id": "r1"]])
             session.stopConversation()  // Ilan is still answering
-            waitFor(0.4) { false }
-            expect(store.message(convID, "u1")?.awaitingCorrection == true, "transcribed before Ilan finished")
-            session.handle(["type": "response.done", "response": ["id": "r1", "output": []]])
             // No API key in tests: transcription gives nothing, and the turn says so.
-            expect(waitFor(2) { store.message(convID, "u1")?.awaitingCorrection == nil }, "never transcribed")
+            expect(waitFor(1) { store.message(convID, "u1")?.awaitingCorrection == nil }, "waited for Ilan")
             expectEqual(store.message(convID, "u1")?.text, "(no words heard)")
         }
     }

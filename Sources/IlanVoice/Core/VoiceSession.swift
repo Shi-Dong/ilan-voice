@@ -431,9 +431,6 @@ final class VoiceSession: ObservableObject {
         }
     }
 
-    /// Ilan's turn is over: no reply on its way, no tools running.
-    private var ilanTurnFinished: Bool { !responseActive && phase != .thinking && phase != .working }
-
     private func sendTurnDetection() {
         let transcription: Any = conversationActive ? NSNull() : transcriptionConfig(UserDictionary.terms(), context: lastAssistantText())
         client?.send(["type": "session.update", "session": [
@@ -464,9 +461,7 @@ final class VoiceSession: ObservableObject {
         let key = settings.apiKey, sttModel = settings.transcriptionModel, lunaModel = settings.titleModel
         let terms = UserDictionary.terms(), store = store
         Task {
-            // Wait (up to 30 s) for Ilan's last answer, so Luna sees it too.
-            let deadline = Date().addingTimeInterval(30)
-            while !ilanTurnFinished && Date() < deadline { try? await Task.sleep(nanoseconds: 200_000_000) }
+            // Right away, even if Ilan is still answering: Luna sees what it has so far.
             guard let conv = store.conversations.first(where: { $0.id == convID }) else { return }
             let results = await ConversationTranscriber.finish(
                 turns, messages: conv.messages,
