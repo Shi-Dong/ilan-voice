@@ -22,12 +22,13 @@ class FakeAudioContext {
     this.destination = any(); this.audioWorklet = { addModule: async () => {} }; contexts.push(this); }
   resume() { if (!this.closed) this.state = "running"; return Promise.resolve(); }
   close() { this.closed = true; this.state = "closed"; return Promise.resolve(); }
-  createOscillator() { g.oscillators = (g.oscillators || 0) + 1; return any(); } createGain() { return any(); } createDynamicsCompressor() { return any(); }
+  createOscillator() { g.oscillators = (g.oscillators || 0) + 1; chimeSessions.add(audioSessionTypes.at(-1)); return any(); } createGain() { return any(); } createDynamicsCompressor() { return any(); }
   createDelay() { return any(); } createBuffer() { return { getChannelData: () => new Float32Array(1), duration: 0 }; }
   createBufferSource() { return any(); } createMediaStreamSource() { return any(); } createAnalyser() { return any(); }
 }
 const sent = [];
 const audioSessionTypes = [];
+const chimeSessions = new Set();  // the audio session each start/end sound played in
 const wakeLocks = [];
 const g = {
   window: null, console,
@@ -41,7 +42,8 @@ const g = {
   navigator: { standalone: true, wakeLock: { request: async type => { const l = { type, released: false, release: async () => { l.released = true; } };
                                                     wakeLocks.push(l); return l; } },
                audioSession: { set type(v) { audioSessionTypes.push(v); }, get type() { return audioSessionTypes.at(-1); } },
-               mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } },
+               mediaDevices: { getUserMedia: async () => { g.micAsks = (g.micAsks || 0) + 1; g.micDelayMs = g.timerMs;
+                 return { getTracks: () => [{ stop() { g.micStops = (g.micStops || 0) + 1; } }] }; } } },
   localStorage: { getItem: k => (k === "ilanToken" ? "t" : k === "ilanDevice" ? "d" : null), setItem() {}, removeItem() {} },
   location: { protocol: "https:", host: "h", search: "" }, URLSearchParams: class { get() { return null; } },
   // Opens, and answers the page's hello the way the Mac does.
@@ -56,7 +58,8 @@ const g = {
   URL: { createObjectURL: () => "blob:" }, Blob: class {}, Int16Array, Float32Array, Uint8Array, Math, JSON, Date, Promise,
 };
 g.window = g;
-const run = () => { while (timers.length) { timers.sort((a, b) => a.at - b.at); timers.shift().fn(); } };
+// Runs every pending timer, earliest first; g.timerMs is the delay of the one running.
+const run = () => { while (timers.length) { timers.sort((a, b) => a.at - b.at); const t = timers.shift(); g.timerMs = t.at; t.fn(); g.timerMs = 0; } };
 new Function(...Object.keys(g), script)(...Object.values(g));
 (async () => {
   run();
@@ -71,8 +74,17 @@ new Function(...Object.keys(g), script)(...Object.values(g));
     fire("pointermove", { clientX: 200 + side, clientY: 500 - px, timeStamp: 80 });
     fire("pointerup", { clientX: 200 + side, clientY: 500 - px, timeStamp: 100 });
   };
-  tap();                                   // start a conversation
-  await new Promise(r => setImmediate(r)); run();
+  // No microphone permission yet: the first tap only asks for it.
+  const nomicAtLoad = el("talk").classes.has("nomic");
+  tap(); await new Promise(r => setImmediate(r)); run();
+  const allowTap = { started: conversing(), asked: g.micAsks || 0, released: g.micStops || 0,
+                     nomicAfter: el("talk").classes.has("nomic") };
+  const oscBeforeStart = g.oscillators || 0;
+  tap();                                   // start a conversation (the second tap)
+  const micBeforeStartSound = (g.micAsks || 0) > 1;
+  await new Promise(r => setImmediate(r)); run(); await new Promise(r => setImmediate(r));
+  const startSound = { chimed: (g.oscillators || 0) > oscBeforeStart, micBefore: micBeforeStartSound,
+                       micAfterMs: (g.micAsks || 0) === 2 ? g.micDelayMs : -1 };
   const during = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length,
                    screenKeptOn: wakeLocks.some(l => l.type === "screen" && !l.released) };
   tap();                                   // a stray touch (e.g. in a pocket)
@@ -99,6 +111,6 @@ new Function(...Object.keys(g), script)(...Object.values(g));
                   screenKeptOn: wakeLocks.some(l => !l.released) };
   const viewport = sent.map(m => { try { return JSON.parse(m); } catch (e) { return {}; } }).find(m => m.type === "viewport");
   const shortPage = el("html").classes.has("short-page");
-  console.log(JSON.stringify({ endedByIlan, atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
+  console.log(JSON.stringify({ nomicAtLoad, allowTap, startSound, chimeSessions: [...chimeSessions], endedByIlan, atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
     pocket: { afterStrayTap, afterShortPush, afterSmallPush, afterDrift, afterEndGesture } }));
 })();
