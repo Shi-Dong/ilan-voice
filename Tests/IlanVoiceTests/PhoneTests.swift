@@ -176,7 +176,7 @@ func registerPhoneTests() {
             send(owner, .string(String(decoding: hello, as: UTF8.self)))
             expectEqual(json(receive(owner))["type"] as? String, "hello_ok")
             owner.cancel(with: .goingAway, reason: nil)
-            waitFor(0.2) { false }  // let the server see the close
+            expect(waitFor(1) { phone.connectedCount == 0 }, "the server never saw the close")
         }
 
         test("costs and token counts reach the page only while the Mac shows them") {
@@ -223,6 +223,79 @@ func registerPhoneTests() {
             expectEqual(PhoneServer.number(for: a), first)
             expectEqual(PhoneServer.number(for: b), first + 1)
             expect(PhoneServer.isKnown(a) && PhoneServer.isKnown(b))
+        }
+    }
+
+    suite("Phone connection drops") { test in
+        test("a conversation waits for a dropped iPhone, carries on when it is back, and ends when it stays away") {
+            let (interval, timeout, limit) = (PhoneClient.heartbeatInterval, PhoneClient.heartbeatTimeout, PhoneClient.awayLimit)
+            (PhoneClient.heartbeatInterval, PhoneClient.heartbeatTimeout, PhoneClient.awayLimit) = (0.02, 0.06, 0.15)
+            defer { (PhoneClient.heartbeatInterval, PhoneClient.heartbeatTimeout, PhoneClient.awayLimit) = (interval, timeout, limit) }
+            let store = ConversationStore()
+            let phone = PhoneServer(store: store, mcp: MCPManager())
+            let port = try startOnSparePort(phone.http)
+            defer { phone.http.stop() }
+            let url = URL(string: "ws://127.0.0.1:\(port)/ws")!
+            // A page connecting, saying whether it is mid-conversation as far as it knows; returns its hello_ok.
+            @MainActor func open(conversing: Bool) throws -> (URLSessionWebSocketTask, [String: Any]) {
+                let task = URLSession.shared.webSocketTask(with: url)
+                task.resume()
+                let hello = try JSONSerialization.data(withJSONObject: ["type": "hello", "token": phone.token,
+                                                                         "device": "drop-phone", "conversing": conversing])
+                send(task, .string(String(decoding: hello, as: UTF8.self)))
+                return (task, json(receive(task)))
+            }
+            let (a, okA) = try open(conversing: false)
+            expectEqual(okA["type"] as? String, "hello_ok")
+            expectEqual(okA["conversing"] as? Bool, false)
+            guard let client = phone.client(for: "drop-phone") else { return expect(false, "no client for the phone") }
+            send(a, .string(#"{"type":"conversation_start"}"#))
+            expect(waitFor(1) { client.session.conversationActive }, "conversation never started")
+            // The page falls silent (its pings go unanswered): the connection is dropped,
+            // but the conversation waits for the phone.
+            expect(waitFor(1) { !client.isConnected }, "a silent page was never dropped")
+            expect(client.isAway)
+            expect(client.session.conversationActive, "the conversation ended when the phone dropped")
+            a.cancel(with: .goingAway, reason: nil)
+            // A reply that starts while the phone is away can't be heard: it is cut.
+            client.session.conversationID = store.iPhoneConversation(device: "drop-phone", create: false)  // no OpenAI here
+            client.session.handle(["type": "response.created", "response": ["id": "r1"]])
+            client.session.handle(["type": "response.output_audio.delta", "response_id": "r1", "item_id": "i1",
+                                   "delta": Data(count: 4800).base64EncodedString()])
+            expectEqual(client.session.phase, .speaking)
+            expect(waitFor(1) { client.session.phase == .recording }, "the unheard reply was not cut")
+            // Back in time, mid-conversation: it carries on.
+            let (b, okB) = try open(conversing: true)
+            expectEqual(okB["conversing"] as? Bool, true)
+            expect(!client.isAway && client.isConnected)
+            expect(client.session.conversationActive)
+            // Gone again (a proper close this time) and not back in time: the conversation ends after all.
+            b.cancel(with: .goingAway, reason: nil)
+            expect(waitFor(1) { client.isAway }, "the close was not noticed")
+            expect(client.session.conversationActive)
+            expect(waitFor(1) { !client.session.conversationActive }, "the conversation never ended")
+            expect(!client.isAway)
+            // The page comes back still thinking it is conversing: hello_ok tells it otherwise.
+            let (c, okC) = try open(conversing: true)
+            expectEqual(okC["conversing"] as? Bool, false)
+            // The same page back before its old connection was found dead: the conversation is kept.
+            send(c, .string(#"{"type":"conversation_start"}"#))
+            expect(waitFor(1) { client.session.conversationActive })
+            let (d, okD) = try open(conversing: true)
+            expectEqual(okD["conversing"] as? Bool, true)
+            expect(client.session.conversationActive, "the conversation ended when the same page reconnected")
+            // A new window for the phone (not conversing) ends it, as before.
+            let (e, okE) = try open(conversing: false)
+            expectEqual(okE["conversing"] as? Bool, false)
+            expect(!client.session.conversationActive, "a new window should end the old page's conversation")
+            for task in [c, d, e] { task.cancel(with: .goingAway, reason: nil) }
+        }
+        test("the Mac decides first: the page waits longer than the Mac, and the Mac's silence watchdog longer than its heartbeat") {
+            let html = PhoneWebApp.html
+            expect(html.contains("AWAY_LIMIT_MS = \(Int(PhoneClient.awayLimit * 1000) + 30_000)"), "the page should wait 30 s longer than the Mac")
+            expect(html.contains("SILENCE_MS = \(Int(PhoneClient.heartbeatInterval * 3 * 1000))"), "the page should allow three missed pings")
+            expect(VoiceSession.defaultConversationSilenceLimit > PhoneClient.heartbeatTimeout + PhoneClient.heartbeatInterval,
+                   "a dropped connection must be noticed as a drop before it counts as a lost microphone")
         }
     }
 
@@ -276,7 +349,7 @@ func registerPhoneTests() {
             expect(html.contains("mask-image: linear-gradient(to bottom, transparent 0, #000 56px)"), "messages aren't faded at the top")
             expect(html.contains("background: linear-gradient(to bottom, #000, rgba(0,0,0,0))"), "no soft band under the status bar")
         }
-        test("pocket mode: screen on, only a full push up the track ends; then audio and screen are let go (needs Node.js)") {
+        test("pocket mode, letting go of audio and screen, and the connection dropping mid-conversation (needs Node.js)") {
             let html = PhoneWebApp.html
             guard let open = html.range(of: "<script>"), let close = html.range(of: "</script>", range: open.upperBound..<html.endIndex) else {
                 expect(false, "no <script> in the page"); return
@@ -341,6 +414,61 @@ func registerPhoneTests() {
             expectEqual(pocket?["afterEndGesture"] as? Bool, false)     // ended
             expectEqual(after?["session"] as? String, "auto")           // let go afterwards…
             expectEqual(after?["openContexts"] as? Int, 0)              // …and nothing left running (no Now Playing)
+            // The connection drops mid-conversation: the conversation waits (mic and screen
+            // kept, "Reconnecting…") and carries on when the Mac is back and still has it.
+            let away = json["whileAway"] as? [String: Any]
+            expectEqual(away?["conversing"] as? Bool, true)
+            expectEqual(away?["micKept"] as? Bool, true)
+            expectEqual(away?["screenKeptOn"] as? Bool, true)
+            expectEqual(away?["away"] as? Bool, true)
+            expectEqual(away?["status"] as? String, "Reconnecting…")
+            expectEqual(away?["hint"] as? String, "Reconnecting… · push the button up to end")
+            let resumed = json["resumed"] as? [String: Any]
+            expectEqual(resumed?["reconnected"] as? Bool, true)
+            expectEqual(resumed?["helloConversing"] as? Bool, true)    // the hello says so
+            expectEqual(resumed?["conversing"] as? Bool, true)
+            expectEqual(resumed?["restarted"] as? Bool, false)         // no second conversation_start
+            expectEqual(resumed?["chimed"] as? Bool, false)
+            expectEqual(resumed?["away"] as? Bool, false)
+            expectEqual(resumed?["status"] as? String, "Listening")
+            expectEqual(resumed?["hint"] as? String, "Listening — just talk · push the button up to end")
+            expectEqual(resumed?["micAsks"] as? Int, 2)                 // the mic was never reopened
+            // Back, but the Mac has let the conversation go: this side ends too, closing sound, no stop echoed.
+            let letGo = json["letGo"] as? [String: Any]
+            expectEqual(letGo?["conversing"] as? Bool, false)
+            expectEqual(letGo?["chimed"] as? Bool, true)
+            expectEqual(letGo?["sentStop"] as? Bool, false)
+            expectEqual(letGo?["screenKeptOn"] as? Bool, false)
+            expectEqual(letGo?["session"] as? String, "auto")
+            expectEqual(letGo?["away"] as? Bool, false)
+            // Ended by the user while away: ends at once, with the sound; the next hello tells the Mac.
+            let endedAway = json["endedAway"] as? [String: Any]
+            expectEqual(endedAway?["conversing"] as? Bool, false)
+            expectEqual(endedAway?["sentStop"] as? Bool, false)         // nothing to send it on
+            expectEqual(endedAway?["chimed"] as? Bool, true)
+            expectEqual(endedAway?["helloConversing"] as? Bool, false)
+            expectEqual(endedAway?["chimedAgain"] as? Bool, false)
+            // Pings are answered; a connection silent for 6 s is given up on and a new one opened.
+            let silence = json["silence"] as? [String: Any]
+            expectEqual(silence?["ponged"] as? Bool, true)
+            expectEqual(silence?["abandoned"] as? Bool, true)
+            expectEqual(silence?["status"] as? String, "Reconnecting…")
+            expectEqual(silence?["reconnected"] as? Bool, true)
+            // No Mac for over AWAY_LIMIT_MS: the page lets the conversation go itself.
+            let tooLong = json["tooLong"] as? [String: Any]
+            expectEqual(tooLong?["conversing"] as? Bool, false)
+            expectEqual(tooLong?["chimed"] as? Bool, true)
+            expect((tooLong?["banner"] as? String)?.hasPrefix("Connection lost") == true, "no explanation shown")
+            // Another window took over: the conversation ends, no retrying; tapping the banner comes back.
+            let replaced = json["replaced"] as? [String: Any]
+            expectEqual(replaced?["conversing"] as? Bool, false)
+            expectEqual(replaced?["retried"] as? Bool, false)
+            expectEqual(replaced?["status"] as? String, "Open in another window")
+            expectEqual(replaced?["backAfterTap"] as? Bool, true)
+            // A connection that never opens is given up on after CONNECT_TIMEOUT_MS; the next try opens.
+            let stalled = json["stalled"] as? [String: Any]
+            expectEqual(stalled?["tries"] as? Int, 2)
+            expectEqual(stalled?["status"] as? String, "Ready")
         }
         test("the page's JavaScript parses (needs Node.js; skipped without it)") {
             let html = PhoneWebApp.html

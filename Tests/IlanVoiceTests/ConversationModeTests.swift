@@ -195,7 +195,7 @@ func registerConversationEdgeTests() {
     suite("Conversation edge cases") { test in
         test("a phone that goes silent (gone without closing) ends the conversation and unlocks the Mac") {
             let (session, _, mic, store, convID) = makeSession()
-            session.conversationSilenceLimit = 0.5
+            session.conversationSilenceLimit = 0.2
             session.startConversation()
             expect(store.liveOnPhone.contains(convID))
             mic.running = false  // no more audio arrives
@@ -204,11 +204,36 @@ func registerConversationEdgeTests() {
             expect(!store.liveOnPhone.contains(convID))
             expect(session.errorMessage?.contains("Lost the iPhone") == true)
         }
+        test("a dropped phone pauses the silence watchdog and cuts a reply it can't hear; silence counts again once it is back") {
+            let (session, speaker, mic, _, _) = makeSession()
+            session.conversationSilenceLimit = 0.06
+            session.startConversation()
+            speaker.isPlaying = true  // Ilan is mid-reply
+            let stops = speaker.stops
+            session.remoteDropped()
+            expect(speaker.stops > stops, "a reply the phone can't hear should be cut")
+            expectEqual(session.phase, .recording)
+            mic.running = false  // and nothing more arrives from the phone
+            expect(!waitFor(0.15) { !session.conversationActive }, "silence ended the conversation while the phone was away")
+            session.remoteReturned()
+            expect(waitFor(1) { !session.conversationActive }, "silence after the phone is back should end it")
+            expect(session.errorMessage?.contains("Lost the iPhone") == true)
+        }
+        test("a reply still being thought about is left alone when the phone drops (it may be ready once the phone is back)") {
+            let (session, speaker, _, _, _) = makeSession()
+            speaker.isPlaying = false
+            session.startConversation()
+            session.handle(["type": "response.created", "response": ["id": "r1"]])
+            let stops = speaker.stops
+            session.remoteDropped()
+            expectEqual(speaker.stops, stops)
+            session.stopConversation()
+        }
         test("a phone still sending audio is never ended for silence") {
             let (session, _, _, _, _) = makeSession()
-            session.conversationSilenceLimit = 0.25
+            session.conversationSilenceLimit = 0.1
             session.startConversation()
-            waitFor(0.5) { false }
+            waitFor(0.25) { false }
             expect(session.conversationActive)
             session.stopConversation()
         }

@@ -4,17 +4,37 @@ import Foundation
 /// One iPhone: its voice session, its conversation and its live connection.
 /// Phones are told apart by a random device ID the web page keeps, so each
 /// one talks in its own conversation and they can be used at the same time.
+///
+/// The connection comes and goes with the phone's network (a tunnel, a Wi-Fi
+/// hand-off). Tailscale keeps a dead connection open for a long time, so the
+/// Mac pings the page and drops a connection that stays silent; and a
+/// conversation survives a drop: it waits (`awayLimit`) for the same page to
+/// come back and carry on, instead of ending the moment the phone is gone.
 @MainActor
 final class PhoneClient {
+    /// How often the page is pinged, and how long without a word from it (a
+    /// pong, audio, a command) before its connection counts as dead.
+    /// (Tests shorten these.)
+    static var heartbeatInterval: TimeInterval = 2
+    static var heartbeatTimeout: TimeInterval = 5
+    /// How long a conversation waits for a dropped phone to come back.
+    static var awayLimit: TimeInterval = 120
+
     let device: String
     let session: VoiceSession
     var onConnectionChange: (() -> Void)?
     var isConnected: Bool { peer != nil }
+    /// The phone dropped mid-conversation; the conversation is waiting for it.
+    private(set) var isAway = false
 
     private let store: ConversationStore
     private let input = RemoteMicrophone()
     private let output = RemoteSpeaker()
     private var peer: WebSocketPeer?
+    private var heartbeat: Timer?
+    private var lastHeard = Date()
+    private var awayTimer: DispatchWorkItem? { didSet { oldValue?.cancel() } }
+    private var cuttingReply = false
     private var conversationID: UUID?
     private var cancellables: Set<AnyCancellable> = []
     private var lastSentMessages: [[String: Any]] = []
@@ -28,7 +48,15 @@ final class PhoneClient {
         target = { [weak self] in self?.conversation(create: true) }
         conversationID = store.iPhoneConversation(device: device, create: false)
 
-        output.sendAudio = { [weak self] pcm in self?.peer?.send(binary: pcm) }
+        output.sendAudio = { [weak self] pcm in
+            guard let self else { return }
+            if let peer = self.peer { peer.send(binary: pcm); return }
+            // A reply that starts while the phone is away can't be heard: cut it
+            // (once the session has finished handling this piece of it).
+            guard self.isAway, !self.cuttingReply else { return }
+            self.cuttingReply = true
+            DispatchQueue.main.async { self.cuttingReply = false; self.session.interrupt() }
+        }
         output.sendStop = { [weak self] in self?.peer?.send(json: ["type": "audio_stop"]) }
         session.onConversationEndedByIlan = { [weak self] in self?.peer?.send(json: ["type": "conversation_ended"]) }
         session.$phase.removeDuplicates()
@@ -46,42 +74,107 @@ final class PhoneClient {
             .store(in: &cancellables)
     }
 
-    /// A newer page for the same phone takes over; the old one is told so and
-    /// does not reconnect on its own (otherwise the two would keep swapping).
-    func attach(_ newPeer: WebSocketPeer) {
+    /// A page for this phone connected, `conversing` as far as it knows. The
+    /// conversation goes on only if both sides think so: the page that
+    /// dropped and is back carries on; a page that ended it while away, or a
+    /// new window, ends it; and a page that still thinks it is conversing
+    /// when the Mac has let the conversation go is told so in hello_ok, and ends.
+    func attach(_ newPeer: WebSocketPeer, conversing: Bool) {
         if let old = peer, old !== newPeer {
+            // A newer window for the same phone takes over (or the same page is
+            // back before its old connection was found dead): the old one is
+            // told so and does not reconnect on its own (otherwise the two
+            // would keep swapping).
+            old.onClose = nil
             old.send(json: ["type": "replaced"])
             old.close()
-            session.stopConversation()  // the old page's conversation ends with it
         }
         peer = newPeer
+        awayTimer = nil
+        if session.conversationActive, !conversing { session.stopConversation() }
+        if isAway {
+            isAway = false
+            session.remoteReturned()
+        }
         newPeer.onBinary = { [weak self, weak newPeer] data in
             guard let self, newPeer === self.peer else { return }
+            self.lastHeard = Date()
             self.input.deliver(data)
         }
         newPeer.onText = { [weak self, weak newPeer] text in
             guard let self, newPeer === self.peer else { return }
+            self.lastHeard = Date()
             self.handleText(text)
         }
         newPeer.onClose = { [weak self, weak newPeer] in
             guard let self, newPeer === self.peer else { return }
             self.peer = nil
-            self.session.stopConversation()  // the phone is gone: stop listening
-            if self.session.phase == .recording { self.session.releaseToTalk() }
+            self.stopHeartbeat()
+            if self.session.conversationActive {
+                // Mid-conversation: the phone may well be back in a moment, so
+                // the conversation waits for it rather than ending.
+                self.isAway = true
+                self.session.remoteDropped()
+                let work = DispatchWorkItem { [weak self] in self?.awayTooLong() }
+                self.awayTimer = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.awayLimit, execute: work)
+            } else if self.session.phase == .recording {
+                self.session.releaseToTalk()
+            }
             self.onConnectionChange?()
         }
+        lastHeard = Date()
+        startHeartbeat()
         lastSentMessages = []
-        newPeer.send(json: ["type": "hello_ok"])
+        newPeer.send(json: ["type": "hello_ok", "conversing": session.conversationActive])
         sendMessages(force: true)
         sendState()
         onConnectionChange?()
     }
 
-    func disconnect() { peer?.close() }
+    /// The phone never came back: the conversation ends after all.
+    private func awayTooLong() {
+        guard isAway else { return }
+        isAway = false
+        session.stopConversation()
+    }
+
+    // MARK: Heartbeat
+
+    private func startHeartbeat() {
+        heartbeat?.invalidate()
+        heartbeat = Timer.scheduledTimer(withTimeInterval: Self.heartbeatInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.beat() }
+        }
+    }
+
+    private func stopHeartbeat() {
+        heartbeat?.invalidate()
+        heartbeat = nil
+    }
+
+    /// Pings the page. A page silent for too long has lost the Mac, whatever
+    /// the connection says (iOS and Tailscale can take minutes to notice): it
+    /// is dropped here, which goes like any other drop (onClose above).
+    private func beat() {
+        guard let peer else { return }
+        if Date().timeIntervalSince(lastHeard) > Self.heartbeatTimeout { peer.drop(); return }
+        peer.send(json: ["type": "ping"])
+    }
+
+    /// The Mac cuts this phone off (a new pairing code): its conversation ends too.
+    func disconnect() {
+        session.stopConversation()
+        peer?.close()
+    }
 
     func shutDown() {
+        session.stopConversation()
         peer?.close()
         peer = nil
+        stopHeartbeat()
+        awayTimer = nil
+        isAway = false
         session.disconnect()
     }
 
