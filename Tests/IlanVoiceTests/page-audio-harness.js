@@ -39,16 +39,23 @@ class FakeAudioContext {
   // Each start/end sound: the session it played in, and how long the context
   // had been playing steadily when it started (-1: paused, i.e. garbled on iOS).
   createOscillator() { g.oscillators = (g.oscillators || 0) + 1; chimeSessions.add(audioSessionTypes.at(-1));
-    if (sounds.at(-1)?.at !== now) sounds.push({ at: now, steadyMs: this.since === null ? -1 : now - this.since });
+    if (sounds.at(-1)?.at !== now) {
+      // The inaudible hum warming the speaker up: still on, or stopped just as the sound starts.
+      const hum = hums.filter(h => h.context === this && (h.on || h.stoppedAt === now)).at(-1);
+      sounds.push({ at: now, steadyMs: this.since === null ? -1 : now - this.since, humMs: hum ? now - hum.startedAt : -1 });
+    }
     return any(); }
   createGain() { return any(); } createDynamicsCompressor() { return any(); } createBiquadFilter() { return any(); }
   createDelay() { return any(); } createBuffer() { return { getChannelData: () => new Float32Array(1), duration: 0 }; }
-  createBufferSource() { return any(); } createMediaStreamSource() { return any(); } createAnalyser() { return any(); }
+  // A looping buffer source is the page's warm-up hum: when it starts and stops is kept.
+  createBufferSource() { const src = { context: this, loop: false, on: false, connect() {}, disconnect() {},
+    start() { src.startedAt = now; src.on = true; if (src.loop) hums.push(src); }, stop() { src.on = false; src.stoppedAt = now; } }; return src; } createMediaStreamSource() { return any(); } createAnalyser() { return any(); }
 }
 const sent = [];
 const audioSessionTypes = [];
 const chimeSessions = new Set();  // the audio session each start/end sound played in
 const sounds = [];
+const hums = [];
 const wakeLocks = [];
 const g = {
   window: null, console,
@@ -64,7 +71,7 @@ const g = {
                audioSession: { set type(v) { if (audioSessionTypes.length && v !== audioSessionTypes.at(-1)) {
                                   routeSettlesAt = now + ROUTE_MS; contexts.forEach(c => c.pause()); }
                                 audioSessionTypes.push(v); },
-                              get type() { return audioSessionTypes.at(-1); } },
+                              get type() { return audioSessionTypes.at(-1); }, },
                mediaDevices: { getUserMedia: async () => { g.micAsks = (g.micAsks || 0) + 1; g.micAt = now;
                  return { getTracks: () => [{ stop() { g.micStops = (g.micStops || 0) + 1; } }] }; } } },
   localStorage: { getItem: k => (k === "ilanToken" ? "t" : k === "ilanDevice" ? "d" : null), setItem() {}, removeItem() {} },
@@ -229,7 +236,7 @@ new Function(...Object.keys(g), script)(...Object.values(g));
                   screenKeptOn: wakeLocks.some(l => !l.released) };
   const viewport = sent.map(m => { try { return JSON.parse(m); } catch (e) { return {}; } }).find(m => m.type === "viewport");
   const shortPage = el("html").classes.has("short-page");
-  console.log(JSON.stringify({ nomicAtLoad, allowTap, startSound, chimeSessions: [...chimeSessions], soundSteadyMs: sounds.map(x => x.steadyMs),
+  console.log(JSON.stringify({ nomicAtLoad, allowTap, startSound, chimeSessions: [...chimeSessions], soundSteadyMs: sounds.map(x => x.steadyMs), soundHumMs: sounds.map(x => x.humMs), humsLeftOn: hums.filter(h => h.on).length,
     endedWhileStarting, quickRestart, endedByIlan, atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
     pocket: { afterStrayTap, afterShortPush, afterSmallPush, afterDrift, afterEndGesture },
     whileAway, resumed, letGo, endedAway, silence, tooLong, replaced, stalled }));
