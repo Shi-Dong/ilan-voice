@@ -399,6 +399,7 @@ final class VoiceSession: ObservableObject {
 
     func stopConversation() {
         guard conversationActive else { return }
+        interrupt()  // ending the conversation silences Ilan at once
         conversationActive = false
         if let id = conversationID ?? target() { store.liveOnPhone.remove(id) }
         mic.stop()

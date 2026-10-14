@@ -578,51 +578,75 @@ enum PhoneWebApp {
       stopAudio();
       send({ type: "conversation_start" });
       showState();
-      haptic(1); chime(true);
+      chime(true);
       startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
     }
     function stopConversation() {
       if (!held) return;
       held = false; sending = false;
       $("talk").classList.remove("held");
+      stopAudio();  // Ilan goes quiet at once, before the Mac even hears about it
       send({ type: "conversation_stop" });
       stopMic();
       audioContext();
       showState();
-      haptic(2); chime(false);
+      chime(false);
     }
-    // ---- Feedback for starting and ending a conversation ----
-    // Haptics: iOS Safari has no navigator.vibrate, but since iOS 18 toggling
-    // a <input type="checkbox" switch> plays the system haptic tap, so a
-    // hidden one is clicked (inside the user's tap). Elsewhere, vibrate.
-    const hapticBox = (() => {
-      const label = document.createElement("label");
-      label.setAttribute("aria-hidden", "true");
-      label.style.cssText = "position:fixed;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;left:-10px;top:-10px";
-      const box = document.createElement("input");
-      box.type = "checkbox"; box.setAttribute("switch", ""); box.tabIndex = -1;
-      label.appendChild(box); document.body.appendChild(label);
-      return label;
-    })();
-    function haptic(times) {
-      if (navigator.vibrate) { navigator.vibrate(times === 2 ? [12, 60, 12] : 12); return; }
-      hapticBox.click();
-      if (times === 2) setTimeout(() => hapticBox.click(), 90);
+    // ---- Sound feedback for starting and ending a conversation ----
+    // Sounds, made on the spot (no files). Start: a bright rising C major
+    // arpeggio over a soft low thump, "here we go". End: a falling cadence
+    // that settles on a warm low C, "done". Each note is a bell: a sine plus a
+    // quieter octave above, with a quick attack and a long ring; a short echo
+    // adds space, and a compressor keeps it full and loud without clipping.
+    let chimeOut = null;
+    function chimeBus(c) {
+      if (chimeOut && chimeOut.context === c) return chimeOut;
+      const comp = c.createDynamicsCompressor();
+      comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 4;
+      comp.attack.value = 0.003; comp.release.value = 0.2;
+      const out = c.createGain(); out.gain.value = 1.4;
+      comp.connect(out); out.connect(c.destination);
+      const echo = c.createDelay(0.5), fb = c.createGain(), wet = c.createGain();
+      echo.delayTime.value = 0.13; fb.gain.value = 0.28; wet.gain.value = 0.22;
+      echo.connect(fb); fb.connect(echo); echo.connect(wet); wet.connect(comp);
+      chimeOut = { context: c, dry: comp, echo };
+      return chimeOut;
     }
-    // Sounds, made on the spot: two soft notes rising to start, falling to end.
-    function chime(rising) {
-      const c = audioContext(), t = c.currentTime + 0.01;
-      const notes = rising ? [660, 990] : [990, 590];
-      notes.forEach((f, i) => {
+    function bell(c, bus, freq, at, peak, ring) {
+      [[1, 1, "sine"], [2, 0.35, "sine"], [3, 0.12, "triangle"]].forEach(([mult, level, type]) => {
         const o = c.createOscillator(), g = c.createGain();
-        o.type = "sine"; o.frequency.value = f;
-        const at = t + i * 0.09;
-        g.gain.setValueAtTime(0, at);
-        g.gain.linearRampToValueAtTime(0.18, at + 0.015);
-        g.gain.exponentialRampToValueAtTime(0.001, at + 0.22);
-        o.connect(g); g.connect(c.destination);
-        o.start(at); o.stop(at + 0.25);
+        o.type = type; o.frequency.value = freq * mult;
+        g.gain.setValueAtTime(0.0001, at);
+        g.gain.exponentialRampToValueAtTime(peak * level, at + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, at + ring / mult);
+        o.connect(g); g.connect(bus.dry); g.connect(bus.echo);
+        o.start(at); o.stop(at + ring + 0.05);
       });
+    }
+    function thump(c, bus, freq, at, peak) {
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(freq * 1.6, at);
+      o.frequency.exponentialRampToValueAtTime(freq, at + 0.08);
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(peak, at + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
+      o.connect(g); g.connect(bus.dry);
+      o.start(at); o.stop(at + 0.4);
+    }
+    const C5 = 523.25, E5 = 659.25, G5 = 783.99, C6 = 1046.5, C4 = 261.63;
+    function chime(starting) {
+      const c = audioContext(), bus = chimeBus(c), t = c.currentTime + 0.02;
+      if (starting) {
+        thump(c, bus, 110, t, 0.5);
+        [C5, E5, G5].forEach((f, i) => bell(c, bus, f, t + i * 0.07, 0.32, 0.6));
+        bell(c, bus, C6, t + 0.21, 0.4, 1.1);  // the top note rings out
+      } else {
+        [G5, E5].forEach((f, i) => bell(c, bus, f, t + i * 0.1, 0.3, 0.5));
+        bell(c, bus, C5, t + 0.2, 0.36, 1.0);
+        bell(c, bus, C4, t + 0.2, 0.3, 1.2);   // a warm low C under the last note
+        thump(c, bus, 82, t + 0.2, 0.4);
+      }
     }
 
     function toggle(e) {
