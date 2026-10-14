@@ -72,10 +72,16 @@ func registerRecentFeatureTests() {
             expect(html.contains("background: var(--raised)") , "header lost its solid background")
             expect(html.contains("padding: calc(env(safe-area-inset-top)"), "header ignores the status bar inset")
         }
-        test("page height follows the visible screen, with a fallback") {
-            let vh = html.range(of: "height: 100vh;"), dvh = html.range(of: "height: 100dvh;")
-            expect(vh != nil && dvh != nil, "100vh/100dvh missing")
-            if let vh, let dvh { expect(vh.lowerBound < dvh.lowerBound, "100dvh must come after the 100vh fallback") }
+        test("page fills the whole screen, top to bottom (no black band at the bottom)") {
+            // Pinned to the screen's edges, like the floating header and footer,
+            // rather than sized by 100dvh, which iOS home-screen apps sometimes
+            // report a little short.
+            guard let body = html.range(of: "body { display: flex;") else { expect(false, "no body rule"); return }
+            let rule = html[body.lowerBound...].prefix { $0 != "}" }
+            expect(rule.contains("position: fixed; inset: 0;"), "body isn't pinned to the screen")
+            expect(!rule.contains("100dvh") && !rule.contains("100vh"), "body is sized by the viewport height again")
+            // Anything iOS still shows beyond the body matches the page.
+            expect(html.contains("html, body { background:"), "html doesn't share the page background")
         }
     }
 }

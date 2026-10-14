@@ -45,11 +45,13 @@ enum PhoneWebApp {
       html, body { margin: 0; height: 100%; background: var(--ink); color: var(--text);
         font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
       /* The page runs full-screen under the iPhone's status bar (clock,
-         battery). Its height follows the real visible screen (100dvh; iOS
-         home-screen apps get 100% wrong), and the header is solid and starts
-         at the very top, so the status bar sits on a crisp, even band rather
-         than on the soft background gradient. */
-      body { display: flex; flex-direction: column; overflow: hidden; height: 100vh; height: 100dvh;
+         battery). The body is pinned to all four edges of the screen rather
+         than given a height: as a home-screen app, iOS sometimes reports
+         100dvh a little short, and the strip below the body then showed as a
+         black band at the bottom. The header is solid and starts at the very
+         top, so the status bar sits on a crisp, even band rather than on the
+         soft background gradient. */
+      body { display: flex; flex-direction: column; overflow: hidden; position: fixed; inset: 0;
         background: radial-gradient(120% 60% at 50% 30%, #231918 0%, var(--ink) 60%); }
       header { padding: calc(env(safe-area-inset-top) + 12px) 20px 12px; display: flex; align-items: center; gap: 12px;
         flex: none; position: relative; z-index: 2; background: var(--raised);
@@ -137,7 +139,8 @@ enum PhoneWebApp {
         --glass-shadow: inset 0 1px 0 rgba(255,255,255,.28), inset 0 -1px 0 rgba(0,0,0,.25),
                         0 10px 30px rgba(0,0,0,.35);
       }
-      body { background:
+      /* Painted on html too, so any edge iOS reveals beyond the body matches. */
+      html, body { background:
           radial-gradient(60% 40% at 15% 18%, rgba(244,167,163,.30), transparent 70%),
           radial-gradient(55% 38% at 90% 45%, rgba(169,220,203,.20), transparent 70%),
           radial-gradient(70% 45% at 40% 95%, rgba(224,112,106,.28), transparent 70%),
@@ -219,7 +222,7 @@ enum PhoneWebApp {
       <div id="phones"></div>
       <button class="choice new" id="newPhone">This is a new iPhone</button>
     </div></div>
-    <main id="list"><div class="empty"><b>Hold to talk</b>Let go to send. Ilan answers out loud.</div></main>
+    <main id="list"><div class="empty"><b>Tap to start a conversation</b>Then just talk. Ilan answers out loud.</div></main>
     <footer>
       <div class="hint" id="hint">Tap to start a conversation</div>
       <span></span>
@@ -364,7 +367,7 @@ enum PhoneWebApp {
       const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
       list.innerHTML = "";
       if (!m.items.length) {
-        list.innerHTML = '<div class="empty"><b>Hold to talk</b>Let go to send. Ilan answers out loud.</div>';
+        list.innerHTML = '<div class="empty"><b>Tap to start a conversation</b>Then just talk. Ilan answers out loud.</div>';
       }
       for (const it of m.items) {
         if (it.role === "user" && !it.text) continue;
