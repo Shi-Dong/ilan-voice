@@ -772,23 +772,43 @@ enum PhoneWebApp {
     // that fade in, linger a moment and fade out, about 0.9 s. Start: E and
     // B, rising; end: A and E, settling lower. A short, darkened echo adds
     // space, and a gentle compressor evens it out.
-    // iOS garbles a sound that starts while its audio is still moving to
-    // another route (the loudspeaker, after the mic), and it pauses the audio
-    // context while it does. So playSound waits until the context has been
-    // playing steadily for SOUND_SETTLE_MS, then plays, and resolves once the
-    // sound and its echo are over, timed on the audio clock (which stops
-    // while iOS pauses it, so a paused sound is still waited for).
-    const SOUND_LEN = 0.9, SOUND_TAIL = 0.35, SOUND_SETTLE_MS = 120, SOUND_WAIT_MAX_MS = 1500, SOUND_POLL_MS = 20;
+    // iOS cuts off the start of a sound that plays while it is still
+    // switching the phone's audio on, or over to another route (the
+    // loudspeaker, after the mic). The audio context's clock can already be
+    // running then, while the speaker is still silent. So before playing,
+    // soundReady waits for three things: the context running, iOS saying the
+    // phone's audio is "active" (navigator.audioSession.state, where there
+    // is one), and then SOUND_SETTLE_MS of steady audio on top. Meanwhile it
+    // plays an inaudible hum, so the speaker is really running by the time
+    // the sound starts. playSound then resolves once the sound and its echo
+    // are over, timed on the audio clock (which stops while iOS pauses it,
+    // so a paused sound is still waited for).
+    const SOUND_LEN = 0.9, SOUND_TAIL = 0.35, SOUND_SETTLE_MS = 350, SOUND_WAIT_MAX_MS = 2000, SOUND_POLL_MS = 20;
     const wait = ms => new Promise(r => setTimeout(r, ms));
+    function audioActive() {
+      try { return !navigator.audioSession || !("state" in navigator.audioSession) || navigator.audioSession.state === "active"; }
+      catch (e) { return true; }
+    }
     async function soundReady(c) {
-      let steadySince = null;  // audio-clock time since when the context has been running
+      const stopHum = hum(c);
+      let steadySince = null;  // audio-clock time since when the context has been running, with iOS's audio active
       for (let waited = 0; waited < SOUND_WAIT_MAX_MS; waited += SOUND_POLL_MS) {
-        if (c.state === "closed") return;
+        if (c.state === "closed") break;
         if (c.state !== "running") { steadySince = null; c.resume().catch(() => {}); }
+        else if (!audioActive()) steadySince = null;
         else if (steadySince === null) steadySince = c.currentTime;
-        else if (c.currentTime - steadySince >= SOUND_SETTLE_MS / 1000) return;
+        else if (c.currentTime - steadySince >= SOUND_SETTLE_MS / 1000) break;
         await wait(SOUND_POLL_MS);
       }
+      stopHum();
+    }
+    // A very quiet tone (about -66 dB, far below hearing on a phone).
+    function hum(c) {
+      const n = Math.round(c.sampleRate / 10), buf = c.createBuffer(1, n, c.sampleRate), ch = buf.getChannelData(0);
+      for (let i = 0; i < ch.length; i++) ch[i] = 0.0005 * Math.sin(2 * Math.PI * 220 * i / c.sampleRate);
+      const src = c.createBufferSource();
+      src.buffer = buf; src.loop = true; src.connect(c.destination); src.start();
+      return () => { try { src.stop(); src.disconnect(); } catch (e) {} };
     }
     async function playSound(starting) {
       const c = audioContext();

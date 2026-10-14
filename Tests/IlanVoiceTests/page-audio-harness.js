@@ -26,6 +26,9 @@ let now = 0;
 // and their clock stops. A context made during the move starts paused too.
 const ROUTE_MS = 250;
 let routeSettlesAt = 0;
+// iOS reports the phone's audio "active" (navigator.audioSession.state) a
+// little after the route settles; until then the speaker may still be silent.
+const ACTIVATE_MS = 150;
 class FakeAudioContext {
   constructor() { this.state = "interrupted"; this.closed = false; this.clock = 0; this.since = null; this.sampleRate = 48000;
     this.destination = any(); this.audioWorklet = { addModule: async () => {} }; contexts.push(this); this.settle(); }
@@ -39,7 +42,8 @@ class FakeAudioContext {
   // Each start/end sound: the session it played in, and how long the context
   // had been playing steadily when it started (-1: paused, i.e. garbled on iOS).
   createOscillator() { g.oscillators = (g.oscillators || 0) + 1; chimeSessions.add(audioSessionTypes.at(-1));
-    if (sounds.at(-1)?.at !== now) sounds.push({ at: now, steadyMs: this.since === null ? -1 : now - this.since });
+    if (sounds.at(-1)?.at !== now) sounds.push({ at: now, steadyMs: this.since === null ? -1 : now - this.since,
+                                                 activeMs: now - (routeSettlesAt + ACTIVATE_MS) });
     return any(); }
   createGain() { return any(); } createDynamicsCompressor() { return any(); } createBiquadFilter() { return any(); }
   createDelay() { return any(); } createBuffer() { return { getChannelData: () => new Float32Array(1), duration: 0 }; }
@@ -64,7 +68,8 @@ const g = {
                audioSession: { set type(v) { if (audioSessionTypes.length && v !== audioSessionTypes.at(-1)) {
                                   routeSettlesAt = now + ROUTE_MS; contexts.forEach(c => c.pause()); }
                                 audioSessionTypes.push(v); },
-                              get type() { return audioSessionTypes.at(-1); } },
+                              get type() { return audioSessionTypes.at(-1); },
+                              get state() { return now >= routeSettlesAt + ACTIVATE_MS ? "active" : "inactive"; } },
                mediaDevices: { getUserMedia: async () => { g.micAsks = (g.micAsks || 0) + 1; g.micAt = now;
                  return { getTracks: () => [{ stop() { g.micStops = (g.micStops || 0) + 1; } }] }; } } },
   localStorage: { getItem: k => (k === "ilanToken" ? "t" : k === "ilanDevice" ? "d" : null), setItem() {}, removeItem() {} },
@@ -229,7 +234,7 @@ new Function(...Object.keys(g), script)(...Object.values(g));
                   screenKeptOn: wakeLocks.some(l => !l.released) };
   const viewport = sent.map(m => { try { return JSON.parse(m); } catch (e) { return {}; } }).find(m => m.type === "viewport");
   const shortPage = el("html").classes.has("short-page");
-  console.log(JSON.stringify({ nomicAtLoad, allowTap, startSound, chimeSessions: [...chimeSessions], soundSteadyMs: sounds.map(x => x.steadyMs),
+  console.log(JSON.stringify({ nomicAtLoad, allowTap, startSound, chimeSessions: [...chimeSessions], soundSteadyMs: sounds.map(x => x.steadyMs), soundActiveMs: sounds.map(x => x.activeMs),
     endedWhileStarting, quickRestart, endedByIlan, atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
     pocket: { afterStrayTap, afterShortPush, afterSmallPush, afterDrift, afterEndGesture },
     whileAway, resumed, letGo, endedAway, silence, tooLong, replaced, stalled }));
