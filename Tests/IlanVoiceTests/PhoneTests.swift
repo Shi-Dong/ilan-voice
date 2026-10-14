@@ -340,6 +340,13 @@ func registerPhoneTests() {
     }
 
     suite("Phone web page") { test in
+        test("the last message clears the floating footer: its room counts the gap under it") {
+            let html = PhoneWebApp.html
+            expect(html.contains("window.innerHeight - foot.getBoundingClientRect().top"),
+                   "the list must leave room for the footer's height plus the gap below it")
+            expect(html.contains("if (typeof sizeBars === \"function\") sizeBars();  // the footer's gap just changed"),
+                   "re-measure when the short-page spacing changes")
+        }
         test("without the microphone the hint says to tap to allow it") {
             expect(PhoneWebApp.html.contains("Tap the button to allow the microphone"))
             expect(PhoneWebApp.html.contains(#"class="icon-nomic""#), "no crossed-out mic icon")
@@ -399,6 +406,13 @@ func registerPhoneTests() {
             expectEqual(allow?["asked"] as? Int, 1)
             expectEqual(allow?["released"] as? Int, 1)
             expectEqual(allow?["nomicAfter"] as? Bool, false)
+            // The start and end sounds play on the loudspeaker: the session is "playback"
+            // for every one of them, and the mic opens only after the start sound.
+            expectEqual(json["chimeSessions"] as? [String], ["playback"])
+            let startSound = json["startSound"] as? [String: Any]
+            expectEqual(startSound?["chimed"] as? Bool, true)
+            expectEqual(startSound?["micBefore"] as? Bool, false)
+            expect((startSound?["micAfterMs"] as? Int ?? -1) >= 500, "the mic opens before the start sound has played")
             // Ilan ended it by voice: the page ends too, with the closing sound, without echoing a stop.
             let byIlan = json["endedByIlan"] as? [String: Any]
             expectEqual(byIlan?["sentStop"] as? Bool, false)

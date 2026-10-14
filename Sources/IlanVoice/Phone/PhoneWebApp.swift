@@ -494,8 +494,10 @@ enum PhoneWebApp {
     // is in "play and record" mode, which is what using the microphone
     // switches it to. Replies play from their own audio context; the
     // microphone gets a separate one that only exists during a conversation.
-    // When a conversation ends, both are closed and the session goes back to
-    // "auto" (see releaseAudio).
+    // The start and end sounds play with the session set to "playback" (the
+    // loudspeaker), so the mic opens only after the start sound and is
+    // closed before the end sound. When a conversation ends, both contexts
+    // are closed and the session goes back to "auto" (see releaseAudio).
     function setAudioSession(type) {
       try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (e) {}
     }
@@ -517,8 +519,10 @@ enum PhoneWebApp {
     }
 
     // After a conversation (and its end chime): let go of the speaker too.
+    let ending = false;  // the end sound is still ringing
     function releaseAudio(afterMs) {
       setTimeout(() => {
+        ending = false;
         if (held) return;  // a new conversation started meanwhile
         stopAudio();
         if (ctx) { ctx.onstatechange = null; ctx.close().catch(() => {}); ctx = null; }
@@ -537,8 +541,9 @@ enum PhoneWebApp {
       if (!ctx || ctx.state === "closed") {
         ctx = new (window.AudioContext || window.webkitAudioContext)();
         // iOS pauses it when the mic switches routes; resume it, but only
-        // during a conversation (otherwise a paused context is what we want).
-        ctx.onstatechange = () => { if (held && ctx && ctx.state !== "running") ctx.resume().catch(() => {}); };
+        // during a conversation and its end sound (otherwise a paused context
+        // is what we want).
+        ctx.onstatechange = () => { if ((held || ending) && ctx && ctx.state !== "running") ctx.resume().catch(() => {}); };
       }
       if (ctx.state !== "running") ctx.resume().catch(() => {});
       return ctx;
@@ -717,6 +722,7 @@ enum PhoneWebApp {
       if (held || !online) return;
       held = true; sending = true;
       document.body.classList.add("conversing");
+      setAudioSession("playback");  // the start sound plays on the loudspeaker
       audioContext();  // unlocks reply playback; iOS only allows that inside a touch
       $("talk").classList.add("held");
       stopAudio();
@@ -724,8 +730,16 @@ enum PhoneWebApp {
       keepScreenOn();
       showState();
       chime(true);
-      startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
+      // Opening the mic moves the sound to the earpiece, so it waits until
+      // the start sound has played.
+      const conversation = ++conversations;
+      setTimeout(() => {
+        if (conversation !== conversations || !held) return;  // ended meanwhile
+        startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
+      }, START_SOUND_MS);
     }
+    const START_SOUND_MS = 700;
+    let conversations = 0;
     // byIlan: Ilan ended it (its end_conversation tool, after its goodbye),
     // so the Mac already knows; everything else is the same, closing sound too.
     function stopConversation(byIlan) {
@@ -738,6 +752,8 @@ enum PhoneWebApp {
       if (!byIlan) send({ type: "conversation_stop" });
       letScreenSleep();
       stopMic();
+      ending = true;
+      setAudioSession("playback");  // with the mic closed, the end sound plays on the loudspeaker
       audioContext();
       showState();
       chime(false);
@@ -755,7 +771,7 @@ enum PhoneWebApp {
       const comp = c.createDynamicsCompressor();
       comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 4;
       comp.attack.value = 0.003; comp.release.value = 0.2;
-      const out = c.createGain(); out.gain.value = 1.4;
+      const out = c.createGain(); out.gain.value = 0.9;  // on the loudspeaker 1.4 was too loud
       comp.connect(out); out.connect(c.destination);
       const echo = c.createDelay(0.5), fb = c.createGain(), wet = c.createGain();
       echo.delayTime.value = 0.13; fb.gain.value = 0.28; wet.gain.value = 0.22;
@@ -882,11 +898,16 @@ enum PhoneWebApp {
       else retryNow();
     });
     // The header and footer float over the conversation (Liquid Glass); keep
-    // the list's padding equal to their real heights.
+    // the list's padding equal to the room they take. For the footer that is
+    // its height plus the gap under it (it floats above the bottom edge), so
+    // the last message clears its top edge when scrolled to the bottom.
     const sizeBars = () => {
       document.documentElement.style.setProperty("--head-h", document.querySelector("header").offsetHeight + "px");
-      document.documentElement.style.setProperty("--foot-h", document.querySelector("footer").offsetHeight + "px");
+      const foot = document.querySelector("footer");
+      const fromBottom = Math.round(window.innerHeight - foot.getBoundingClientRect().top);
+      document.documentElement.style.setProperty("--foot-h", Math.max(foot.offsetHeight, fromBottom) + "px");
     };
+    window.addEventListener("resize", sizeBars);
     // Some iOS versions give a home-screen web app a page a little shorter
     // than the screen (by about the status bar's height), leaving a black
     // band at the bottom that is outside the page (iOS doesn't draw the page
@@ -901,6 +922,7 @@ enum PhoneWebApp {
       const gap = standalone && upright ? Math.max(0, Math.round(screenH - window.innerHeight)) : 0;
       // Short by more than a status bar's slack: the page ends above the home bar.
       document.documentElement.classList.toggle("short-page", gap > 30);
+      if (typeof sizeBars === "function") sizeBars();  // the footer's gap just changed
       if (!report) return;
       const probe = document.createElement("div");
       probe.style.cssText = "position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)";
