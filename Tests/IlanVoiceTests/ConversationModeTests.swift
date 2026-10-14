@@ -69,102 +69,67 @@ func registerConversationModeTests() {
     }
 }
 
-/// Conversation turns are transcribed once the conversation ends.
+/// Conversation turns are transcribed as they happen, like push-to-talk turns.
 @MainActor
 func registerConversationTranscriptTests() {
-    func blocking(_ body: @escaping () async -> Void) {
-        var done = false
-        Task { await body(); done = true }
-        while !done { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005)) }
+    func makeSession() -> (VoiceSession, ConversationStore, UUID) {
+        let store = ConversationStore()
+        let conv = store.newConversation()
+        let speaker = FakeSpeaker()
+        speaker.isPlaying = false
+        let session = VoiceSession(store: store, mcp: MCPManager(), input: FakeMic(), output: speaker,
+                                   isRemote: true, target: { conv.id })
+        session.conversationID = conv.id
+        return (session, store, conv.id)
+    }
+    /// One spoken turn, as OpenAI reports it.
+    func speak(_ session: VoiceSession, item: String) {
+        session.handle(["type": "input_audio_buffer.speech_started"])
+        expect(waitFor(3) { session.turnIsSpeech }, "voice never counted")
+        session.handle(["type": "input_audio_buffer.speech_stopped"])
+        session.handle(["type": "input_audio_buffer.committed", "item_id": item])
     }
     suite("Conversation transcripts") { test in
-        test("speech to text sends the recording, the model and the dictionary prompt") {
-            let wav = PCM.wav(Data(count: 4800))
-            let r = SpeechToText.request(wav: wav, model: "gpt-transcribe", prompt: "Ilan, MCP", apiKey: "sk-test")
-            expectEqual(r.url?.path, "/v1/audio/transcriptions")
-            expectEqual(r.value(forHTTPHeaderField: "Authorization"), "Bearer sk-test")
-            let body = String(decoding: r.httpBody ?? Data(), as: UTF8.self)
-            expect(body.contains("name=\"model\"\r\n\r\ngpt-transcribe"))
-            expect(body.contains("name=\"prompt\"\r\n\r\nIlan, MCP"))
-            expect(body.contains("filename=\"turn.wav\""))
-            expect(r.httpBody!.count > wav.count)
-        }
-        test("speech to text reads the text, retries a server error, and gives up on a bad key") {
-            blocking {
-                var calls = 0
-                let ok = await SpeechToText.transcribe(wav: Data(), model: "m", prompt: nil, apiKey: "k",
-                    send: { req in
-                        calls += 1
-                        let status = calls == 1 ? 500 : 200
-                        return (Data(#"{"text":" hello there "}"#.utf8),
-                                HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
-                    }, sleep: { _ in })
-                expectEqual(ok, "hello there")
-                expectEqual(calls, 2)
-                let bad = await SpeechToText.transcribe(wav: Data(), model: "m", prompt: nil, apiKey: "k",
-                    send: { req in (Data(), HTTPURLResponse(url: req.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!) },
-                    sleep: { _ in })
-                expect(bad == nil)
-            }
-        }
-        test("each turn is transcribed, then repaired with what came before and Ilan's reply") {
-            blocking {
-                let messages = [
-                    Message(id: "u1", role: .user, text: ""),
-                    Message(id: "a1", role: .assistant, text: "Sure, which cluster?"),
-                    Message(id: "u2", role: .user, text: ""),
-                    Message(id: "t2", role: .tool, text: "pods: 3"),
-                    Message(id: "a2", role: .assistant, text: "Three pods are running."),
-                ]
-                var seen: [(raw: String, history: [String], tools: [String], reply: String)] = []
-                let results = await ConversationTranscriber.finish(
-                    ["u1", "u2"], messages: messages,
-                    audio: { _ in Data([1]) },
-                    transcribe: { _, _ in "raw" },
-                    fix: { raw, history, tools, reply in
-                        seen.append((raw, history.map(\.text), tools.map(\.text), reply))
-                        return "fixed \(seen.count)"
-                    })
-                expectEqual(results["u1"], .init(raw: "raw", text: "fixed 1"))
-                expectEqual(results["u2"], .init(raw: "raw", text: "fixed 2"))
-                expectEqual(seen[0].reply, "Sure, which cluster?")
-                expectEqual(seen[1].tools, ["pods: 3"])
-                expectEqual(seen[1].reply, "Three pods are running.")
-                // The second turn sees the first one already repaired.
-                expectEqual(seen[1].history, ["fixed 1", "Sure, which cluster?"])
-            }
-        }
-        test("a turn with no words, or no recording, says so instead of staying grey forever") {
-            blocking {
-                let messages = [Message(id: "u1", role: .user, text: ""), Message(id: "u2", role: .user, text: "")]
-                let results = await ConversationTranscriber.finish(
-                    ["u1", "u2"], messages: messages,
-                    audio: { $0.id == "u1" ? nil : Data([1]) },
-                    transcribe: { _, _ in "" },
-                    fix: { raw, _, _, _ in raw })
-                expectEqual(results["u1"]?.text, "(no words heard)")
-                expectEqual(results["u2"]?.text, "(no words heard)")
-            }
-        }
-        test("in a conversation, turns are saved with their own recording and wait for transcription") {
-            let store = ConversationStore()
-            let conv = store.newConversation()
-            let speaker = FakeSpeaker(), mic = FakeMic()
-            speaker.isPlaying = false
-            let session = VoiceSession(store: store, mcp: MCPManager(), input: mic, output: speaker,
-                                       isRemote: true, target: { conv.id })
-            session.conversationID = conv.id
+        test("each turn shows its transcript as soon as OpenAI has it, mid-conversation") {
+            let (session, store, convID) = makeSession()
             session.startConversation()
-            session.handle(["type": "input_audio_buffer.speech_started"])
-            expect(waitFor(3) { session.turnIsSpeech }, "voice never counted")
-            session.handle(["type": "input_audio_buffer.speech_stopped"])
-            session.handle(["type": "input_audio_buffer.committed", "item_id": "u1"])
-            let m = store.message(conv.id, "u1")
-            expect(m?.text.isEmpty == true)
-            expect(m?.awaitingCorrection == true)
-            expect(m?.audioFile != nil)
-            // (a loaded CI machine delivers fewer fake chunks, so only require some audio)
-            expect((m?.audioSeconds ?? 0) > 0.1, "\(m?.audioSeconds ?? 0) s")
+            speak(session, item: "u1")
+            let m = store.message(convID, "u1")
+            expect(m?.audioFile != nil && (m?.audioSeconds ?? 0) > 0.1, "turn recording not saved")
+            session.handle(["type": "conversation.item.input_audio_transcription.delta", "item_id": "u1", "delta": "What is "])
+            expectEqual(store.message(convID, "u1")?.text, "What is ")
+            session.handle(["type": "conversation.item.input_audio_transcription.completed", "item_id": "u1",
+                            "transcript": "What is the weather?"])
+            expectEqual(store.message(convID, "u1")?.text, "What is the weather?")
+            expect(session.conversationActive)  // no need to end the conversation first
+            session.stopConversation()
+        }
+        test("Luna's repair runs once Ilan has answered the turn, still mid-conversation") {
+            let (session, store, convID) = makeSession()
+            session.startConversation()
+            speak(session, item: "u1")
+            session.handle(["type": "conversation.item.input_audio_transcription.completed", "item_id": "u1",
+                            "transcript": "What is the weather?"])
+            expect(store.message(convID, "u1")?.awaitingCorrection == true)  // grey: Ilan is still answering
+            session.handle(["type": "response.created", "response": ["id": "r1"]])
+            session.handle(["type": "response.output_item.added", "item": ["id": "a1", "type": "message"]])
+            session.handle(["type": "response.output_audio_transcript.delta", "item_id": "a1", "delta": "Sunny."])
+            session.handle(["type": "response.output_item.done", "item": ["id": "a1", "type": "message"]])
+            session.handle(["type": "response.done", "response": ["id": "r1", "output": []]])
+            // No API key in tests: Luna gives nothing back, and the turn turns final as heard.
+            expect(waitFor(2) { store.message(convID, "u1")?.awaitingCorrection == nil }, "never final")
+            expectEqual(store.message(convID, "u1")?.text, "What is the weather?")
+            expect(session.conversationActive)
+            session.stopConversation()
+        }
+        test("a new turn finalises the one before, as in push to talk") {
+            let (session, store, convID) = makeSession()
+            session.startConversation()
+            speak(session, item: "u1")
+            session.handle(["type": "conversation.item.input_audio_transcription.completed", "item_id": "u1",
+                            "transcript": "First."])
+            speak(session, item: "u2")
+            expect(store.message(convID, "u1")?.awaitingCorrection == nil)
             session.stopConversation()
         }
     }
@@ -245,19 +210,6 @@ func registerConversationEdgeTests() {
             waitFor(0.6) { false }
             expect(session.conversationActive)
             session.stopConversation()
-        }
-        test("ending while Ilan is still answering transcribes right away") {
-            let (session, _, _, store, convID) = makeSession()
-            session.startConversation()
-            session.handle(["type": "input_audio_buffer.speech_started"])
-            expect(waitFor(3) { session.turnIsSpeech }, "voice never counted")
-            session.handle(["type": "input_audio_buffer.speech_stopped"])
-            session.handle(["type": "input_audio_buffer.committed", "item_id": "u1"])
-            session.handle(["type": "response.created", "response": ["id": "r1"]])
-            session.stopConversation()  // Ilan is still answering
-            // No API key in tests: transcription gives nothing, and the turn says so.
-            expect(waitFor(1) { store.message(convID, "u1")?.awaitingCorrection == nil }, "waited for Ilan")
-            expectEqual(store.message(convID, "u1")?.text, "(no words heard)")
         }
     }
 }
