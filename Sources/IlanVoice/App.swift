@@ -114,7 +114,6 @@ struct IlanVoiceApp: App {
     var body: some Scene {
         Window("Ilan Voice", id: "main") {
             MainView(store: model.store, session: model.session, ptt: model.ptt, mcp: model.mcp, updater: model.updater)
-                .frame(minWidth: 760, minHeight: 540)
                 .task { model.start() }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     model.store.flush()
@@ -125,7 +124,7 @@ struct IlanVoiceApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
         // The window can't be narrowed past its content's minimum width, which
-        // includes the chat header's full title and status line.
+        // includes the chat header in full (see MainView.minimumWidth).
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .appInfo) {
