@@ -578,7 +578,7 @@ enum PhoneWebApp {
       stopAudio();
       send({ type: "conversation_start" });
       showState();
-      if (navigator.vibrate) navigator.vibrate(10);
+      haptic(1); chime(true);
       startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
     }
     function stopConversation() {
@@ -589,8 +589,42 @@ enum PhoneWebApp {
       stopMic();
       audioContext();
       showState();
-      if (navigator.vibrate) navigator.vibrate(8);
+      haptic(2); chime(false);
     }
+    // ---- Feedback for starting and ending a conversation ----
+    // Haptics: iOS Safari has no navigator.vibrate, but since iOS 18 toggling
+    // a <input type="checkbox" switch> plays the system haptic tap, so a
+    // hidden one is clicked (inside the user's tap). Elsewhere, vibrate.
+    const hapticBox = (() => {
+      const label = document.createElement("label");
+      label.setAttribute("aria-hidden", "true");
+      label.style.cssText = "position:fixed;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;left:-10px;top:-10px";
+      const box = document.createElement("input");
+      box.type = "checkbox"; box.setAttribute("switch", ""); box.tabIndex = -1;
+      label.appendChild(box); document.body.appendChild(label);
+      return label;
+    })();
+    function haptic(times) {
+      if (navigator.vibrate) { navigator.vibrate(times === 2 ? [12, 60, 12] : 12); return; }
+      hapticBox.click();
+      if (times === 2) setTimeout(() => hapticBox.click(), 90);
+    }
+    // Sounds, made on the spot: two soft notes rising to start, falling to end.
+    function chime(rising) {
+      const c = audioContext(), t = c.currentTime + 0.01;
+      const notes = rising ? [660, 990] : [990, 590];
+      notes.forEach((f, i) => {
+        const o = c.createOscillator(), g = c.createGain();
+        o.type = "sine"; o.frequency.value = f;
+        const at = t + i * 0.09;
+        g.gain.setValueAtTime(0, at);
+        g.gain.linearRampToValueAtTime(0.18, at + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.001, at + 0.22);
+        o.connect(g); g.connect(c.destination);
+        o.start(at); o.stop(at + 0.25);
+      });
+    }
+
     function toggle(e) {
       e.preventDefault();
       if (held) stopConversation(); else startConversation();
