@@ -368,6 +368,17 @@ final class VoiceSession: ObservableObject {
     /// noise turns had 1 and 6; a quick "Yeah." had 7 (ignored too: a
     /// backchannel shouldn't cut Ilan off).
     static let minTurnVoicedFrames = 10
+    /// While Ilan is talking on the phone, the mic also hears Ilan: its own
+    /// first words leak back in short bursts before iOS's echo cancellation
+    /// catches up (two "Let me." turns had 13 and 15 voiced frames over ~5 s).
+    /// So a turn that starts while Ilan is talking needs 0.8 s of voice to
+    /// interrupt Ilan or be sent at all; shorter speech is dropped. The user's
+    /// real speech has about 30 voiced frames a second, so a real interruption
+    /// gets through after roughly a second of talking.
+    static let minBargeInVoicedFrames = 40
+    /// Ilan was talking when this turn started (see `minBargeInVoicedFrames`).
+    private var turnOverIlan = false
+    private var turnVoiceNeeded: Int { turnOverIlan ? Self.minBargeInVoicedFrames : Self.minTurnVoicedFrames }
     private var turnVoicedFrames = 0
     /// How far into `conversationAudio` the turn's 20 ms frames have been counted.
     /// The phone sends tiny pieces (64 samples, under 3 ms), far shorter than a
@@ -385,7 +396,7 @@ final class VoiceSession: ObservableObject {
             turnVoicedFrames += PCM.voicedFrames(conversationAudio[start..<start + frameBytes])
             turnScanned += frameBytes
         }
-        guard turnVoicedFrames >= Self.minTurnVoicedFrames else { return }
+        guard turnVoicedFrames >= turnVoiceNeeded else { return }
         turnIsSpeech = true
         interrupt()  // speaking over Ilan stops its reply
         phase = .recording
@@ -879,6 +890,7 @@ final class VoiceSession: ObservableObject {
             inTurn = true
             turnVoicedFrames = 0
             turnScanned = 0  // counts from the moment just before, kept in conversationAudio
+            turnOverIlan = speaker.isPlaying || phase == .speaking
             turnIsSpeech = false
             countTurnVoice()
 
@@ -893,7 +905,7 @@ final class VoiceSession: ObservableObject {
             var msg = Message(id: itemID, role: .user, text: "", pending: true)
             if conversationActive {
                 let confirmed = turnIsSpeech
-                let speech = confirmed || PCM.voicedFrames(conversationAudio) >= Self.minTurnVoicedFrames
+                let speech = confirmed || PCM.voicedFrames(conversationAudio) >= turnVoiceNeeded
                 turnIsSpeech = false
                 guard speech else {
                     // Noise: forget the turn here and at OpenAI; Ilan carries on.

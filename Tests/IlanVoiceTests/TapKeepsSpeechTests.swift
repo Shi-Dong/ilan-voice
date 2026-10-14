@@ -22,6 +22,11 @@ final class FakeMic: VoiceInput {
     var running = false
     /// False: the mic hears only quiet room noise.
     var loud = true
+    /// 20 ms of audio delivered so far (each tick is one voiced frame when loud).
+    var ticks = 0
+    /// 20 ms frames delivered per tick: above 1 the mic runs faster than real
+    /// time, so tests of long speech (0.8 s over Ilan) stay quick.
+    var framesPerTick = 1
     var starts = 0
     /// How long the permission check takes (the first-run prompt is slow).
     var permissionDelay = 0.0
@@ -38,8 +43,10 @@ final class FakeMic: VoiceInput {
     private func tick() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
             guard let self, self.running else { return }
+            self.ticks += 1
             // 20 ms of audio in phone-sized pieces (the iPhone page sends 64 samples at a time).
-            let audio = self.loud ? Self.speech : Data(count: Self.speech.count)
+            let frame = self.loud ? Self.speech : Data(count: Self.speech.count)
+            let audio = Data((0..<self.framesPerTick).flatMap { _ in frame })
             stride(from: 0, to: audio.count, by: Self.pieceBytes).forEach { offset in
                 self.onChunk?(audio.subdata(in: offset..<min(offset + Self.pieceBytes, audio.count)), self.loud ? 0.3 : 0)
             }
@@ -131,7 +138,7 @@ func registerTapKeepsSpeechTests() {
             let (session, speaker, _) = makeSession()
             let (sub, seen) = outcomes(session)
             doubleTap(session)
-            pause(window + 0.2)
+            pause(window + 0.1)
             expectEqual(speaker.stops, 0)
             expect(speaker.isPlaying)
             expectEqual(seen(), [])
@@ -189,7 +196,7 @@ func registerTapKeepsSpeechTests() {
             expectEqual(speaker.stops, 0)  // still undecided
             expect(waitFor(1) { session.phase == .recording })
             expectEqual(speaker.stops, 1)
-            pause(window)  // the first tap's stop was called off: nothing ends this recording
+            pause(0.15)  // now well past the first tap's window: its stop was called off
             expectEqual(session.phase, .recording)
             expectEqual(seen(), [])
             session.cancelRecording()
@@ -204,7 +211,7 @@ func registerTapKeepsSpeechTests() {
             pause(0.2)
             expectEqual(speaker.stops, 0)  // the second tap waits too
             expect(waitFor(2) { speaker.stops == 1 }, "never stopped")
-            pause(0.2)
+            pause(0.1)
             expectEqual(speaker.stops, 1)
             expectEqual(seen(), [.stoppedSpeech])
             sub.cancel()
@@ -217,7 +224,7 @@ func registerTapKeepsSpeechTests() {
             pause(0.12)  // ...and is still down when the first tap's wait would end
             session.releaseToTalk()
             session.keepIlanGoing()
-            pause(window + 0.15)
+            pause(window + 0.05)
             expectEqual(speaker.stops, 0)
         }
         test("a third tap after a double tap stops Ilan") {
@@ -253,7 +260,7 @@ func registerTapKeepsSpeechTests() {
             let (session, speaker, _) = makeSession()
             usingTool(session, speaker, seconds: 0.1)
             doubleTap(session)
-            pause(window + 0.2)
+            pause(window + 0.1)
             expectEqual(session.phase, .thinking)  // the tool's result went back
             nextReplyStarts(session)
             expectEqual(speaker.enqueued, 1)
@@ -263,7 +270,7 @@ func registerTapKeepsSpeechTests() {
             let (session, speaker, _) = makeSession()
             usingTool(session, speaker, seconds: 0.45)
             tap(session)
-            pause(window + 0.2)  // past the tool's end too
+            pause(window + 0.1)  // past the tool's end too
             expectEqual(session.phase, .offline)  // stopped; no API key in tests, so offline
         }
         test("a tap after a tool result went back cancels the reply asked for, once it starts") {
@@ -335,7 +342,7 @@ func registerTapKeepsSpeechTests() {
             pause(0.1)
             press(session)  // held: talking
             expect(waitFor(1.5) { session.phase == .recording }, "never went live")
-            pause(0.3)  // both checks are back
+            pause(0.15)  // both checks are back
             expectEqual(mic.starts, 1)
             session.cancelRecording()
         }
