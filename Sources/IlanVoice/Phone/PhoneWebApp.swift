@@ -127,6 +127,9 @@ enum PhoneWebApp {
       #halo { position: absolute; left: 50%; top: 50%; width: 240px; height: 240px; margin: -120px 0 0 -120px;
         pointer-events: none; z-index: 0; }
       #talk.held svg { color: #2A0B0B; }
+      /* The Mac is out of reach mid-conversation (see "Connection" in the script). */
+      body.away #talk.held { filter: saturate(.3) brightness(.8); }
+      body.away #halo { opacity: .35; }
       /* Swiped up far enough: letting go now cancels. */
       #talk.held.cancel { transform: scale(0.92); background: radial-gradient(circle at 35% 30%, #d9dedd, #8b9593 60%, #5f6866);
         box-shadow: 0 10px 30px rgba(0,0,0,.35); }
@@ -290,43 +293,91 @@ enum PhoneWebApp {
       device = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, "0")).join("");
       localStorage.setItem("ilanDevice", device);
     }
-    let replaced = false;
+    let replaced = false, paired = true;
 
     let ws = null, ctx = null, playHead = 0, sources = [];
     let micStream = null, micNode = null, micSource = null, held = false, sending = false, phase = "Offline";
 
     // ---- Connection ----
+    // The connection to the Mac comes and goes with the phone's network (a
+    // tunnel, a Wi-Fi hand-off). A conversation survives that: the page keeps
+    // the microphone and the screen, shows "Reconnecting…", and carries on
+    // once the Mac is back. The Mac keeps the conversation for a while on its
+    // side too (a little less than AWAY_LIMIT_MS: the Mac decides first) and
+    // says in hello_ok whether it still has it. What was said while the
+    // connection was down is lost, and a reply that was playing is cut.
+    // A dead connection shows as silence, not a close (iOS and Tailscale can
+    // take minutes to notice): the Mac pings every 2 s, and a connection with
+    // nothing heard for SILENCE_MS is given up on. Retries come quickly at
+    // first, then every 2 s, and at once when iOS says the network is back.
+    const RETRY_MS = [250, 500, 1000, 2000], CONNECT_TIMEOUT_MS = 5000, SILENCE_MS = 6000, AWAY_LIMIT_MS = 150000;
+    let online = false, everOnline = false, attempt = 0, lastHeard = 0, retry = null, awaySince = 0;
     function connect() {
+      if (ws) return;
+      clearTimeout(retry); retry = null;
       if (!token) { banner("Open the link shown in Ilan Voice on your Mac (Settings → General → iPhone)."); return; }
-      ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-      ws.binaryType = "arraybuffer";
-      ws.onopen = () => ws.send(JSON.stringify({ type: "hello", token, device }));
-      ws.onmessage = e => typeof e.data === "string" ? onJSON(JSON.parse(e.data)) : playPCM(e.data);
-      ws.onclose = () => {
-        ws = null;
-        // The Mac ends a conversation when the page goes away; end it here too,
-        // so the mic closes and the button doesn't claim one is still on.
-        if (held) {
-          held = false; sending = false;
-          document.body.classList.remove("conversing");
-          $("talk").classList.remove("held");
-          stopMic();
-          letScreenSleep();
-          releaseAudio(0);
-          banner("Connection lost — the conversation ended. Tap the button to start again.");
-        }
-        if (replaced) { setStatus("Open in another window", ""); return; }
-        setStatus("Reconnecting…", ""); setTimeout(connect, 1500);
-      };
+      const socket = ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+      socket.binaryType = "arraybuffer";
+      socket.onopen = () => { lastHeard = Date.now(); socket.send(JSON.stringify({ type: "hello", token, device, conversing: held })); };
+      socket.onmessage = e => { lastHeard = Date.now(); if (typeof e.data === "string") onJSON(JSON.parse(e.data)); else playPCM(e.data); };
+      socket.onclose = () => dropped(socket);
+      // iOS can take ages to give up on a connection that isn't going anywhere.
+      setTimeout(() => { if (socket === ws && socket.readyState !== 1) abandon(socket); }, CONNECT_TIMEOUT_MS);
     }
+    // Gives up on a connection (dead, or never opening): nothing more is heard
+    // from it, not even a late "replaced", and a new one is tried.
+    function abandon(socket) {
+      socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
+      try { socket.close(); } catch (e) {}
+      dropped(socket);
+    }
+    function dropped(socket) {
+      if (socket !== ws) return;  // a connection already given up on, closing late
+      ws = null; online = false;
+      if (replaced || !paired) {  // another window took over, or the link is no longer paired: no retrying
+        if (held) stopConversation(true);
+        showState();
+        return;
+      }
+      if (held && !awaySince) awaySince = Date.now();
+      showState();  // "Reconnecting…"; a conversation waits
+      retry = setTimeout(connect, RETRY_MS[Math.min(attempt++, RETRY_MS.length - 1)]);
+    }
+    // Once a second: a conversation whose Mac has been out of reach for too
+    // long is let go (the Mac has let it go by now), and a connection gone
+    // silent is given up on.
+    function checkConnection() {
+      if (held && awaySince && Date.now() - awaySince > AWAY_LIMIT_MS) {
+        stopConversation(true);
+        banner("Connection lost — the conversation ended. Tap the button to start again.");
+      }
+      if (ws && ws.readyState === 1 && Date.now() - lastHeard > SILENCE_MS) abandon(ws);
+    }
+    setInterval(checkConnection, 1000);
+    // The network or the page is back: don't wait for the next retry.
+    function retryNow() {
+      if (replaced || !paired) return;
+      attempt = 0;
+      if (ws && ws.readyState === 1 && Date.now() - lastHeard <= SILENCE_MS) return;  // still fine
+      if (ws) abandon(ws); else connect();
+    }
+    window.addEventListener("online", retryNow);
     function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 
     function onJSON(m) {
-      if (m.type === "hello_ok") { replaced = false; banner(""); measureViewport(true); }
+      if (m.type === "hello_ok") {
+        online = everOnline = true; attempt = 0; awaySince = 0; replaced = false;
+        banner(""); measureViewport(true);
+        // Back mid-conversation: the Mac kept the conversation (carry on), or
+        // let it go meanwhile (too long away, or Ilan ended it): then end here too.
+        if (held && !m.conversing) stopConversation(true);
+        showState();
+      }
+      else if (m.type === "ping") { send({ type: "pong" }); }
       else if (m.type === "choose_phone") { choosePhone(m.phones); }
-      else if (m.type === "replaced") { replaced = true;
+      else if (m.type === "replaced") { replaced = true;  // the Mac closes this connection next (see dropped)
         banner("Ilan was opened in another window on this phone. Tap here to use it in this one."); }
-      else if (m.type === "auth_failed") { localStorage.removeItem("ilanToken");
+      else if (m.type === "auth_failed") { paired = false; localStorage.removeItem("ilanToken");
         banner("This link is no longer paired. Open the current link from Ilan Voice on your Mac."); }
       else if (m.type === "state") {
         lastState = m;
@@ -374,6 +425,13 @@ enum PhoneWebApp {
     function showState() {
       // Without the microphone the button shows a crossed-out mic: a tap only asks for it.
       $("talk").classList.toggle("nomic", micPermission !== "granted" && !held);
+      // Mid-conversation without the Mac: the mic stays on (dimmed) and the conversation waits.
+      document.body.classList.toggle("away", held && !online);
+      if (!online) {
+        setStatus(replaced ? "Open in another window" : !paired ? "Not paired" : everOnline ? "Reconnecting…" : "Connecting…", "");
+        if (held) $("hint").textContent = "Reconnecting… · push the button up to end";
+        return;
+      }
       const m = lastState;
       if (!m) return;
       phase = m.phase;
@@ -553,7 +611,7 @@ enum PhoneWebApp {
           out[i] = v * 32767; sum += v * v;
         }
         carry = input.slice(Math.floor(n * ratio));
-        if (sending && ws && ws.readyState === 1) ws.send(out.buffer);
+        if (sending && online && ws && ws.readyState === 1) ws.send(out.buffer);
       };
       micSource.connect(micNode);
       // Live spectrum for the voice halo.
@@ -661,7 +719,7 @@ enum PhoneWebApp {
     // decides from what you say when you have finished (semantic turn
     // detection) and answers, and speaking over Ilan stops its reply.
     function startConversation() {
-      if (held || !ws || ws.readyState !== 1) return;
+      if (held || !online) return;
       held = true; sending = true;
       document.body.classList.add("conversing");
       setAudioSession("playback");  // the start sound plays on the loudspeaker
@@ -686,7 +744,7 @@ enum PhoneWebApp {
     // so the Mac already knows; everything else is the same, closing sound too.
     function stopConversation(byIlan) {
       if (!held) return;
-      held = false; sending = false;
+      held = false; sending = false; awaySince = 0;
       document.body.classList.remove("conversing");
       $("talk").classList.remove("held");
       if (endGesture) resetEndGesture();
@@ -832,12 +890,12 @@ enum PhoneWebApp {
       b.classList.remove("spin"); void b.offsetWidth; b.classList.add("spin");
       setTimeout(() => b.classList.remove("spin"), 650);
       if (held) return;
-      if (ws && ws.readyState === 1) send({ type: "reconnect" });
-      else { replaced = false; if (!ws) connect(); }
+      if (online) send({ type: "reconnect" });
+      else { replaced = false; retryNow(); }
     });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) { if (held) stopConversation(); }
-      else if (!ws && !replaced) connect();
+      else retryNow();
     });
     // The header and footer float over the conversation (Liquid Glass); keep
     // the list's padding equal to the room they take. For the footer that is

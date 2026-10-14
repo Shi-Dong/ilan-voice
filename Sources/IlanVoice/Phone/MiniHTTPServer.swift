@@ -129,6 +129,10 @@ final class WebSocketPeer {
         finish(cancel: false)
     }
 
+    /// Drops the connection at once, with no close frame: for a peer that has
+    /// gone silent (a frame would go nowhere).
+    func drop() { finish() }
+
     private func finish(cancel: Bool = true) {
         guard isOpen else { return }
         isOpen = false

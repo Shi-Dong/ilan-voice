@@ -421,6 +421,7 @@ final class VoiceSession: ObservableObject {
         errorMessage = nil
         interrupt()
         conversationActive = true
+        remoteAway = false
         if let id = target() { store.liveOnPhone.insert(id) }
         lastConversationAudio = Date()
         watchConversationAudio()
@@ -445,6 +446,7 @@ final class VoiceSession: ObservableObject {
         guard conversationActive else { return }
         interrupt()  // ending the conversation silences Ilan at once
         conversationActive = false
+        remoteAway = false
         if let id = conversationID ?? target() { store.liveOnPhone.remove(id) }
         mic.stop()
         inputLevel = 0
@@ -457,21 +459,49 @@ final class VoiceSession: ObservableObject {
     }
 
     /// A conversation streams audio all the time; none for this long means the
-    /// phone is gone without saying so (no network, switched off).
-    /// (Tests shorten it.)
-    var conversationSilenceLimit: TimeInterval = 6
+    /// phone's microphone is gone without a word (iOS took it for a call, say).
+    /// A phone whose connection dropped is another matter: PhoneClient notices
+    /// that first (its heartbeat gives up sooner than this), and the
+    /// conversation waits for the phone instead (remoteDropped). (Tests shorten it.)
+    static let defaultConversationSilenceLimit: TimeInterval = 8
+    var conversationSilenceLimit = defaultConversationSilenceLimit
     private var lastConversationAudio = Date()
+    /// The phone's connection dropped mid-conversation; it may be back soon.
+    private var remoteAway = false
 
     private func watchConversationAudio() {
         DispatchQueue.main.asyncAfter(deadline: .now() + min(1, conversationSilenceLimit / 4)) { [weak self] in
             guard let self, self.conversationActive else { return }
-            if Date().timeIntervalSince(self.lastConversationAudio) > self.conversationSilenceLimit {
+            if !self.remoteAway, Date().timeIntervalSince(self.lastConversationAudio) > self.conversationSilenceLimit {
                 self.errorMessage = "Lost the iPhone's microphone, so the conversation ended."
                 self.stopConversation()
             } else {
                 self.watchConversationAudio()
             }
         }
+    }
+
+    /// The phone's connection dropped mid-conversation (PhoneClient waits for
+    /// it to come back). Its silence doesn't count meanwhile. A reply that is
+    /// playing is cut: the phone can't hear the rest of it. A reply still
+    /// being thought about (or a tool call) is left alone: it may be ready
+    /// once the phone is back; if its audio comes first, PhoneClient cuts it.
+    func remoteDropped() {
+        guard conversationActive else { return }
+        remoteAway = true
+        if speaker.isPlaying || phase == .speaking { interrupt() }
+    }
+
+    /// The phone is back. Whatever was half-said when it dropped is stale by
+    /// now (the rest was never heard), so the next turn starts clean.
+    func remoteReturned() {
+        guard conversationActive else { return }
+        remoteAway = false
+        lastConversationAudio = Date()
+        conversationAudio = Data()
+        inTurn = false
+        turnIsSpeech = false
+        if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
     }
 
     private func sendTurnDetection() {

@@ -148,7 +148,7 @@ final class PhoneServer: ObservableObject {
                 self.clients[device] = c
                 return c
             }()
-            client.attach(peer)
+            client.attach(peer, conversing: obj["conversing"] as? Bool ?? false)
             // A page this Mac hasn't seen (new phone, or the home-screen app
             // removed and added again) is asked which iPhone it is, so a
             // re-added app can carry on with its old conversation.
@@ -187,6 +187,9 @@ final class PhoneServer: ObservableObject {
     private func recount() {
         connectedCount = clients.values.filter(\.isConnected).count
     }
+
+    /// Unit tests only.
+    func client(for device: String) -> PhoneClient? { clients[device] }
 
     // MARK: Files
 
