@@ -36,7 +36,7 @@ func registerConversationModeTests() {
             let (session, _, _) = makeSession()
             session.startConversation()
             session.handle(["type": "input_audio_buffer.speech_started"])
-            waitFor(0.4) { false }  // 0.2 s of voice makes it a turn
+            expect(waitFor(3) { session.turnIsSpeech }, "voice never counted")  // 0.2 s of voice
             expectEqual(session.phase, .recording)
             session.handle(["type": "input_audio_buffer.speech_stopped"])
             expectEqual(session.phase, .thinking)
@@ -156,7 +156,7 @@ func registerConversationTranscriptTests() {
             session.conversationID = conv.id
             session.startConversation()
             session.handle(["type": "input_audio_buffer.speech_started"])
-            waitFor(0.4) { false }  // the fake mic delivers 0.4 s of audio
+            expect(waitFor(3) { session.turnIsSpeech }, "voice never counted")
             session.handle(["type": "input_audio_buffer.speech_stopped"])
             session.handle(["type": "input_audio_buffer.committed", "item_id": "u1"])
             let m = store.message(conv.id, "u1")
@@ -250,7 +250,7 @@ func registerConversationEdgeTests() {
             let (session, _, _, store, convID) = makeSession()
             session.startConversation()
             session.handle(["type": "input_audio_buffer.speech_started"])
-            waitFor(0.4) { false }  // some voice
+            expect(waitFor(3) { session.turnIsSpeech }, "voice never counted")
             session.handle(["type": "input_audio_buffer.speech_stopped"])
             session.handle(["type": "input_audio_buffer.committed", "item_id": "u1"])
             session.handle(["type": "response.created", "response": ["id": "r1"]])

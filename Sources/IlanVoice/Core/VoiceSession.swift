@@ -370,7 +370,8 @@ final class VoiceSession: ObservableObject {
     /// backchannel shouldn't cut Ilan off).
     static let minTurnVoicedFrames = 10
     private var turnVoicedFrames = 0
-    private var turnIsSpeech = false
+    /// This turn has enough voice to count. (Read by the tests.)
+    private(set) var turnIsSpeech = false
 
     /// Enough voice in this turn: now it interrupts Ilan.
     private func countTurnVoice(_ data: Data) {
