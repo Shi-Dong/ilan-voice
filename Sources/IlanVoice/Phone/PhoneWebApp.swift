@@ -27,10 +27,12 @@ enum PhoneWebApp {
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <!-- An opaque status bar: the page starts below it. With a translucent bar
-         the page ran underneath the clock and battery, where iOS lays its own
-         blurred fade that a page cannot remove. -->
-    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <!-- A translucent status bar: the page covers the whole screen. With
+         "black" (opaque), current iOS still draws the page from the very top
+         but makes it a status bar shorter, which left a black band at the
+         bottom. The clock and battery sit on a solid band the page draws
+         itself (body::before), so text never scrolls visibly under them. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Ilan">
     <meta name="theme-color" content="#1D1818">
     <link rel="manifest" href="/manifest.webmanifest">
@@ -51,6 +53,10 @@ enum PhoneWebApp {
          black band at the bottom. The header is solid and starts at the very
          top, so the status bar sits on a crisp, even band rather than on the
          soft background gradient. */
+      /* A solid band behind the status bar (clock, battery): the page runs
+         under it, and messages scrolling there would show through. */
+      body::before { content: ""; position: fixed; z-index: 4; top: 0; left: 0; right: 0;
+        height: env(safe-area-inset-top); background: var(--ink); pointer-events: none; }
       body { display: flex; flex-direction: column; overflow: hidden; position: fixed; inset: 0;
         background: radial-gradient(120% 60% at 50% 30%, #231918 0%, var(--ink) 60%); }
       header { padding: calc(env(safe-area-inset-top) + 12px) 20px 12px; display: flex; align-items: center; gap: 12px;

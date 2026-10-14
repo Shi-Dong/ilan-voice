@@ -71,10 +71,14 @@ func json(_ message: URLSessionWebSocketTask.Message?) -> [String: Any] {
 @MainActor
 func registerPhoneTests() {
     suite("Phone web server") { test in
-        test("the page stays below the iPhone status bar (no blurred top edge)") {
+        test("the page covers the whole screen, with a solid band under the status bar") {
             let html = PhoneWebApp.html
-            expect(html.contains(#"name="apple-mobile-web-app-status-bar-style" content="black">"#), "status bar should be opaque")
-            expect(!html.contains("black-translucent"), "a translucent status bar puts the page under iOS's blur")
+            // "black" made current iOS cut a status bar's height off the bottom.
+            expect(html.contains(#"name="apple-mobile-web-app-status-bar-style" content="black-translucent">"#),
+                   "the status bar must be translucent so the page gets the full screen height")
+            // The clock and battery sit on a solid band, not on scrolling messages.
+            expect(html.contains("body::before") && html.contains("height: env(safe-area-inset-top); background: var(--ink)"),
+                   "no solid band behind the status bar")
         }
         test("the conversation title has room above its letters (no clipped top)") {
             let html = PhoneWebApp.html
