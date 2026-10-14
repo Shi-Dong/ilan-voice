@@ -160,6 +160,13 @@ final class VoiceSession: ObservableObject {
             self.sessionReady = false
             self.cancelWatchdog()
             if self.retryUnsentTurn() { return }
+            // A conversation carries on: reconnect (configured for it) after a moment.
+            if self.conversationActive {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                    guard let self, self.conversationActive, self.client == nil else { return }
+                    self.connect()
+                }
+            }
             if self.phase != .recording { self.phase = .offline }
             if report, let reason {
                 self.errorMessage = reason
@@ -370,6 +377,8 @@ final class VoiceSession: ObservableObject {
         interrupt()
         conversationActive = true
         if let id = target() { store.liveOnPhone.insert(id) }
+        lastConversationAudio = Date()
+        watchConversationAudio()
         conversationAudio = Data()
         inTurn = false
         conversationTurns = []
@@ -404,6 +413,27 @@ final class VoiceSession: ObservableObject {
         if phase == .recording { phase = sessionReady ? .ready : (client == nil ? .offline : .connecting) }
     }
 
+    /// A conversation streams audio all the time; none for this long means the
+    /// phone is gone without saying so (no network, switched off).
+    /// (Tests shorten it.)
+    var conversationSilenceLimit: TimeInterval = 6
+    private var lastConversationAudio = Date()
+
+    private func watchConversationAudio() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + min(1, conversationSilenceLimit / 4)) { [weak self] in
+            guard let self, self.conversationActive else { return }
+            if Date().timeIntervalSince(self.lastConversationAudio) > self.conversationSilenceLimit {
+                self.errorMessage = "Lost the iPhone's microphone, so the conversation ended."
+                self.stopConversation()
+            } else {
+                self.watchConversationAudio()
+            }
+        }
+    }
+
+    /// Ilan's turn is over: no reply on its way, no tools running.
+    private var ilanTurnFinished: Bool { !responseActive && phase != .thinking && phase != .working }
+
     private func sendTurnDetection() {
         let transcription: Any = conversationActive ? NSNull() : transcriptionConfig(UserDictionary.terms(), context: lastAssistantText())
         client?.send(["type": "session.update", "session": [
@@ -430,10 +460,14 @@ final class VoiceSession: ObservableObject {
 
     /// Each turn: speech to text from its recording, then Luna's repair.
     private func transcribeConversation(_ convID: UUID, _ turns: [String]) {
-        guard !turns.isEmpty, let conv = store.conversations.first(where: { $0.id == convID }) else { return }
+        guard !turns.isEmpty else { return }
         let key = settings.apiKey, sttModel = settings.transcriptionModel, lunaModel = settings.titleModel
         let terms = UserDictionary.terms(), store = store
         Task {
+            // Wait (up to 30 s) for Ilan's last answer, so Luna sees it too.
+            let deadline = Date().addingTimeInterval(30)
+            while !ilanTurnFinished && Date() < deadline { try? await Task.sleep(nanoseconds: 200_000_000) }
+            guard let conv = store.conversations.first(where: { $0.id == convID }) else { return }
             let results = await ConversationTranscriber.finish(
                 turns, messages: conv.messages,
                 audio: { m in m.audioFile.flatMap { try? Data(contentsOf: store.audioURL(convID, $0)) } },
@@ -714,6 +748,7 @@ final class VoiceSession: ObservableObject {
 
     private func handleMic(_ data: Data, _ level: Float) {
         if conversationActive {
+            lastConversationAudio = Date()
             inputLevel = inputLevel * 0.6 + level * 0.4
             conversationAudio.append(data)
             // Between turns keep only the last moment, the start of the next turn.

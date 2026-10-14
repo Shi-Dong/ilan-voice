@@ -51,6 +51,7 @@ final class PhoneClient {
         if let old = peer, old !== newPeer {
             old.send(json: ["type": "replaced"])
             old.close()
+            session.stopConversation()  // the old page's conversation ends with it
         }
         peer = newPeer
         newPeer.onBinary = { [weak self, weak newPeer] data in

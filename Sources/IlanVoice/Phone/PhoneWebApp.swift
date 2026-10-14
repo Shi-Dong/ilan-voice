@@ -253,6 +253,14 @@ enum PhoneWebApp {
       ws.onmessage = e => typeof e.data === "string" ? onJSON(JSON.parse(e.data)) : playPCM(e.data);
       ws.onclose = () => {
         ws = null;
+        // The Mac ends a conversation when the page goes away; end it here too,
+        // so the mic closes and the button doesn't claim one is still on.
+        if (held) {
+          held = false; sending = false;
+          $("talk").classList.remove("held");
+          stopMic();
+          banner("Connection lost — the conversation ended. Tap the button to start again.");
+        }
         if (replaced) { setStatus("Open in another window", ""); return; }
         setStatus("Reconnecting…", ""); setTimeout(connect, 1500);
       };

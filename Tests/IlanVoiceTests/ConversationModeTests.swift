@@ -209,3 +209,54 @@ func registerLiveOnPhoneTests() {
         }
     }
 }
+
+/// What happens when things go away in the middle of an iPhone conversation.
+@MainActor
+func registerConversationEdgeTests() {
+    func makeSession() -> (VoiceSession, FakeSpeaker, FakeMic, ConversationStore, UUID) {
+        let store = ConversationStore()
+        let conv = store.newConversation()
+        let speaker = FakeSpeaker(), mic = FakeMic()
+        speaker.isPlaying = false
+        let session = VoiceSession(store: store, mcp: MCPManager(), input: mic, output: speaker,
+                                   isRemote: true, target: { conv.id })
+        session.conversationID = conv.id
+        return (session, speaker, mic, store, conv.id)
+    }
+    suite("Conversation edge cases") { test in
+        test("a phone that goes silent (gone without closing) ends the conversation and unlocks the Mac") {
+            let (session, _, mic, store, convID) = makeSession()
+            session.conversationSilenceLimit = 0.5
+            session.startConversation()
+            expect(store.liveOnPhone.contains(convID))
+            mic.running = false  // no more audio arrives
+            expect(waitFor(2) { !session.conversationActive },
+                   "conversation never ended")
+            expect(!store.liveOnPhone.contains(convID))
+            expect(session.errorMessage?.contains("Lost the iPhone") == true)
+        }
+        test("a phone still sending audio is never ended for silence") {
+            let (session, _, _, _, _) = makeSession()
+            session.conversationSilenceLimit = 0.5
+            session.startConversation()
+            waitFor(1.1) { false }
+            expect(session.conversationActive)
+            session.stopConversation()
+        }
+        test("ending while Ilan is still answering waits for its reply before transcribing") {
+            let (session, _, _, store, convID) = makeSession()
+            session.startConversation()
+            session.handle(["type": "input_audio_buffer.speech_started"])
+            session.handle(["type": "input_audio_buffer.speech_stopped"])
+            session.handle(["type": "input_audio_buffer.committed", "item_id": "u1"])
+            session.handle(["type": "response.created", "response": ["id": "r1"]])
+            session.stopConversation()  // Ilan is still answering
+            waitFor(0.4) { false }
+            expect(store.message(convID, "u1")?.awaitingCorrection == true, "transcribed before Ilan finished")
+            session.handle(["type": "response.done", "response": ["id": "r1", "output": []]])
+            // No API key in tests: transcription gives nothing, and the turn says so.
+            expect(waitFor(2) { store.message(convID, "u1")?.awaitingCorrection == nil }, "never transcribed")
+            expectEqual(store.message(convID, "u1")?.text, "(no words heard)")
+        }
+    }
+}
