@@ -1,8 +1,8 @@
 // The iPhone web app, served by PhoneServer. One page, no build step.
 //
-// Talking: hold the round button to record (24 kHz PCM16 is streamed to the
-// Mac while it is held), let go to send. Replies stream back as PCM16 and
-// play straight away. The Mac does everything else: transcription, the model,
+// Talking: tap the round button to start a conversation (24 kHz PCM16 is
+// streamed to the Mac until you tap again); OpenAI hears when you finish
+// each turn. Replies stream back as PCM16 and play straight away. The Mac does everything else: transcription, the model,
 // tools, saving the conversation.
 enum PhoneWebApp {
     static let manifest = """
@@ -217,10 +217,10 @@ enum PhoneWebApp {
     </div></div>
     <main id="list"><div class="empty"><b>Hold to talk</b>Let go to send. Ilan answers out loud.</div></main>
     <footer>
-      <div class="hint" id="hint">Hold the button and speak</div>
+      <div class="hint" id="hint">Tap to start a conversation</div>
       <span></span>
       <div class="talkwrap"><canvas id="halo"></canvas>
-      <button id="talk" aria-label="Hold to talk">
+      <button id="talk" aria-label="Start or end a conversation">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/>
           <path d="M18.5 11.5a.9.9 0 1 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 1 0-1.8 0 6.5 6.5 0 0 0 5.6 6.4V20H8.8a.9.9 0 1 0 0 1.8h6.4a.9.9 0 1 0 0-1.8H12.9v-2.1a6.5 6.5 0 0 0 5.6-6.4Z"/></svg>
       </button></div>
@@ -321,13 +321,15 @@ enum PhoneWebApp {
         $("hint").textContent = "Open the link from the Mac (https) to use the microphone";
       } else if (idle && micPermission === "prompt") {
         setStatus("Microphone not enabled yet", "busy");
-        $("hint").textContent = "Hold the button and allow the microphone";
+        $("hint").textContent = "Tap the button and allow the microphone";
       } else {
         const cls = m.phase === "Listening" ? "rec" : m.busy ? "busy" : m.phase === "Offline" ? "" : "ok";
         setStatus(m.phase, cls);
-        $("hint").textContent = held ? (cancelArmed ? "Release to cancel" : "Listening — let go to send · swipe up to cancel")
-          : m.phase === "Speaking" ? "Tap to stop · hold to interrupt"
-          : m.phase === "Thinking" || m.phase === "Using tools" ? m.phase + "…" : "Hold the button and speak";
+        $("hint").textContent = held
+          ? (m.phase === "Speaking" ? "Speak to interrupt · tap to end"
+             : m.phase === "Thinking" || m.phase === "Using tools" ? m.phase + "… · tap to end"
+             : "Listening — just talk · tap to end")
+          : "Tap to start a conversation";
       }
       if (m.error || !soundBanner) banner(m.error || "");
     }
@@ -385,7 +387,7 @@ enum PhoneWebApp {
     function audioContext() {
       if (!ctx || ctx.state === "closed") {
         ctx = new (window.AudioContext || window.webkitAudioContext)();
-        ctx.onstatechange = () => { if (ctx.state !== "running" && !held) ctx.resume().catch(() => {}); };
+        ctx.onstatechange = () => { if (ctx.state !== "running") ctx.resume().catch(() => {}); };
       }
       if (ctx.state !== "running") ctx.resume().catch(() => {});
       return ctx;
@@ -556,64 +558,38 @@ enum PhoneWebApp {
     }
     requestAnimationFrame(drawHalo);
 
-    // Swipe up to cancel: while holding, sliding the finger up past
-    // CANCEL_PX arms a cancel (the button greys out, "Release to cancel");
-    // letting go there drops the recording instead of sending it. Sliding
-    // back down disarms it.
-    const CANCEL_PX = 70;
-    let startY = 0, cancelArmed = false;
-    function setCancelArmed(on) {
-      if (on === cancelArmed) return;
-      cancelArmed = on;
-      $("talk").classList.toggle("cancel", on);
-      $("hint").classList.toggle("cancel", on);
-      $("hint").textContent = on ? "Release to cancel" : "Listening — let go to send · swipe up to cancel";
-      if (navigator.vibrate) navigator.vibrate(on ? 18 : 8);
-    }
-
-    function press(e) {
-      e.preventDefault();
+    // Conversation mode: tap once to start talking with Ilan hands-free, tap
+    // again to end it. While it is on the mic streams continuously; OpenAI
+    // decides from what you say when you have finished (semantic turn
+    // detection) and answers, and speaking over Ilan stops its reply.
+    function startConversation() {
       if (held || !ws || ws.readyState !== 1) return;
       held = true; sending = true;
-      startY = e.clientY; cancelArmed = false;
-      try { $("talk").setPointerCapture(e.pointerId); } catch (err) {}
       audioContext();  // unlocks reply playback; iOS only allows that inside a touch
       $("talk").classList.add("held");
       stopAudio();
-      send({ type: "press" });
-      $("hint").textContent = "Listening — let go to send · swipe up to cancel";
+      send({ type: "conversation_start" });
+      showState();
       if (navigator.vibrate) navigator.vibrate(10);
-      startMic().catch(err => { banner("Microphone unavailable: " + err.message); release(e); });
+      startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
     }
-    function move(e) {
+    function stopConversation() {
       if (!held) return;
-      setCancelArmed(startY - e.clientY > CANCEL_PX);
-    }
-    function release(e) {
-      if (e) e.preventDefault();
-      if (!held) return;
-      held = false;
-      const cancel = cancelArmed;
-      setCancelArmed(false);
+      held = false; sending = false;
       $("talk").classList.remove("held");
-      audioContext();  // letting go is a touch, so iOS allows resuming playback here
-      if (cancel) {
-        sending = false;
-        send({ type: "cancel" });
-        stopMic();
-        $("hint").textContent = "Cancelled";
-        setTimeout(() => { if (!held) showState(); }, 900);
-        return;
-      }
-      // Let the last few milliseconds of audio through before closing the mic.
-      setTimeout(() => { sending = false; send({ type: "release" }); stopMic(); audioContext(); }, 120);
+      send({ type: "conversation_stop" });
+      stopMic();
+      audioContext();
+      showState();
+      if (navigator.vibrate) navigator.vibrate(8);
+    }
+    function toggle(e) {
+      e.preventDefault();
+      if (held) stopConversation(); else startConversation();
     }
 
     const talk = $("talk");
-    talk.addEventListener("pointerdown", press);
-    talk.addEventListener("pointermove", move);
-    talk.addEventListener("pointerup", release);
-    talk.addEventListener("pointercancel", release);
+    talk.addEventListener("click", toggle);
     talk.addEventListener("contextmenu", e => e.preventDefault());
     // Reconnect, like the Mac's button: a fresh session for this phone's
     // conversation (the conversation itself is kept). If the page has lost
@@ -627,7 +603,7 @@ enum PhoneWebApp {
       else { replaced = false; if (!ws) connect(); }
     });
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) { if (held) release(); }
+      if (document.hidden) { if (held) stopConversation(); }
       else if (!ws && !replaced) connect();
     });
     // The header and footer float over the conversation (Liquid Glass); keep

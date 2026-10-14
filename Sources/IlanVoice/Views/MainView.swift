@@ -243,6 +243,11 @@ struct ChatView: View {
     /// talk button beside it.
     private func footer(_ conv: Conversation?) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let conv, store.liveOnPhone.contains(conv.id) {
+                Label("Live on your iPhone — you can follow along; talking and typing are paused here",
+                      systemImage: "iphone.radiowaves.left.and.right")
+                    .font(.system(size: 11.5)).foregroundStyle(Theme.accent)
+            }
             if let err = session.errorMessage, !(err == VoiceSession.missingKeyMessage && !settings.apiKey.isEmpty) {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.orange)
