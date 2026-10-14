@@ -267,6 +267,10 @@ func registerPhoneTests() {
     }
 
     suite("Phone web page") { test in
+        test("without the microphone the hint says to tap to allow it") {
+            expect(PhoneWebApp.html.contains("Tap the button to allow the microphone"))
+            expect(PhoneWebApp.html.contains(#"class="icon-nomic""#), "no crossed-out mic icon")
+        }
         test("no hard line under the status bar: messages fade out, and the bar melts into the page") {
             let html = PhoneWebApp.html
             expect(html.contains("mask-image: linear-gradient(to bottom, transparent 0, #000 56px)"), "messages aren't faded at the top")
@@ -314,6 +318,14 @@ func registerPhoneTests() {
             expectEqual(json["shortPage"] as? Bool, true)  // footer drops its home-bar spacing
             expectEqual(viewport?["innerHeight"] as? Int, 790)
             expectEqual(viewport?["safeTop"] as? Int, 62)
+            // No microphone yet: the button shows a crossed-out mic, and the first tap only asks
+            // for it (then lets it go); the conversation starts on the next tap.
+            expectEqual(json["nomicAtLoad"] as? Bool, true)
+            let allow = json["allowTap"] as? [String: Any]
+            expectEqual(allow?["started"] as? Bool, false)
+            expectEqual(allow?["asked"] as? Int, 1)
+            expectEqual(allow?["released"] as? Int, 1)
+            expectEqual(allow?["nomicAfter"] as? Bool, false)
             // Ilan ended it by voice: the page ends too, with the closing sound, without echoing a stop.
             let byIlan = json["endedByIlan"] as? [String: Any]
             expectEqual(byIlan?["sentStop"] as? Bool, false)
