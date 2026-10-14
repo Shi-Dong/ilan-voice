@@ -436,8 +436,10 @@ enum PhoneWebApp {
     // is in "play and record" mode, which is what using the microphone
     // switches it to. Replies play from their own audio context; the
     // microphone gets a separate one that only exists during a conversation.
-    // When a conversation ends, both are closed and the session goes back to
-    // "auto" (see releaseAudio).
+    // The start and end sounds play with the session set to "playback" (the
+    // loudspeaker), so the mic opens only after the start sound and is
+    // closed before the end sound. When a conversation ends, both contexts
+    // are closed and the session goes back to "auto" (see releaseAudio).
     function setAudioSession(type) {
       try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (e) {}
     }
@@ -459,8 +461,10 @@ enum PhoneWebApp {
     }
 
     // After a conversation (and its end chime): let go of the speaker too.
+    let ending = false;  // the end sound is still ringing
     function releaseAudio(afterMs) {
       setTimeout(() => {
+        ending = false;
         if (held) return;  // a new conversation started meanwhile
         stopAudio();
         if (ctx) { ctx.onstatechange = null; ctx.close().catch(() => {}); ctx = null; }
@@ -479,8 +483,9 @@ enum PhoneWebApp {
       if (!ctx || ctx.state === "closed") {
         ctx = new (window.AudioContext || window.webkitAudioContext)();
         // iOS pauses it when the mic switches routes; resume it, but only
-        // during a conversation (otherwise a paused context is what we want).
-        ctx.onstatechange = () => { if (held && ctx && ctx.state !== "running") ctx.resume().catch(() => {}); };
+        // during a conversation and its end sound (otherwise a paused context
+        // is what we want).
+        ctx.onstatechange = () => { if ((held || ending) && ctx && ctx.state !== "running") ctx.resume().catch(() => {}); };
       }
       if (ctx.state !== "running") ctx.resume().catch(() => {});
       return ctx;
@@ -659,6 +664,7 @@ enum PhoneWebApp {
       if (held || !ws || ws.readyState !== 1) return;
       held = true; sending = true;
       document.body.classList.add("conversing");
+      setAudioSession("playback");  // the start sound plays on the loudspeaker
       audioContext();  // unlocks reply playback; iOS only allows that inside a touch
       $("talk").classList.add("held");
       stopAudio();
@@ -666,8 +672,16 @@ enum PhoneWebApp {
       keepScreenOn();
       showState();
       chime(true);
-      startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
+      // Opening the mic moves the sound to the earpiece, so it waits until
+      // the start sound has played.
+      const conversation = ++conversations;
+      setTimeout(() => {
+        if (conversation !== conversations || !held) return;  // ended meanwhile
+        startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
+      }, START_SOUND_MS);
     }
+    const START_SOUND_MS = 700;
+    let conversations = 0;
     // byIlan: Ilan ended it (its end_conversation tool, after its goodbye),
     // so the Mac already knows; everything else is the same, closing sound too.
     function stopConversation(byIlan) {
@@ -680,6 +694,8 @@ enum PhoneWebApp {
       if (!byIlan) send({ type: "conversation_stop" });
       letScreenSleep();
       stopMic();
+      ending = true;
+      setAudioSession("playback");  // with the mic closed, the end sound plays on the loudspeaker
       audioContext();
       showState();
       chime(false);
