@@ -106,7 +106,7 @@ enum PhoneWebApp {
       #talk.sliding { transition: none; }
       /* Microphone not allowed yet: a crossed-out mic (a tap asks for it). */
       #talk .icon-nomic, #talk.nomic .icon-mic { display: none; }
-      #talk.nomic .icon-nomic { display: block; }
+      #talk.nomic .icon-nomic { display: inline; }  /* inline like the mic icon, so the button centres it */
       /* The way out of a conversation: shown while a finger is on the button,
          a track rising above it to a stop target. */
       .endtrack { position: absolute; left: 50%; bottom: 0; width: 104px; margin-left: -52px; height: 104px;
@@ -269,9 +269,11 @@ enum PhoneWebApp {
       <button id="talk" aria-label="Start or end a conversation">
         <svg class="icon-mic" viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/>
           <path d="M18.5 11.5a.9.9 0 1 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 1 0-1.8 0 6.5 6.5 0 0 0 5.6 6.4V20H8.8a.9.9 0 1 0 0 1.8h6.4a.9.9 0 1 0 0-1.8H12.9v-2.1a6.5 6.5 0 0 0 5.6-6.4Z"/></svg>
-      <svg class="icon-nomic" viewBox="0 0 24 24" fill="currentColor"><g opacity=".6"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/>
+      <svg class="icon-nomic" viewBox="0 0 24 24"><defs><mask id="nomic-cut"><rect width="24" height="24" fill="#fff"/>
+          <path d="M4.5 3.5 20.5 19.5" stroke="#000" stroke-width="4.6" stroke-linecap="round"/></mask></defs>
+          <g fill="currentColor" mask="url(#nomic-cut)"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/>
           <path d="M18.5 11.5a.9.9 0 1 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 1 0-1.8 0 6.5 6.5 0 0 0 5.6 6.4V20H8.8a.9.9 0 1 0 0 1.8h6.4a.9.9 0 1 0 0-1.8H12.9v-2.1a6.5 6.5 0 0 0 5.6-6.4Z"/></g>
-          <path d="M4.2 3.2 20.8 19.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+          <path d="M4.5 3.5 20.5 19.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" fill="none"/></svg>
       </button></div>
       <span></span>
     </footer>
