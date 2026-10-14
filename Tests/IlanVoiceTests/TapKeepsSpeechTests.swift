@@ -22,6 +22,8 @@ final class FakeMic: VoiceInput {
     var running = false
     /// False: the mic hears only quiet room noise.
     var loud = true
+    /// 20 ms of audio delivered so far (each tick is one voiced frame when loud).
+    var ticks = 0
     var starts = 0
     /// How long the permission check takes (the first-run prompt is slow).
     var permissionDelay = 0.0
@@ -38,6 +40,7 @@ final class FakeMic: VoiceInput {
     private func tick() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
             guard let self, self.running else { return }
+            self.ticks += 1
             // 20 ms of audio in phone-sized pieces (the iPhone page sends 64 samples at a time).
             let audio = self.loud ? Self.speech : Data(count: Self.speech.count)
             stride(from: 0, to: audio.count, by: Self.pieceBytes).forEach { offset in

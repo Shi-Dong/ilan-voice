@@ -325,12 +325,13 @@ func registerConversationEchoTests() {
         session.handle(["type": "response.output_audio.delta", "response_id": "r1", "item_id": "i1",
                         "delta": Data(count: 4800).base64EncodedString()])
     }
-    /// A short burst of voice (about 0.3 s, like an echo of "Let me"), then quiet.
+    /// A short burst of exactly 15 voiced frames (0.3 s, like the echoed "Let me"), then quiet.
     func burst(_ session: VoiceSession, _ mic: FakeMic, item: String) {
         mic.loud = false
         session.handle(["type": "input_audio_buffer.speech_started"])
+        let start = mic.ticks
         mic.loud = true
-        waitFor(0.3) { false }
+        expect(waitFor(3) { mic.ticks >= start + 15 }, "mic stalled")
         mic.loud = false
         waitFor(0.05) { false }
         session.handle(["type": "input_audio_buffer.speech_stopped"])
