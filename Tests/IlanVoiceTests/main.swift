@@ -35,6 +35,7 @@ MainActor.assumeIsolated {
     registerUsageTests()
     registerPillMicrophoneTests()
     registerPressEndsTests()
+    registerWindowWidthTests()
     registerConversationModeTests()
     registerConversationTranscriptTests()
     registerLiveOnPhoneTests()

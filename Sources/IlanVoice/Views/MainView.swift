@@ -7,13 +7,45 @@ struct MainView: View {
     @ObservedObject var mcp: MCPManager
     @ObservedObject var updater: Updater
     @ObservedObject var settings = AppSettings.shared
+    /// The sidebar's width as it is now (0 while it is hidden), and the width
+    /// the chat header needs to show everything in full.
+    @Local private var sidebarWidth: CGFloat = 240
+    @Local private var headerWidth: CGFloat = 0
+
+    /// The window can't be narrowed past this: the sidebar plus the whole chat
+    /// header (its title and status line never shorten, and its buttons never
+    /// squeeze), so nothing is squashed or cut off at the edges.
+    static let minimumWidth: CGFloat = 760
+    static func minimumWidth(sidebar: CGFloat, header: CGFloat) -> CGFloat {
+        max(minimumWidth, (sidebar + 1 + header).rounded(.up))  // 1: the divider between them
+    }
+
+    private static func widenMainWindow(to width: CGFloat) {
+        guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) else { return }
+        let missing = width - window.contentLayoutRect.width
+        guard missing > 0 else { return }
+        var frame = window.frame
+        frame.size.width += missing
+        window.setFrame(frame, display: true)
+    }
 
     var body: some View {
         NavigationSplitView {
             Sidebar(store: store, updater: updater)
                 .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 320)
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { sidebarWidth = $0 }
+                .onDisappear { sidebarWidth = 0 }
         } detail: {
             ChatView(store: store, session: session, ptt: ptt, mcp: mcp, updater: updater)
+                .onPreferenceChange(ChatHeaderWidth.self) { headerWidth = $0 }
+                // Widening the sidebar can't squeeze the chat either.
+                .frame(minWidth: headerWidth)
+        }
+        .frame(minWidth: Self.minimumWidth(sidebar: sidebarWidth, header: headerWidth), minHeight: 540)
+        // A wider minimum (an update appeared, a longer title) doesn't resize an
+        // open window by itself: widen it, so nothing hangs off the edges.
+        .onChange(of: Self.minimumWidth(sidebar: sidebarWidth, header: headerWidth)) { _, width in
+            Self.widenMainWindow(to: width)
         }
         .background(Theme.background)
         // The sidebar card floats on the same background as the chat.
@@ -134,6 +166,12 @@ struct Sidebar: View {
     }
 }
 
+/// The width the chat header needs to show everything in full (see MainView.minimumWidth).
+struct ChatHeaderWidth: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 struct ChatView: View {
     @ObservedObject var store: ConversationStore
     @ObservedObject var session: VoiceSession
@@ -146,6 +184,11 @@ struct ChatView: View {
         let conv = store.selected
         VStack(spacing: 0) {
             header(conv)
+                // An invisible copy at its natural width says how wide the header must be.
+                .background(alignment: .leading) {
+                    header(conv).fixedSize().hidden()
+                        .background(GeometryReader { Color.clear.preference(key: ChatHeaderWidth.self, value: $0.size.width) })
+                }
             Divider().overlay(Theme.hairline)
             ZStack {
                 if let conv, !conv.messages.isEmpty {
@@ -179,7 +222,7 @@ struct ChatView: View {
             }
             // Never cut short or wrapped: the title shows in full and the line
             // under it stays one line. Their full width counts towards the
-            // window's minimum width (see .windowResizability in App.swift).
+            // window's minimum width (see MainView.minimumWidth).
             .fixedSize(horizontal: true, vertical: false)
             .layoutPriority(1)
             Spacer(minLength: 12)
@@ -187,6 +230,7 @@ struct ChatView: View {
                 GeneralSettingsButton {
                     Label("Update", systemImage: "arrow.down.circle.fill")
                         .font(.system(size: 11.5, weight: .semibold))
+                        .fixedSize()  // never squeezed into a tall, empty pill
                         .padding(.horizontal, 10).padding(.vertical, 5)
                         .background(Theme.orange.opacity(0.18), in: Capsule())
                         .foregroundStyle(Theme.orange)
