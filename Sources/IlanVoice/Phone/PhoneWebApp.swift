@@ -297,6 +297,7 @@ enum PhoneWebApp {
 
     let ws = null, ctx = null, playHead = 0, sources = [];
     let micStream = null, micNode = null, micSource = null, held = false, sending = false, phase = "Offline";
+    let starting = false;  // a conversation's start sound is playing; the Mac hears of it afterwards
 
     // ---- Connection ----
     // The connection to the Mac comes and goes with the phone's network (a
@@ -318,7 +319,7 @@ enum PhoneWebApp {
       if (!token) { banner("Open the link shown in Ilan Voice on your Mac (Settings → General → iPhone)."); return; }
       const socket = ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
       socket.binaryType = "arraybuffer";
-      socket.onopen = () => { lastHeard = Date.now(); socket.send(JSON.stringify({ type: "hello", token, device, conversing: held })); };
+      socket.onopen = () => { lastHeard = Date.now(); socket.send(JSON.stringify({ type: "hello", token, device, conversing: held && !starting })); };
       socket.onmessage = e => { lastHeard = Date.now(); if (typeof e.data === "string") onJSON(JSON.parse(e.data)); else playPCM(e.data); };
       socket.onclose = () => dropped(socket);
       // iOS can take ages to give up on a connection that isn't going anywhere.
@@ -370,7 +371,7 @@ enum PhoneWebApp {
         banner(""); measureViewport(true);
         // Back mid-conversation: the Mac kept the conversation (carry on), or
         // let it go meanwhile (too long away, or Ilan ended it): then end here too.
-        if (held && !m.conversing) stopConversation(true);
+        if (held && !starting && !m.conversing) stopConversation(true);
         showState();
       }
       else if (m.type === "ping") { send({ type: "pong" }); }
@@ -449,7 +450,8 @@ enum PhoneWebApp {
         const cls = m.phase === "Listening" ? "rec" : m.busy ? "busy" : m.phase === "Offline" ? "" : "ok";
         setStatus(m.phase, cls);
         $("hint").textContent = held
-          ? (m.phase === "Speaking" ? "Speak to interrupt · push the button up to end"
+          ? (starting ? "Starting…"
+             : m.phase === "Speaking" ? "Speak to interrupt · push the button up to end"
              : m.phase === "Thinking" || m.phase === "Using tools" ? m.phase + "… · push the button up to end"
              : "Listening — just talk · push the button up to end")
           : "Tap to start a conversation";
@@ -509,16 +511,21 @@ enum PhoneWebApp {
     // Keep the screen on during a conversation: when the iPhone auto-locks,
     // the page is hidden, iOS cuts its microphone, and the conversation ends.
     // Released when the conversation ends, so Auto-Lock works again.
-    let wakeLock = null;
+    // One request at a time: ending and restarting quickly must not leave a
+    // second, forgotten lock holding the screen on.
+    let wakeLock = null, wakeLockAsked = false;
     async function keepScreenOn() {
-      try { if (navigator.wakeLock && !wakeLock) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+      if (!navigator.wakeLock || wakeLock || wakeLockAsked) return;
+      wakeLockAsked = true;
+      try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+      wakeLockAsked = false;
       if (!held) letScreenSleep();  // ended while the request was pending
     }
     function letScreenSleep() {
       if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
     }
 
-    // After a conversation (and its end chime): let go of the speaker too.
+    // After a conversation (and its end sound): let go of the speaker too.
     let ending = false;  // the end sound is still ringing
     function releaseAudio(afterMs) {
       setTimeout(() => {
@@ -526,7 +533,7 @@ enum PhoneWebApp {
         if (held) return;  // a new conversation started meanwhile
         stopAudio();
         if (ctx) { ctx.onstatechange = null; ctx.close().catch(() => {}); ctx = null; }
-        chimeOut = null;
+        soundOut = null;
         setAudioSession("auto");
       }, afterMs);
     }
@@ -718,103 +725,111 @@ enum PhoneWebApp {
     // again to end it. While it is on the mic streams continuously; OpenAI
     // decides from what you say when you have finished (semantic turn
     // detection) and answers, and speaking over Ilan stops its reply.
+    // Starting goes in order: the start sound plays on the loudspeaker, all
+    // of it; only then does the conversation start (the Mac hears of it, and
+    // the mic opens, which moves the sound to the earpiece).
     function startConversation() {
       if (held || !online) return;
-      held = true; sending = true;
+      held = true; starting = true;
       document.body.classList.add("conversing");
       setAudioSession("playback");  // the start sound plays on the loudspeaker
       audioContext();  // unlocks reply playback; iOS only allows that inside a touch
       $("talk").classList.add("held");
       stopAudio();
-      send({ type: "conversation_start" });
       keepScreenOn();
       showState();
-      chime(true);
-      // Opening the mic moves the sound to the earpiece, so it waits until
-      // the start sound has played.
       const conversation = ++conversations;
-      setTimeout(() => {
+      playSound(true).then(() => {
         if (conversation !== conversations || !held) return;  // ended meanwhile
+        starting = false; sending = true;
+        send({ type: "conversation_start" });
+        showState();
         startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
-      }, START_SOUND_MS);
+      });
     }
-    const START_SOUND_MS = 700;
     let conversations = 0;
     // byIlan: Ilan ended it (its end_conversation tool, after its goodbye),
     // so the Mac already knows; everything else is the same, closing sound too.
     function stopConversation(byIlan) {
       if (!held) return;
-      held = false; sending = false; awaySince = 0;
+      const started = !starting;  // ended during the start sound: the Mac never heard of it
+      held = false; sending = false; starting = false; awaySince = 0;
       document.body.classList.remove("conversing");
       $("talk").classList.remove("held");
       if (endGesture) resetEndGesture();
       stopAudio();  // Ilan goes quiet at once, before the Mac even hears about it
-      if (!byIlan) send({ type: "conversation_stop" });
+      if (!byIlan && started) send({ type: "conversation_stop" });
       letScreenSleep();
       stopMic();
       ending = true;
       setAudioSession("playback");  // with the mic closed, the end sound plays on the loudspeaker
       audioContext();
       showState();
-      chime(false);
-      releaseAudio(1500);  // once the end chime has rung out
+      playSound(false).then(() => releaseAudio(0));  // once the end sound has rung out
     }
     // ---- Sound feedback for starting and ending a conversation ----
-    // Sounds, made on the spot (no files). Start: a bright rising C major
-    // arpeggio over a soft low thump, "here we go". End: a falling cadence
-    // that settles on a warm low C, "done". Each note is a bell: a sine plus a
-    // quieter octave above, with a quick attack and a long ring; a short echo
-    // adds space, and a compressor keeps it full and loud without clipping.
-    let chimeOut = null;
-    function chimeBus(c) {
-      if (chimeOut && chimeOut.context === c) return chimeOut;
-      const comp = c.createDynamicsCompressor();
-      comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 4;
-      comp.attack.value = 0.003; comp.release.value = 0.2;
-      const out = c.createGain(); out.gain.value = 0.9;  // on the loudspeaker 1.4 was too loud
-      comp.connect(out); out.connect(c.destination);
-      const echo = c.createDelay(0.5), fb = c.createGain(), wet = c.createGain();
-      echo.delayTime.value = 0.13; fb.gain.value = 0.28; wet.gain.value = 0.22;
-      echo.connect(fb); fb.connect(echo); echo.connect(wet); wet.connect(comp);
-      chimeOut = { context: c, dry: comp, echo };
-      return chimeOut;
-    }
-    function bell(c, bus, freq, at, peak, ring) {
-      [[1, 1, "sine"], [2, 0.35, "sine"], [3, 0.12, "triangle"]].forEach(([mult, level, type]) => {
-        const o = c.createOscillator(), g = c.createGain();
-        o.type = type; o.frequency.value = freq * mult;
-        g.gain.setValueAtTime(0.0001, at);
-        g.gain.exponentialRampToValueAtTime(peak * level, at + 0.012);
-        g.gain.exponentialRampToValueAtTime(0.0001, at + ring / mult);
-        o.connect(g); g.connect(bus.dry); g.connect(bus.echo);
-        o.start(at); o.stop(at + ring + 0.05);
-      });
-    }
-    function thump(c, bus, freq, at, peak) {
-      const o = c.createOscillator(), g = c.createGain();
-      o.type = "sine";
-      o.frequency.setValueAtTime(freq * 1.6, at);
-      o.frequency.exponentialRampToValueAtTime(freq, at + 0.08);
-      g.gain.setValueAtTime(0.0001, at);
-      g.gain.exponentialRampToValueAtTime(peak, at + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
-      o.connect(g); g.connect(bus.dry);
-      o.start(at); o.stop(at + 0.4);
-    }
-    const C5 = 523.25, E5 = 659.25, G5 = 783.99, C6 = 1046.5, C4 = 261.63;
-    function chime(starting) {
-      const c = audioContext(), bus = chimeBus(c), t = c.currentTime + 0.02;
-      if (starting) {
-        thump(c, bus, 110, t, 0.5);
-        [C5, E5, G5].forEach((f, i) => bell(c, bus, f, t + i * 0.07, 0.32, 0.6));
-        bell(c, bus, C6, t + 0.21, 0.4, 1.1);  // the top note rings out
-      } else {
-        [G5, E5].forEach((f, i) => bell(c, bus, f, t + i * 0.1, 0.3, 0.5));
-        bell(c, bus, C5, t + 0.2, 0.36, 1.0);
-        bell(c, bus, C4, t + 0.2, 0.3, 1.2);   // a warm low C under the last note
-        thump(c, bus, 82, t + 0.2, 0.4);
+    // "Halo", made on the spot (no files): two soft sine notes a fifth apart
+    // that fade in, linger a moment and fade out, about 0.9 s. Start: E and
+    // B, rising; end: A and E, settling lower. A short, darkened echo adds
+    // space, and a gentle compressor evens it out.
+    // iOS garbles a sound that starts while its audio is still moving to
+    // another route (the loudspeaker, after the mic), and it pauses the audio
+    // context while it does. So playSound waits until the context has been
+    // playing steadily for SOUND_SETTLE_MS, then plays, and resolves once the
+    // sound and its echo are over, timed on the audio clock (which stops
+    // while iOS pauses it, so a paused sound is still waited for).
+    const SOUND_LEN = 0.9, SOUND_TAIL = 0.35, SOUND_SETTLE_MS = 120, SOUND_WAIT_MAX_MS = 1500, SOUND_POLL_MS = 20;
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    async function soundReady(c) {
+      let steadySince = null;  // audio-clock time since when the context has been running
+      for (let waited = 0; waited < SOUND_WAIT_MAX_MS; waited += SOUND_POLL_MS) {
+        if (c.state === "closed") return;
+        if (c.state !== "running") { steadySince = null; c.resume().catch(() => {}); }
+        else if (steadySince === null) steadySince = c.currentTime;
+        else if (c.currentTime - steadySince >= SOUND_SETTLE_MS / 1000) return;
+        await wait(SOUND_POLL_MS);
       }
     }
+    async function playSound(starting) {
+      const c = audioContext();
+      await soundReady(c);
+      if (c.state === "closed") return;
+      const bus = soundBus(c), t = c.currentTime + 0.03, end = t + SOUND_LEN + SOUND_TAIL;
+      if (starting) {
+        note(c, bus, E5, t, 0.17, 0.06, SOUND_LEN);
+        note(c, bus, B5, t + 0.04, 0.136, 0.06, SOUND_LEN);
+      } else {
+        note(c, bus, A4, t, 0.187, 0.048, SOUND_LEN);
+        note(c, bus, E5, t, 0.119, 0.048, SOUND_LEN * 0.9);
+      }
+      const limit = (SOUND_LEN + SOUND_TAIL) * 1000 + SOUND_WAIT_MAX_MS;
+      for (let waited = 0; c.state !== "closed" && c.currentTime < end && waited < limit; waited += SOUND_POLL_MS) await wait(SOUND_POLL_MS);
+    }
+    let soundOut = null;
+    function soundBus(c) {
+      if (soundOut && soundOut.context === c) return soundOut;
+      const comp = c.createDynamicsCompressor();
+      comp.threshold.value = -20; comp.knee.value = 14; comp.ratio.value = 3;
+      comp.attack.value = 0.004; comp.release.value = 0.2;
+      const out = c.createGain(); out.gain.value = 0.9;
+      comp.connect(out); out.connect(c.destination);
+      const echo = c.createDelay(0.5), fb = c.createGain(), dark = c.createBiquadFilter(), wet = c.createGain();
+      echo.delayTime.value = 0.09; fb.gain.value = 0.32; dark.type = "lowpass"; dark.frequency.value = 2600; wet.gain.value = 0.2;
+      echo.connect(dark); dark.connect(fb); fb.connect(echo); dark.connect(wet); wet.connect(comp);
+      soundOut = { context: c, dry: comp, echo };
+      return soundOut;
+    }
+    function note(c, bus, freq, at, peak, attack, len) {
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(peak, at + attack);
+      g.gain.exponentialRampToValueAtTime(peak * 0.55, at + attack + 0.15);  // lingers a moment
+      g.gain.exponentialRampToValueAtTime(0.0001, at + len);
+      o.connect(g); g.connect(bus.dry); g.connect(bus.echo);
+      o.start(at); o.stop(at + len + 0.05);
+    }
+    const A4 = 440, E5 = 659.25, B5 = 987.77;
 
     // Starting is a tap. Ending is deliberate, so a phone in a pocket (screen
     // on) can't end it by a stray touch: touching the button shows a track

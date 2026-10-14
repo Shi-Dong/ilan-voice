@@ -407,12 +407,35 @@ func registerPhoneTests() {
             expectEqual(allow?["released"] as? Int, 1)
             expectEqual(allow?["nomicAfter"] as? Bool, false)
             // The start and end sounds play on the loudspeaker: the session is "playback"
-            // for every one of them, and the mic opens only after the start sound.
+            // for every one of them.
             expectEqual(json["chimeSessions"] as? [String], ["playback"])
+            // No sound starts while iOS is still moving the audio to the loudspeaker (the
+            // harness pauses audio for 250 ms after each switch, as iOS does): every one
+            // waits until its audio has played steadily for 120 ms.
+            let steady = json["soundSteadyMs"] as? [Int] ?? []
+            expect(steady.count >= 10, "too few sounds played: \(steady)")
+            expect(steady.allSatisfy { $0 >= 120 }, "a sound started before the loudspeaker was ready: \(steady)")
+            // Starting goes in order: the sound (after the 250 ms switch), all of it (0.9 s plus
+            // its echo); only then is the Mac told, and the mic opened.
             let startSound = json["startSound"] as? [String: Any]
             expectEqual(startSound?["chimed"] as? Bool, true)
             expectEqual(startSound?["micBefore"] as? Bool, false)
-            expect((startSound?["micAfterMs"] as? Int ?? -1) >= 500, "the mic opens before the start sound has played")
+            expectEqual(startSound?["toldMacAtTap"] as? Bool, false)
+            expectEqual(startSound?["hintAtTap"] as? String, "Starting…")
+            expect((startSound?["soundAfterMs"] as? Int ?? -1) >= 250, "the start sound played during the switch to the loudspeaker")
+            expect((startSound?["micAfterMs"] as? Int ?? -1) >= (startSound?["soundAfterMs"] as? Int ?? 0) + 1250,
+                   "the mic opened before the start sound was over")
+            expectEqual(startSound?["toldMac"] as? Bool, true)
+            // Ended during the start sound: the Mac never hears of it, and no mic opens.
+            let endedWhileStarting = json["endedWhileStarting"] as? [String: Any]
+            expectEqual(endedWhileStarting?["told"] as? Int, 0)
+            expectEqual(endedWhileStarting?["micAsks"] as? Int, 0)
+            expectEqual(endedWhileStarting?["conversing"] as? Bool, false)
+            // Ended and started again during the start sound: one start, one mic.
+            let quickRestart = json["quickRestart"] as? [String: Any]
+            expectEqual(quickRestart?["starts"] as? Int, 1)
+            expectEqual(quickRestart?["micAsks"] as? Int, 1)
+            expectEqual(quickRestart?["conversing"] as? Bool, true)
             // Ilan ended it by voice: the page ends too, with the closing sound, without echoing a stop.
             let byIlan = json["endedByIlan"] as? [String: Any]
             expectEqual(byIlan?["sentStop"] as? Bool, false)
@@ -459,9 +482,8 @@ func registerPhoneTests() {
             let endedAway = json["endedAway"] as? [String: Any]
             expectEqual(endedAway?["conversing"] as? Bool, false)
             expectEqual(endedAway?["sentStop"] as? Bool, false)         // nothing to send it on
-            expectEqual(endedAway?["chimed"] as? Bool, true)
             expectEqual(endedAway?["helloConversing"] as? Bool, false)
-            expectEqual(endedAway?["chimedAgain"] as? Bool, false)
+            expectEqual(endedAway?["sounds"] as? Int, 1)                // the end sound, and nothing on reconnecting
             // Pings are answered; a connection silent for 6 s is given up on and a new one opened.
             let silence = json["silence"] as? [String: Any]
             expectEqual(silence?["ponged"] as? Bool, true)
