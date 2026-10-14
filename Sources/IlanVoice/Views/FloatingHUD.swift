@@ -17,6 +17,10 @@ final class FloatingHUD {
     /// each time the pill is asked to appear, in case it ever doesn't.
     private let log = Logger(subsystem: "me.dongshi.ilan-voice", category: "pill")
     private var showWork: DispatchWorkItem?
+    /// Bumped by every show and hide: a fade-in or an order-out still on its
+    /// way from an earlier one is dropped, so a hide right after a show can't
+    /// be undone by that show's fade-in (which left the pill up for good).
+    private var visibilityChange = 0
     private static let listeningDelay: TimeInterval = VoiceSession.minRecordingSeconds
 
     /// How long to wait before "Listening". A press over a busy Ilan records
@@ -61,7 +65,16 @@ final class FloatingHUD {
     /// tap is almost always meant to cut Ilan off, so it goes straight to
     /// "Stopped assistant speech" without flashing "Listening".
     private func update(_ phase: VoiceSession.Phase, recordedFor: TimeInterval, microphone: String?) {
-        guard phase == .recording else { return }
+        guard phase == .recording else {
+            // A safety net: no longer recording, yet nothing said how the press
+            // ended, so "Listening" (or its pending show) goes. "Sent" and
+            // "Stopped" keep their moment.
+            if model.mode == .listening {
+                showWork?.cancel()
+                if panel.isVisible { hide() }
+            }
+            return
+        }
         hideWork?.cancel()
         showWork?.cancel()
         model.listen(microphone: microphone)
@@ -105,14 +118,21 @@ final class FloatingHUD {
         // fully transparent.
         panel.alphaValue = 1
         panel.orderFrontRegardless()
+        visibilityChange += 1
+        let change = visibilityChange
         log.info("show: mode=\(String(describing: self.model.mode), privacy: .public) screen=\(String(describing: self.panel.screen?.localizedName), privacy: .public) active=\(NSApp.isActive)")
-        DispatchQueue.main.async { [weak self] in self?.model.shown = true }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.visibilityChange == change else { return }
+            self.model.shown = true
+        }
     }
 
     private func hide() {
         model.shown = false
+        visibilityChange += 1
+        let change = visibilityChange
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            guard let self, !self.model.shown else { return }
+            guard let self, self.visibilityChange == change else { return }
             self.panel.orderOut(nil)
         }
     }

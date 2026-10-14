@@ -155,29 +155,35 @@ final class VoiceSession: ObservableObject {
         client.onEvent = { [weak self] in self?.handle($0) }
         client.onClose = { [weak self, weak client] reason in
             guard let self, self.client === client else { return }
-            let report = Self.shouldReport(closeReason: reason, phase: self.phase, responseActive: self.responseActive)
-            self.client = nil
-            self.sessionReady = false
-            self.cancelWatchdog()
-            if self.retryUnsentTurn() { return }
-            // A conversation carries on: reconnect (configured for it) after a moment.
-            if self.conversationActive {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-                    guard let self, self.conversationActive, self.client == nil else { return }
-                    self.connect()
-                }
-            }
-            if self.phase != .recording { self.phase = .offline }
-            if report, let reason {
-                self.errorMessage = reason
-                self.connectionError = reason
-            }
+            self.connectionClosed(reason: reason)
         }
         self.client = client
         connectedFingerprint = settings.sessionFingerprint
         sessionStartedAt = Date()
         sessionModel = settings.model
         client.connect(apiKey: settings.apiKey, model: settings.model)
+    }
+
+    /// The connection to OpenAI closed. Internal (not private) so the unit
+    /// tests can drop it.
+    func connectionClosed(reason: String?) {
+        let report = Self.shouldReport(closeReason: reason, phase: phase, responseActive: responseActive)
+        client = nil
+        sessionReady = false
+        cancelWatchdog()
+        if retryUnsentTurn() { return }
+        // A conversation carries on: reconnect (configured for it) after a moment.
+        if conversationActive {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self, self.conversationActive, self.client == nil else { return }
+                self.connect()
+            }
+        }
+        if phase != .recording { phase = .offline }
+        if report, let reason {
+            errorMessage = reason
+            connectionError = reason
+        }
     }
 
     /// The last connection error shown, so it can be cleared once a new
@@ -598,6 +604,7 @@ final class VoiceSession: ObservableObject {
         guard phase != .recording else { return }
         guard !targetLiveOnPhone else { errorMessage = Self.liveOnPhoneMessage; return }
         errorMessage = nil
+        livePress = false  // a new press: whatever the last one was is over
         pressCount += 1
         if waitForDoubleTap && (tapStop != nil || ilanBusy) {
             // Maybe a double tap, or its second half (the first tap's stop
@@ -708,6 +715,7 @@ final class VoiceSession: ObservableObject {
 
     /// The press is for talking: OpenAI starts hearing it, from its first word.
     private func goLive() {
+        livePress = true
         ensureSession()
         if sessionReady {
             client?.send(["type": "input_audio_buffer.clear"])
@@ -732,7 +740,7 @@ final class VoiceSession: ObservableObject {
         commitWhenReady = false
         inputLevel = 0
         if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
-        pressEnded.send(.discarded)
+        endPress(.discarded)
         phase = sessionReady ? .ready : (client == nil ? .offline : .connecting)
     }
 
@@ -751,7 +759,10 @@ final class VoiceSession: ObservableObject {
             tapStop = after(Self.secondTapWindow) { [weak self] in self?.stopAfterTap() }
             return
         }
-        guard phase == .recording, !finishingRecording else { return }
+        guard phase == .recording, !finishingRecording else {
+            if livePress && !finishingRecording { abandonPress() }
+            return
+        }
         mic.stop()
         // The microphone hands over audio in small batches; give the last one
         // a moment to arrive so the end of the sentence isn't cut off.
@@ -764,24 +775,51 @@ final class VoiceSession: ObservableObject {
     }
 
     private func finishRecording() {
-        guard phase == .recording else { return }
+        guard phase == .recording else {
+            if livePress { abandonPress() }
+            return
+        }
         inputLevel = 0
         // Ignore accidental taps: the API rejects buffers under ~100 ms anyway.
         // Silence (a press with nothing said) is dropped the same way, so it
         // never shows up in the conversation or reaches the model.
         guard PCM.seconds(recording) >= Self.minRecordingSeconds, PCM.containsSpeech(recording) else {
             if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
-            pressEnded.send(interruptedThisPress ? .stoppedSpeech : .discarded)
+            endPress(interruptedThisPress ? .stoppedSpeech : .discarded)
             phase = sessionReady ? .ready : (client == nil ? .offline : .connecting)
             return
         }
-        pressEnded.send(.sent)
+        endPress(.sent)
         // "Breeze" in System Settings → Sound; the file is still Blow.aiff.
         if !isRemote { NSSound(named: "Blow")?.play() }
         pendingUserAudio = recording
         phase = .thinking
         if sessionReady { commit() } else { commitWhenReady = true }
     }
+
+    /// The press is live (OpenAI hears it) and hasn't said how it ended yet.
+    /// Every live press ends with exactly one `pressEnded`: the floating pill
+    /// waits for it to go away.
+    private var livePress = false
+
+    private func endPress(_ outcome: PressOutcome) {
+        livePress = false
+        pressEnded.send(outcome)
+    }
+
+    /// Something took the session over while the key was held, so this
+    /// recording can't be sent: a dropped connection resending the message
+    /// before it (which sets "Thinking"), or a reconnect (which sets
+    /// "Offline"). Without this the key's release did nothing: the mic stayed
+    /// on and the pill kept saying "Listening".
+    private func abandonPress() {
+        mic.stop()
+        recording = Data()
+        inputLevel = 0
+        errorMessage = Self.lostPressMessage
+        endPress(.discarded)  // the pill just goes (no "Stopped": Ilan may be about to answer the resent message)
+    }
+    static let lostPressMessage = "The connection to OpenAI was reset while you were talking, so that wasn't sent. Please say it again."
 
     private func handleMic(_ data: Data, _ level: Float) {
         if conversationActive {
