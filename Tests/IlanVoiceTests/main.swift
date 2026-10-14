@@ -25,6 +25,7 @@ MainActor.assumeIsolated {
     registerUpdateCheckTests()
     registerTranscriptQualityTests()
     registerTranscriptRetryTests()
+    registerTitleAfterCorrectionTests()
     registerTextInputTests()
     registerSelectionButtonTests()
     registerMessageTextTests()

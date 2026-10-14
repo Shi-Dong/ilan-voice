@@ -128,8 +128,12 @@ final class ConversationStore: ObservableObject {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
         mutate(&conversations[idx])
         conversations[idx].updatedAt = Date()
+        // The first words as a stand-in title, once they are final: a spoken
+        // message waits until Luna has corrected its transcript.
         if conversations[idx].title == "New conversation",
-           let first = conversations[idx].messages.first(where: { $0.role == .user && !$0.pending && !$0.text.isEmpty }) {
+           let first = conversations[idx].messages.first(where: {
+               $0.role == .user && !$0.pending && $0.awaitingCorrection != true && !$0.text.isEmpty
+           }) {
             conversations[idx].title = Self.title(from: first.text)
         }
         scheduleSave(conversations[idx].id)
