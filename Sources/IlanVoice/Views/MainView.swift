@@ -177,7 +177,12 @@ struct ChatView: View {
                 }
                 .font(.system(size: 11)).foregroundStyle(Theme.textDim)
             }
-            Spacer()
+            // Never cut short or wrapped: the title shows in full and the line
+            // under it stays one line. Their full width counts towards the
+            // window's minimum width (see .windowResizability in App.swift).
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
+            Spacer(minLength: 12)
             if updater.updateAvailable {
                 GeneralSettingsButton {
                     Label("Update", systemImage: "arrow.down.circle.fill")

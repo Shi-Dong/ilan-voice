@@ -124,6 +124,9 @@ struct IlanVoiceApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
+        // The window can't be narrowed past its content's minimum width, which
+        // includes the chat header's full title and status line.
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") {
