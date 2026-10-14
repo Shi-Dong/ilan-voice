@@ -24,15 +24,16 @@ enum PhoneWebApp {
     <html lang="en">
     <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+    <!-- No viewport-fit=cover: asking to extend under the status bar made iOS
+         draw the home-screen page from the very top while still sizing it a
+         status bar shorter (an iPhone reported 812 of 874 pt), leaving a black
+         band at the bottom that is outside the page. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <!-- A translucent status bar: the page covers the whole screen. With
-         "black" (opaque), current iOS still draws the page from the very top
-         but makes it a status bar shorter, which left a black band at the
-         bottom. The clock and battery sit on a solid band the page draws
-         itself (body::before), so text never scrolls visibly under them. -->
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <!-- An opaque status bar: the page starts below the clock and battery and
+         nothing scrolls under them. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Ilan">
     <meta name="theme-color" content="#1D1818">
     <link rel="manifest" href="/manifest.webmanifest">
@@ -53,10 +54,6 @@ enum PhoneWebApp {
          black band at the bottom. The header is solid and starts at the very
          top, so the status bar sits on a crisp, even band rather than on the
          soft background gradient. */
-      /* A solid band behind the status bar (clock, battery): the page runs
-         under it, and messages scrolling there would show through. */
-      body::before { content: ""; position: fixed; z-index: 4; top: 0; left: 0; right: 0;
-        height: env(safe-area-inset-top); background: var(--ink); pointer-events: none; }
       body { display: flex; flex-direction: column; overflow: hidden; position: fixed; inset: 0;
         background: radial-gradient(120% 60% at 50% 30%, #231918 0%, var(--ink) 60%); }
       header { padding: calc(env(safe-area-inset-top) + 12px) 20px 12px; display: flex; align-items: center; gap: 12px;
@@ -197,6 +194,9 @@ enum PhoneWebApp {
         background: linear-gradient(180deg, var(--glass-strong), var(--glass));
         -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
         border: 1px solid var(--rim-soft); box-shadow: var(--glass-shadow); }
+      /* If iOS still hands the page less than the screen (see measureViewport),
+         the page's bottom is not at the home bar: no home-bar spacing then. */
+      html.short-page footer { bottom: 8px; }
       /* The talk button: a flat pane of coral glass. An even, see-through
          tint over a uniform backdrop blur, a thin crisp edge and one fine
          highlight along the top edge; no curved shine. Held: the pane turns
@@ -802,6 +802,8 @@ enum PhoneWebApp {
       const screenH = Math.max(screen.width, screen.height);
       const standalone = !!navigator.standalone || matchMedia("(display-mode: standalone)").matches;
       const gap = standalone && upright ? Math.max(0, Math.round(screenH - window.innerHeight)) : 0;
+      // Short by more than a status bar's slack: the page ends above the home bar.
+      document.documentElement.classList.toggle("short-page", gap > 30);
       if (!report) return;
       const probe = document.createElement("div");
       probe.style.cssText = "position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)";

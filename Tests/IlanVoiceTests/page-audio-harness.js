@@ -9,7 +9,9 @@ const any = () => new Proxy(function () {}, {
 const handlers = {};
 const elements = {};
 const cssVars = {};
-const el = id => elements[id] || (elements[id] = new Proxy({ id, style: { setProperty(k, v) { cssVars[k] = v; } }, classList: { add() {}, remove() {}, toggle() {} },
+const el = id => elements[id] || (elements[id] = new Proxy({ id, style: { setProperty(k, v) { cssVars[k] = v; } }, classes: new Set(),
+  get classList() { const c = this.classes; return { add: (...n) => n.forEach(x => c.add(x)), remove: (...n) => n.forEach(x => c.delete(x)),
+                    toggle: (n, on) => { if (on === undefined ? !c.has(n) : on) c.add(n); else c.delete(n); }, contains: n => c.has(n) }; },
   textContent: "", addEventListener: (type, fn) => { (handlers[id + ":" + type] = handlers[id + ":" + type] || []).push(fn); },
   setPointerCapture() {}, getContext: () => any(), appendChild() {}, append() {}, click() {}, setAttribute() {} }, {
   get: (t, k) => (k in t ? t[k] : any()), set: (t, k, v) => { t[k] = v; return true; } }));
@@ -87,6 +89,7 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   const after = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length,
                   screenKeptOn: wakeLocks.some(l => !l.released) };
   const viewport = sent.map(m => { try { return JSON.parse(m); } catch (e) { return {}; } }).find(m => m.type === "viewport");
-  console.log(JSON.stringify({ atLoad: audioSessionTypes[0], during, after, gapVar: cssVars["--gap"], viewport,
+  const shortPage = el("html").classes.has("short-page");
+  console.log(JSON.stringify({ atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
     pocket: { afterStrayTap, afterShortPush, afterSmallPush, afterDrift, afterEndGesture } }));
 })();
