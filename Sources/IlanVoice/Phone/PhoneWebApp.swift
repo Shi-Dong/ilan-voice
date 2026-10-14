@@ -770,32 +770,26 @@ enum PhoneWebApp {
     // ---- Sound feedback for starting and ending a conversation ----
     // "Halo", made on the spot (no files): two soft sine notes a fifth apart
     // that fade in, linger a moment and fade out, about 0.9 s. Start: E and
-    // B, rising; end: A and E, settling lower. A short, darkened echo adds
+    // B, rising; end: A and E an octave below, settling low. A short, darkened echo adds
     // space, and a gentle compressor evens it out.
     // iOS cuts off the start of a sound that plays while it is still
     // switching the phone's audio on, or over to another route (the
-    // loudspeaker, after the mic). The audio context's clock can already be
-    // running then, while the speaker is still silent. So before playing,
-    // soundReady waits for three things: the context running, iOS saying the
-    // phone's audio is "active" (navigator.audioSession.state, where there
-    // is one), and then SOUND_SETTLE_MS of steady audio on top. Meanwhile it
-    // plays an inaudible hum, so the speaker is really running by the time
-    // the sound starts. playSound then resolves once the sound and its echo
-    // are over, timed on the audio clock (which stops while iOS pauses it,
-    // so a paused sound is still waited for).
-    const SOUND_LEN = 0.9, SOUND_TAIL = 0.35, SOUND_SETTLE_MS = 350, SOUND_WAIT_MAX_MS = 2000, SOUND_POLL_MS = 20;
+    // loudspeaker, after the mic): the audio context's clock can already be
+    // running while the speaker is still silent. So soundReady first plays
+    // an inaudible hum until the context has been running steadily for
+    // SOUND_SETTLE_MS, so the speaker is really on when the sound starts
+    // (tried on an iPhone: the most reliable of several waits). playSound
+    // then resolves once the sound and its echo are over, timed on the audio
+    // clock (which stops while iOS pauses it, so a paused sound is still
+    // waited for).
+    const SOUND_LEN = 0.9, SOUND_TAIL = 0.35, SOUND_SETTLE_MS = 300, SOUND_WAIT_MAX_MS = 2000, SOUND_POLL_MS = 20;
     const wait = ms => new Promise(r => setTimeout(r, ms));
-    function audioActive() {
-      try { return !navigator.audioSession || !("state" in navigator.audioSession) || navigator.audioSession.state === "active"; }
-      catch (e) { return true; }
-    }
     async function soundReady(c) {
       const stopHum = hum(c);
-      let steadySince = null;  // audio-clock time since when the context has been running, with iOS's audio active
+      let steadySince = null;  // audio-clock time since when the context has been running
       for (let waited = 0; waited < SOUND_WAIT_MAX_MS; waited += SOUND_POLL_MS) {
         if (c.state === "closed") break;
         if (c.state !== "running") { steadySince = null; c.resume().catch(() => {}); }
-        else if (!audioActive()) steadySince = null;
         else if (steadySince === null) steadySince = c.currentTime;
         else if (c.currentTime - steadySince >= SOUND_SETTLE_MS / 1000) break;
         await wait(SOUND_POLL_MS);
@@ -819,8 +813,8 @@ enum PhoneWebApp {
         note(c, bus, E5, t, 0.17, 0.06, SOUND_LEN);
         note(c, bus, B5, t + 0.04, 0.136, 0.06, SOUND_LEN);
       } else {
-        note(c, bus, A4, t, 0.187, 0.048, SOUND_LEN);
-        note(c, bus, E5, t, 0.119, 0.048, SOUND_LEN * 0.9);
+        note(c, bus, A3, t, 0.187, 0.048, SOUND_LEN);
+        note(c, bus, E4, t, 0.119, 0.048, SOUND_LEN * 0.9);
       }
       const limit = (SOUND_LEN + SOUND_TAIL) * 1000 + SOUND_WAIT_MAX_MS;
       for (let waited = 0; c.state !== "closed" && c.currentTime < end && waited < limit; waited += SOUND_POLL_MS) await wait(SOUND_POLL_MS);
@@ -849,7 +843,7 @@ enum PhoneWebApp {
       o.connect(g); g.connect(bus.dry); g.connect(bus.echo);
       o.start(at); o.stop(at + len + 0.05);
     }
-    const A4 = 440, E5 = 659.25, B5 = 987.77;
+    const A3 = 220, E4 = 329.63, E5 = 659.25, B5 = 987.77;
 
     // Starting is a tap. Ending is deliberate, so a phone in a pocket (screen
     // on) can't end it by a stray touch: touching the button shows a track
