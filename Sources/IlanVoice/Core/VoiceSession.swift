@@ -1021,6 +1021,7 @@ final class VoiceSession: ObservableObject {
         case "conversation.item.input_audio_transcription.failed":
             guard let itemID = event["item_id"] as? String else { return }
             store.updateMessage(convID, itemID) { $0.text = "(transcription failed)"; $0.pending = false }
+            retitleWhenSettled(convID)
 
         case "response.created":
             currentResponseID = (event["response"] as? [String: Any])?["id"] as? String
@@ -1068,7 +1069,7 @@ final class VoiceSession: ObservableObject {
                   item["type"] as? String == "message" else { return }
             saveReplyAudio(convID, itemID)
             store.updateMessage(convID, itemID) { $0.pending = false }
-            retitle(convID)
+            retitleWhenSettled(convID)
 
         case "response.done":
             let response = event["response"] as? [String: Any] ?? [:]
@@ -1127,6 +1128,20 @@ final class VoiceSession: ObservableObject {
     /// name. Only the newest request per conversation may apply its result.
     private var titleRequests: [UUID: Int] = [:]
 
+    /// Unit tests only: stand in for the title model and the transcript fixer.
+    var titleOverride: (@MainActor (_ messages: [Message]) async -> String?)?
+    var transcriptFixOverride: (@MainActor (_ transcript: String) async -> String?)?
+
+    /// Names the conversation only once the user's latest message is final:
+    /// transcribed and, when spoken, corrected by Luna (correctTranscript
+    /// calls this when it is done). Otherwise the title could be built from
+    /// misheard words.
+    private func retitleWhenSettled(_ convID: UUID) {
+        guard let conv = store.conversations.first(where: { $0.id == convID }) else { return }
+        if let user = conv.messages.last(where: { $0.role == .user }), user.pending || user.awaitingCorrection == true { return }
+        retitle(convID)
+    }
+
     private func retitle(_ convID: UUID) {
         guard let conv = store.conversations.first(where: { $0.id == convID }), conv.titleLocked != true else { return }
         let ticket = (titleRequests[convID] ?? 0) + 1
@@ -1135,8 +1150,10 @@ final class VoiceSession: ObservableObject {
         let key = settings.apiKey
         let model = settings.titleModel
         Task {
-            guard let title = await ConversationTitler.title(for: messages, apiKey: key, model: model),
-                  titleRequests[convID] == ticket else { return }
+            let title: String?
+            if let titleOverride { title = await titleOverride(messages) }
+            else { title = await ConversationTitler.title(for: messages, apiKey: key, model: model) }
+            guard let title, titleRequests[convID] == ticket else { return }
             store.setAutoTitle(convID, title)
         }
     }
@@ -1175,6 +1192,7 @@ final class VoiceSession: ObservableObject {
     /// words using the dictionary, the recent conversation, Ilan's tool calls
     /// and replies. The raw transcript is kept in `rawText`. Runs from either
     /// event (transcript done, final response done), whichever comes last.
+    /// The conversation is renamed after it, from the corrected words.
     private func correctTranscript(_ convID: UUID) {
         let finished = !responseActive && phase != .thinking && phase != .working
         guard let conv = store.conversations.first(where: { $0.id == convID }),
@@ -1186,8 +1204,10 @@ final class VoiceSession: ObservableObject {
         let history = Array(conv.messages.prefix { $0.id != user.id })
         let key = settings.apiKey, model = settings.titleModel, terms = UserDictionary.terms()
         Task {
-            let fixed = await TranscriptFixer.fix(user.text, dictionary: terms, history: history,
-                                                  tools: turn.tools, reply: reply, apiKey: key, model: model)
+            let fixed: String?
+            if let transcriptFixOverride { fixed = await transcriptFixOverride(user.text) }
+            else { fixed = await TranscriptFixer.fix(user.text, dictionary: terms, history: history,
+                                                     tools: turn.tools, reply: reply, apiKey: key, model: model) }
             // Final either way: corrected, unchanged, or every attempt failed.
             store.updateMessage(convID, user.id) { message in
                 message.awaitingCorrection = nil
@@ -1195,6 +1215,7 @@ final class VoiceSession: ObservableObject {
                 message.rawText = message.rawText ?? message.text
                 message.text = fixed
             }
+            retitleWhenSettled(convID)  // now the title can use the corrected words
         }
     }
 
