@@ -258,3 +258,31 @@ func registerConversationEdgeTests() {
         }
     }
 }
+
+@MainActor
+func registerConversationStopTests() {
+    suite("Ending a conversation") { test in
+        test("ending while Ilan is talking silences it at once") {
+            let store = ConversationStore()
+            let conv = store.newConversation()
+            let speaker = FakeSpeaker()
+            speaker.isPlaying = false
+            let session = VoiceSession(store: store, mcp: MCPManager(), input: FakeMic(), output: speaker,
+                                       isRemote: true, target: { conv.id })
+            session.conversationID = conv.id
+            session.startConversation()
+            session.handle(["type": "response.created", "response": ["id": "r1"]])
+            speaker.isPlaying = true
+            session.handle(["type": "response.output_audio.delta", "response_id": "r1", "item_id": "i1",
+                            "delta": Data(count: 4800).base64EncodedString()])
+            let before = speaker.stops
+            session.stopConversation()
+            expect(speaker.stops > before, "Ilan kept talking")
+            // Any more of that reply is dropped, not played.
+            let enqueued = speaker.enqueued
+            session.handle(["type": "response.output_audio.delta", "response_id": "r1", "item_id": "i1",
+                            "delta": Data(count: 4800).base64EncodedString()])
+            expectEqual(speaker.enqueued, enqueued)
+        }
+    }
+}

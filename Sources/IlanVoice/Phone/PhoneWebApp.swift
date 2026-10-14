@@ -578,37 +578,21 @@ enum PhoneWebApp {
       stopAudio();
       send({ type: "conversation_start" });
       showState();
-      haptic(1); chime(true);
+      chime(true);
       startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
     }
     function stopConversation() {
       if (!held) return;
       held = false; sending = false;
       $("talk").classList.remove("held");
+      stopAudio();  // Ilan goes quiet at once, before the Mac even hears about it
       send({ type: "conversation_stop" });
       stopMic();
       audioContext();
       showState();
-      haptic(2); chime(false);
+      chime(false);
     }
-    // ---- Feedback for starting and ending a conversation ----
-    // Haptics: iOS Safari has no navigator.vibrate, but since iOS 18 toggling
-    // a <input type="checkbox" switch> plays the system haptic tap, so a
-    // hidden one is clicked (inside the user's tap). Elsewhere, vibrate.
-    const hapticBox = (() => {
-      const label = document.createElement("label");
-      label.setAttribute("aria-hidden", "true");
-      label.style.cssText = "position:fixed;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;left:-10px;top:-10px";
-      const box = document.createElement("input");
-      box.type = "checkbox"; box.setAttribute("switch", ""); box.tabIndex = -1;
-      label.appendChild(box); document.body.appendChild(label);
-      return label;
-    })();
-    function haptic(times) {
-      if (navigator.vibrate) { navigator.vibrate(times === 2 ? [12, 60, 12] : 12); return; }
-      hapticBox.click();
-      if (times === 2) setTimeout(() => hapticBox.click(), 90);
-    }
+    // ---- Sound feedback for starting and ending a conversation ----
     // Sounds, made on the spot: two soft notes rising to start, falling to end.
     function chime(rising) {
       const c = audioContext(), t = c.currentTime + 0.01;
