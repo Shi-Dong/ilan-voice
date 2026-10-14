@@ -713,7 +713,7 @@ enum PhoneWebApp {
       const comp = c.createDynamicsCompressor();
       comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 4;
       comp.attack.value = 0.003; comp.release.value = 0.2;
-      const out = c.createGain(); out.gain.value = 1.4;
+      const out = c.createGain(); out.gain.value = 0.9;  // on the loudspeaker 1.4 was too loud
       comp.connect(out); out.connect(c.destination);
       const echo = c.createDelay(0.5), fb = c.createGain(), wet = c.createGain();
       echo.delayTime.value = 0.13; fb.gain.value = 0.28; wet.gain.value = 0.22;
