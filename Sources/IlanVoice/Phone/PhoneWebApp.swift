@@ -811,7 +811,7 @@ enum PhoneWebApp {
       const comp = c.createDynamicsCompressor();
       comp.threshold.value = -20; comp.knee.value = 14; comp.ratio.value = 3;
       comp.attack.value = 0.004; comp.release.value = 0.2;
-      const out = c.createGain(); out.gain.value = 0.9;
+      const out = c.createGain(); out.gain.value = 1.17;  // 1.3× the first Halo level (0.9)
       comp.connect(out); out.connect(c.destination);
       const echo = c.createDelay(0.5), fb = c.createGain(), dark = c.createBiquadFilter(), wet = c.createGain();
       echo.delayTime.value = 0.09; fb.gain.value = 0.32; dark.type = "lowpass"; dark.frequency.value = 2600; wet.gain.value = 0.2;
