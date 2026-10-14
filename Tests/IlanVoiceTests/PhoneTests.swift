@@ -267,6 +267,13 @@ func registerPhoneTests() {
     }
 
     suite("Phone web page") { test in
+        test("the last message clears the floating footer: its room counts the gap under it") {
+            let html = PhoneWebApp.html
+            expect(html.contains("window.innerHeight - foot.getBoundingClientRect().top"),
+                   "the list must leave room for the footer's height plus the gap below it")
+            expect(html.contains("if (typeof sizeBars === \"function\") sizeBars();  // the footer's gap just changed"),
+                   "re-measure when the short-page spacing changes")
+        }
         test("without the microphone the hint says to tap to allow it") {
             expect(PhoneWebApp.html.contains("Tap the button to allow the microphone"))
             expect(PhoneWebApp.html.contains(#"class="icon-nomic""#), "no crossed-out mic icon")
