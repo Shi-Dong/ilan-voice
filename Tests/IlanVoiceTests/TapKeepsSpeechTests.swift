@@ -24,6 +24,9 @@ final class FakeMic: VoiceInput {
     var loud = true
     /// 20 ms of audio delivered so far (each tick is one voiced frame when loud).
     var ticks = 0
+    /// 20 ms frames delivered per tick: above 1 the mic runs faster than real
+    /// time, so tests of long speech (0.8 s over Ilan) stay quick.
+    var framesPerTick = 1
     var starts = 0
     /// How long the permission check takes (the first-run prompt is slow).
     var permissionDelay = 0.0
@@ -42,7 +45,8 @@ final class FakeMic: VoiceInput {
             guard let self, self.running else { return }
             self.ticks += 1
             // 20 ms of audio in phone-sized pieces (the iPhone page sends 64 samples at a time).
-            let audio = self.loud ? Self.speech : Data(count: Self.speech.count)
+            let frame = self.loud ? Self.speech : Data(count: Self.speech.count)
+            let audio = Data((0..<self.framesPerTick).flatMap { _ in frame })
             stride(from: 0, to: audio.count, by: Self.pieceBytes).forEach { offset in
                 self.onChunk?(audio.subdata(in: offset..<min(offset + Self.pieceBytes, audio.count)), self.loud ? 0.3 : 0)
             }

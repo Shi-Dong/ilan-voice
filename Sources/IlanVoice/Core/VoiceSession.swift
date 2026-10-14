@@ -371,9 +371,11 @@ final class VoiceSession: ObservableObject {
     /// While Ilan is talking on the phone, the mic also hears Ilan: its own
     /// first words leak back in short bursts before iOS's echo cancellation
     /// catches up (two "Let me." turns had 13 and 15 voiced frames over ~5 s).
-    /// So a turn that starts while Ilan is talking needs 0.5 s of voice; the
-    /// user's real speech has about 30 voiced frames a second.
-    static let minBargeInVoicedFrames = 25
+    /// So a turn that starts while Ilan is talking needs 0.8 s of voice to
+    /// interrupt Ilan or be sent at all; shorter speech is dropped. The user's
+    /// real speech has about 30 voiced frames a second, so a real interruption
+    /// gets through after roughly a second of talking.
+    static let minBargeInVoicedFrames = 40
     /// Ilan was talking when this turn started (see `minBargeInVoicedFrames`).
     private var turnOverIlan = false
     private var turnVoiceNeeded: Int { turnOverIlan ? Self.minBargeInVoicedFrames : Self.minTurnVoicedFrames }

@@ -46,7 +46,8 @@ func registerConversationModeTests() {
             session.stopConversation()
         }
         test("speaking over Ilan stops its reply") {
-            let (session, speaker, _) = makeSession()
+            let (session, speaker, mic) = makeSession()
+            mic.framesPerTick = 4  // 0.8 s of voice in 0.2 s
             session.startConversation()
             session.handle(["type": "response.created", "response": ["id": "r1"]])
             speaker.isPlaying = true
@@ -280,7 +281,8 @@ func registerConversationNoiseTests() {
             session.stopConversation()
         }
         test("real speech over Ilan still interrupts, and becomes a turn") {
-            let (session, speaker, _, store, convID) = makeSession()
+            let (session, speaker, mic, store, convID) = makeSession()
+            mic.framesPerTick = 4  // 0.8 s of voice in 0.2 s
             session.startConversation()
             session.handle(["type": "response.created", "response": ["id": "r1"]])
             speaker.isPlaying = true
@@ -325,13 +327,13 @@ func registerConversationEchoTests() {
         session.handle(["type": "response.output_audio.delta", "response_id": "r1", "item_id": "i1",
                         "delta": Data(count: 4800).base64EncodedString()])
     }
-    /// A short burst of exactly 15 voiced frames (0.3 s, like the echoed "Let me"), then quiet.
-    func burst(_ session: VoiceSession, _ mic: FakeMic, item: String) {
+    /// A burst of exactly `frames` voiced frames (default 15 = 0.3 s, like the echoed "Let me"), then quiet.
+    func burst(_ session: VoiceSession, _ mic: FakeMic, item: String, frames: Int = 15) {
         mic.loud = false
         session.handle(["type": "input_audio_buffer.speech_started"])
         let start = mic.ticks
         mic.loud = true
-        expect(waitFor(3) { mic.ticks >= start + 15 }, "mic stalled")
+        expect(waitFor(3) { mic.ticks >= start + frames }, "mic stalled")
         mic.loud = false
         waitFor(0.05) { false }
         session.handle(["type": "input_audio_buffer.speech_stopped"])
@@ -349,6 +351,16 @@ func registerConversationEchoTests() {
             expect(store.message(convID, "e1") == nil)
             session.stopConversation()
         }
+        test("0.6 s of speech while Ilan talks is still too short: not sent, no interruption") {
+            let (session, speaker, mic, store, convID) = makeSession()
+            session.startConversation()
+            ilanTalks(session, speaker)
+            let stops = speaker.stops
+            burst(session, mic, item: "s1", frames: 30)
+            expectEqual(speaker.stops, stops)
+            expect(store.message(convID, "s1") == nil)
+            session.stopConversation()
+        }
         test("the same short burst while Ilan is quiet is a turn") {
             let (session, _, mic, store, convID) = makeSession()
             session.startConversation()
@@ -357,7 +369,8 @@ func registerConversationEchoTests() {
             session.stopConversation()
         }
         test("talking over Ilan for real still interrupts it") {
-            let (session, speaker, _, store, convID) = makeSession()
+            let (session, speaker, mic, store, convID) = makeSession()
+            mic.framesPerTick = 4  // 0.8 s of voice in 0.2 s
             session.startConversation()
             ilanTalks(session, speaker)
             let stops = speaker.stops
@@ -368,9 +381,10 @@ func registerConversationEchoTests() {
             expect(store.message(convID, "u1") != nil)
             session.stopConversation()
         }
-        test("the bar while Ilan talks sits above the echo bursts and below real speech") {
-            expect(VoiceSession.minBargeInVoicedFrames > 15)  // the two echo turns: 13 and 15
-            expect(VoiceSession.minBargeInVoicedFrames <= 30) // real speech: about 30 a second
+        test("while Ilan talks, under 0.8 s of voice is never sent; while quiet, 0.2 s is enough") {
+            expectEqual(VoiceSession.minBargeInVoicedFrames, 40)  // 0.8 s of 20 ms frames
+            expectEqual(VoiceSession.minTurnVoicedFrames, 10)     // 0.2 s
+            expect(VoiceSession.minBargeInVoicedFrames > 15)      // the two echo turns: 13 and 15
         }
     }
 }
