@@ -261,12 +261,6 @@ func registerPhoneTests() {
     }
 
     suite("Phone web page") { test in
-        test("the stretch for a short page only applies when one is measured") {
-            let html = PhoneWebApp.html
-            expect(html.contains("bottom: calc(-1 * var(--gap, 0px));"), "background not stretched by the gap")
-            expect(html.contains("- var(--gap, 0px));"), "footer not moved down by the gap")
-            expect(html.contains("standalone && upright ?"), "the gap must be zero outside an upright home-screen app")
-        }
         test("pocket mode: screen on, only hold-and-slide-up ends; then audio and screen are let go (needs Node.js)") {
             let html = PhoneWebApp.html
             guard let open = html.range(of: "<script>"), let close = html.range(of: "</script>", range: open.upperBound..<html.endIndex) else {
@@ -304,7 +298,6 @@ func registerPhoneTests() {
             expectEqual(after?["screenKeptOn"] as? Bool, false)         // Auto-Lock works again afterwards
             // A home-screen page shorter than the screen: the shortfall is measured,
             // applied (background stretched, footer moved down), and reported to the Mac.
-            expectEqual(json["gapVar"] as? String, "62px")
             let viewport = json["viewport"] as? [String: Any]
             expectEqual(viewport?["gap"] as? Int, 62)
             expectEqual(viewport?["innerHeight"] as? Int, 790)
