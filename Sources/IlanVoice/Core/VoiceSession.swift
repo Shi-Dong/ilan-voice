@@ -285,8 +285,7 @@ final class VoiceSession: ObservableObject {
                     "format": ["type": "audio/pcm", "rate": 24000],
                     "turn_detection": turnDetection,
                     "noise_reduction": noiseReduction,
-                    // In a conversation nothing is transcribed live (see stopConversation).
-                    "transcription": conversationActive ? NSNull() as Any : transcriptionConfig(dictionary, context: lastAssistantText()) as Any,
+                    "transcription": transcriptionConfig(dictionary, context: lastAssistantText()),
                 ],
                 "output": [
                     "format": ["type": "audio/pcm", "rate": 24000],
@@ -407,7 +406,6 @@ final class VoiceSession: ObservableObject {
         watchConversationAudio()
         conversationAudio = Data()
         inTurn = false
-        conversationTurns = []
         ensureSession()  // a new session is configured for conversation from the start
         if sessionReady {
             client?.send(["type": "input_audio_buffer.clear"])
@@ -430,8 +428,6 @@ final class VoiceSession: ObservableObject {
         if let id = conversationID ?? target() { store.liveOnPhone.remove(id) }
         mic.stop()
         inputLevel = 0
-        if let convID = conversationID { transcribeConversation(convID, conversationTurns) }
-        conversationTurns = []
         conversationAudio = Data()
         if sessionReady {
             client?.send(["type": "input_audio_buffer.clear"])
@@ -459,10 +455,8 @@ final class VoiceSession: ObservableObject {
     }
 
     private func sendTurnDetection() {
-        let transcription: Any = conversationActive ? NSNull() : transcriptionConfig(UserDictionary.terms(), context: lastAssistantText())
         client?.send(["type": "session.update", "session": [
-            "type": "realtime", "audio": ["input": ["turn_detection": turnDetection, "transcription": transcription,
-                                                    "noise_reduction": noiseReduction]],
+            "type": "realtime", "audio": ["input": ["turn_detection": turnDetection, "noise_reduction": noiseReduction]],
         ]])
     }
 
@@ -470,8 +464,6 @@ final class VoiceSession: ObservableObject {
     /// next one), so each turn is saved as its own recording.
     private var conversationAudio = Data()
     private var inTurn = false
-    /// The user's turns in this conversation, transcribed when it ends.
-    private var conversationTurns: [String] = []
     /// Kept from just before OpenAI noticed speech: it hears the start a moment late.
     static let turnLeadBytes = Int(PCM.sampleRate) * 2 / 2  // 0.5 s
 
@@ -481,35 +473,6 @@ final class VoiceSession: ObservableObject {
         conversationAudio = Data()
         inTurn = false
         return turn
-    }
-
-    /// Each turn: speech to text from its recording, then Luna's repair.
-    private func transcribeConversation(_ convID: UUID, _ turns: [String]) {
-        guard !turns.isEmpty else { return }
-        let key = settings.apiKey, sttModel = settings.transcriptionModel, lunaModel = settings.titleModel
-        let terms = UserDictionary.terms(), store = store
-        Task {
-            // Right away, even if Ilan is still answering: Luna sees what it has so far.
-            guard let conv = store.conversations.first(where: { $0.id == convID }) else { return }
-            let results = await ConversationTranscriber.finish(
-                turns, messages: conv.messages,
-                audio: { m in m.audioFile.flatMap { try? Data(contentsOf: store.audioURL(convID, $0)) } },
-                transcribe: { wav, context in
-                    await SpeechToText.transcribe(wav: wav, model: sttModel,
-                                                  prompt: UserDictionary.transcriptionPrompt(terms, context: context), apiKey: key)
-                },
-                fix: { raw, history, tools, reply in
-                    await TranscriptFixer.fix(raw, dictionary: terms, history: history, tools: tools,
-                                              reply: reply, apiKey: key, model: lunaModel)
-                })
-            for (id, result) in results {
-                store.updateMessage(convID, id) { message in
-                    message.text = result.text
-                    if !result.raw.isEmpty, result.raw != result.text { message.rawText = result.raw }
-                    message.awaitingCorrection = nil
-                }
-            }
-        }
     }
 
     // MARK: Push to talk
@@ -931,11 +894,8 @@ final class VoiceSession: ObservableObject {
                 if !confirmed { interrupt() }  // only now known to be speech
                 phase = .thinking
                 client?.send(["type": "response.create"])
-                // Not transcribed live: grey "Transcribing…" until the conversation ends.
+                // Transcribed live like a push-to-talk turn; Luna repairs it once Ilan has answered.
                 pendingUserAudio = takeTurnAudio()
-                msg.pending = false
-                msg.awaitingCorrection = true
-                conversationTurns.append(itemID)
             }
             if let pcm = pendingUserAudio {
                 let file = "\(itemID).wav"
@@ -944,10 +904,8 @@ final class VoiceSession: ObservableObject {
                 msg.audioSeconds = PCM.seconds(pcm)
                 pendingUserAudio = nil
             }
-            let conversing = conversationActive
             store.update(convID) { conv in
-                // A conversation's earlier turns stay grey until it ends and they are transcribed.
-                if !conversing { Self.settleEarlierCorrections(&conv) }
+                Self.settleEarlierCorrections(&conv)
                 conv.messages.append(msg)
             }
 
