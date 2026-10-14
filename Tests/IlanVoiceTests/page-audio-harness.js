@@ -8,7 +8,8 @@ const any = () => new Proxy(function () {}, {
 });
 const handlers = {};
 const elements = {};
-const el = id => elements[id] || (elements[id] = new Proxy({ id, style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {} },
+const cssVars = {};
+const el = id => elements[id] || (elements[id] = new Proxy({ id, style: { setProperty(k, v) { cssVars[k] = v; } }, classList: { add() {}, remove() {}, toggle() {} },
   textContent: "", addEventListener: (type, fn) => { (handlers[id + ":" + type] = handlers[id + ":" + type] || []).push(fn); },
   setPointerCapture() {}, getContext: () => any(), appendChild() {}, append() {}, click() {}, setAttribute() {} }, {
   get: (t, k) => (k in t ? t[k] : any()), set: (t, k, v) => { t[k] = v; return true; } }));
@@ -30,14 +31,23 @@ const g = {
   window: null, console,
   document: { getElementById: el, querySelector: () => el("q"), createElement: () => el("x" + Math.random()),
               body: el("body"), documentElement: el("html"), addEventListener() {}, hidden: false },
-  navigator: { wakeLock: { request: async type => { const l = { type, released: false, release: async () => { l.released = true; } };
+  // An upright iPhone (393 x 852 pt) whose home-screen page is 62 pt short.
+  screen: { width: 393, height: 852 }, innerWidth: 393, innerHeight: 790, visualViewport: { height: 790 },
+  matchMedia: () => ({ matches: true }),
+  addEventListener() {},
+  getComputedStyle: () => ({ paddingTop: "62px", paddingBottom: "34px" }),
+  navigator: { standalone: true, wakeLock: { request: async type => { const l = { type, released: false, release: async () => { l.released = true; } };
                                                     wakeLocks.push(l); return l; } },
                audioSession: { set type(v) { audioSessionTypes.push(v); }, get type() { return audioSessionTypes.at(-1); } },
                mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } },
   localStorage: { getItem: k => (k === "ilanToken" ? "t" : k === "ilanDevice" ? "d" : null), setItem() {}, removeItem() {} },
   location: { protocol: "https:", host: "h", search: "" }, URLSearchParams: class { get() { return null; } },
-  WebSocket: class { constructor() { this.readyState = 1; setTimeout(() => this.onopen && this.onopen(), 0); }
-                     send(m) { sent.push(m); } close() {} },
+  // Opens, and answers the page's hello the way the Mac does.
+  // (On the harness's own timers, so it opens when run() drains them.)
+  WebSocket: class { constructor() { this.readyState = 1; g.setTimeout(() => this.onopen && this.onopen(), 0); }
+                     send(m) { sent.push(m);
+                       if (m.includes('"hello"')) g.setTimeout(() => this.onmessage && this.onmessage({ data: JSON.stringify({ type: "hello_ok" }) }), 0); }
+                     close() {} },
   AudioContext: FakeAudioContext, AudioWorkletNode: class { constructor() { this.port = {}; } connect() {} disconnect() {} },
   setTimeout: (fn, ms) => { timers.push({ fn, at: (ms || 0) }); return timers.length; }, clearTimeout() {},
   setInterval: () => 0, requestAnimationFrame() {}, ResizeObserver: class { observe() {} },
@@ -74,6 +84,7 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   run();                                   // the end chime rings out, then the page lets go
   const after = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length,
                   screenKeptOn: wakeLocks.some(l => !l.released) };
-  console.log(JSON.stringify({ atLoad: audioSessionTypes[0], during, after,
+  const viewport = sent.map(m => { try { return JSON.parse(m); } catch (e) { return {}; } }).find(m => m.type === "viewport");
+  console.log(JSON.stringify({ atLoad: audioSessionTypes[0], during, after, gapVar: cssVars["--gap"], viewport,
     pocket: { afterStrayTap, afterQuickSwipe, afterShortSlide, afterEndGesture } }));
 })();

@@ -261,6 +261,12 @@ func registerPhoneTests() {
     }
 
     suite("Phone web page") { test in
+        test("the stretch for a short page only applies when one is measured") {
+            let html = PhoneWebApp.html
+            expect(html.contains("bottom: calc(-1 * var(--gap, 0px));"), "background not stretched by the gap")
+            expect(html.contains("- var(--gap, 0px));"), "footer not moved down by the gap")
+            expect(html.contains("standalone && upright ?"), "the gap must be zero outside an upright home-screen app")
+        }
         test("pocket mode: screen on, only hold-and-slide-up ends; then audio and screen are let go (needs Node.js)") {
             let html = PhoneWebApp.html
             guard let open = html.range(of: "<script>"), let close = html.range(of: "</script>", range: open.upperBound..<html.endIndex) else {
@@ -296,6 +302,13 @@ func registerPhoneTests() {
             expectEqual(during?["session"] as? String, "play-and-record")
             expectEqual(during?["screenKeptOn"] as? Bool, true)         // auto-lock would end the conversation
             expectEqual(after?["screenKeptOn"] as? Bool, false)         // Auto-Lock works again afterwards
+            // A home-screen page shorter than the screen: the shortfall is measured,
+            // applied (background stretched, footer moved down), and reported to the Mac.
+            expectEqual(json["gapVar"] as? String, "62px")
+            let viewport = json["viewport"] as? [String: Any]
+            expectEqual(viewport?["gap"] as? Int, 62)
+            expectEqual(viewport?["innerHeight"] as? Int, 790)
+            expectEqual(viewport?["safeTop"] as? Int, 62)
             // Pocket mode: only a hold-and-slide-up ends the conversation.
             let pocket = json["pocket"] as? [String: Any]
             expectEqual(pocket?["afterStrayTap"] as? Bool, true)        // still on
@@ -329,6 +342,27 @@ func registerPhoneTests() {
             if process.terminationStatus != 0 {
                 print(String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
             }
+        }
+    }
+}
+
+/// The page's viewport reports end up in a log the Mac keeps, for diagnosing
+/// iOS layout bugs on a phone we can't look at.
+@MainActor
+func registerViewportLogTests() {
+    suite("Phone viewport log") { test in
+        test("a report from the page is appended to phone-viewport.log with time and device") {
+            try? FileManager.default.removeItem(at: PhoneClient.viewportLog)
+            let store = ConversationStore()
+            let client = PhoneClient(device: "test-phone", store: store, mcp: MCPManager())
+            client.receiveForTesting(#"{"type":"viewport","innerHeight":790,"screenHeight":852,"gap":62}"#)
+            client.receiveForTesting(#"{"type":"viewport","innerHeight":852,"screenHeight":852,"gap":0}"#)
+            let lines = (try? String(contentsOf: PhoneClient.viewportLog, encoding: .utf8))?.split(separator: "\n") ?? []
+            expectEqual(lines.count, 2)
+            let first = (try? JSONSerialization.jsonObject(with: Data((lines.first ?? "").utf8))) as? [String: Any]
+            expectEqual(first?["gap"] as? Int, 62)
+            expectEqual(first?["device"] as? String, "test-phone")
+            expect(first?["time"] != nil)
         }
     }
 }
