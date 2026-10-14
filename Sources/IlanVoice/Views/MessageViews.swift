@@ -72,21 +72,11 @@ struct MessageRow: View {
                 } else {
                     messageText(message.text, color: NSColor(white: 1, alpha: 0.92), lineSpacing: 3)
                 }
-                // The replay button on the left, this reply's tokens on the right of the same line.
                 let usage = settings.showUsage ? message.usage : nil
                 if message.audioFile != nil || usage != nil {
-                    HStack(alignment: .center, spacing: 12) {
+                    ReplyFooter(usage: usage.map(Pricing.describe)) {
                         if message.audioFile != nil {
                             PlayChip(message: message, session: session, clips: clips, dark: false)
-                        }
-                        Spacer(minLength: 0)
-                        if let usage {
-                            Text(Pricing.describe(usage))
-                                .font(.system(size: 10)).monospacedDigit()
-                                .foregroundStyle(Theme.textDim)
-                                .lineLimit(1)
-                                .fixedSize()
-                                .help("Tokens this reply used (including any tool steps before it): input, of which cached, and output")
                         }
                     }
                 }
@@ -100,8 +90,42 @@ struct MessageRow: View {
     }
 }
 
+/// Under a reply: the replay button on the left and the reply's tokens on the
+/// right of the same line, or, when the bubble is too narrow for both, the
+/// tokens on a line of their own under it. Neither is ever squeezed.
+struct ReplyFooter<Player: View>: View {
+    let usage: String?
+    @ViewBuilder var player: () -> Player
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 12) {
+                player()
+                Spacer(minLength: 0)
+                tokens
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                player()
+                tokens
+            }
+        }
+    }
+
+    @ViewBuilder private var tokens: some View {
+        if let usage {
+            Text(usage)
+                .font(.system(size: 10)).monospacedDigit()
+                .foregroundStyle(Theme.textDim)
+                .lineLimit(1)
+                .fixedSize()
+                .help("Tokens this reply used (including any tool steps before it): input, of which cached, and output")
+        }
+    }
+}
+
 /// Play/pause pill with a progress bar, a duration, and a "new" dot for
-/// cached replies that have not been heard yet.
+/// cached replies that have not been heard yet. It never shrinks: squeezed,
+/// its duration used to wrap one character per line.
 struct PlayChip: View {
     let message: Message
     @ObservedObject var session: VoiceSession
@@ -135,6 +159,7 @@ struct PlayChip: View {
                         .foregroundStyle(Theme.orange)
                 }
             }
+            .fixedSize()
         }
         .buttonStyle(.plain)
         .hoverLift(1.04)

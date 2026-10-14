@@ -33,13 +33,20 @@ func expectEqual<T: Equatable>(_ a: T, _ b: T, file: StaticString = #fileID, lin
 func runAll() -> Int {
     var failed = 0
     let start = Date()
+    var times: [(String, TimeInterval)] = []
     for test in registered {
         currentFailures = []
+        let began = Date()
         do { try test.body() } catch { currentFailures.append("threw \(error)") }
+        times.append(("\(test.suite) › \(test.name)", Date().timeIntervalSince(began)))
         if currentFailures.isEmpty { continue }
         failed += 1
         print("✘ \(test.suite) › \(test.name)")
         for failure in currentFailures { print("    \(failure)") }
+    }
+    // ILAN_TEST_TIMES=<n>: the n slowest tests, to keep the suite under its time budget.
+    if let n = Int(ProcessInfo.processInfo.environment["ILAN_TEST_TIMES"] ?? "") {
+        for (name, time) in times.sorted(by: { $0.1 > $1.1 }).prefix(n) { print(String(format: "  %5.2fs  ", time) + name) }
     }
     let seconds = String(format: "%.2f", Date().timeIntervalSince(start))
     print(failed == 0
