@@ -284,6 +284,7 @@ final class VoiceSession: ObservableObject {
                 "input": [
                     "format": ["type": "audio/pcm", "rate": 24000],
                     "turn_detection": turnDetection,
+                    "noise_reduction": noiseReduction,
                     // In a conversation nothing is transcribed live (see stopConversation).
                     "transcription": conversationActive ? NSNull() as Any : transcriptionConfig(dictionary, context: lastAssistantText()) as Any,
                 ],
@@ -357,12 +358,37 @@ final class VoiceSession: ObservableObject {
     /// then answers by itself. Speaking over Ilan stops its reply.
     private(set) var conversationActive = false
 
+    /// OpenAI decides when a turn starts and ends; the app decides whether it
+    /// was speech (see `minTurnVoicedFrames`), then interrupts and asks for the
+    /// reply itself. So noise never cuts Ilan off or gets an answer.
     static let semanticTurns: [String: Any] = [
-        "type": "semantic_vad", "eagerness": "auto", "create_response": true, "interrupt_response": true,
+        "type": "semantic_vad", "eagerness": "auto", "create_response": false, "interrupt_response": false,
     ]
+    /// A turn counts as speech after this many voiced 20 ms frames (0.2 s).
+    /// Measured on real iPhone turns: speech, even quiet, had 42 or more;
+    /// noise turns had 1 and 6; a quick "Yeah." had 7 (ignored too: a
+    /// backchannel shouldn't cut Ilan off).
+    static let minTurnVoicedFrames = 10
+    private var turnVoicedFrames = 0
+    /// This turn has enough voice to count. (Read by the tests.)
+    private(set) var turnIsSpeech = false
+
+    /// Enough voice in this turn: now it interrupts Ilan.
+    private func countTurnVoice(_ data: Data) {
+        guard inTurn, !turnIsSpeech else { return }
+        turnVoicedFrames += PCM.voicedFrames(data)
+        guard turnVoicedFrames >= Self.minTurnVoicedFrames else { return }
+        turnIsSpeech = true
+        interrupt()  // speaking over Ilan stops its reply
+        phase = .recording
+    }
 
     /// Off (push to talk: the app says when a turn ends) or semantic.
     private var turnDetection: Any { conversationActive ? Self.semanticTurns : NSNull() }
+
+    /// OpenAI cleans up the phone's audio in a conversation (a phone held away
+    /// from you, or on the table), so room noise is less likely to start a turn.
+    private var noiseReduction: Any { conversationActive ? ["type": "far_field"] as [String: Any] : NSNull() }
 
     /// Listening between turns in a conversation, else ready.
     private var idlePhase: Phase { conversationActive ? .recording : .ready }
@@ -435,7 +461,8 @@ final class VoiceSession: ObservableObject {
     private func sendTurnDetection() {
         let transcription: Any = conversationActive ? NSNull() : transcriptionConfig(UserDictionary.terms(), context: lastAssistantText())
         client?.send(["type": "session.update", "session": [
-            "type": "realtime", "audio": ["input": ["turn_detection": turnDetection, "transcription": transcription]],
+            "type": "realtime", "audio": ["input": ["turn_detection": turnDetection, "transcription": transcription,
+                                                    "noise_reduction": noiseReduction]],
         ]])
     }
 
@@ -747,6 +774,7 @@ final class VoiceSession: ObservableObject {
             lastConversationAudio = Date()
             inputLevel = inputLevel * 0.6 + level * 0.4
             conversationAudio.append(data)
+            countTurnVoice(data)
             // Between turns keep only the last moment, the start of the next turn.
             if !inTurn, conversationAudio.count > 2 * Self.turnLeadBytes {
                 conversationAudio = conversationAudio.suffix(Self.turnLeadBytes)
@@ -874,12 +902,15 @@ final class VoiceSession: ObservableObject {
         // Conversation mode: OpenAI heard the user start or finish a turn.
         case "input_audio_buffer.speech_started":
             guard conversationActive else { return }
-            interrupt()  // speaking over Ilan stops its reply (OpenAI cancels it too)
+            // Maybe speech, maybe noise: Ilan is only interrupted once the turn
+            // has real voice in it (countTurnVoice).
             inTurn = true
-            phase = .recording
+            turnVoicedFrames = PCM.voicedFrames(conversationAudio)  // what came just before
+            turnIsSpeech = false
+            countTurnVoice(Data())
 
         case "input_audio_buffer.speech_stopped":
-            guard conversationActive else { return }
+            guard conversationActive, turnIsSpeech else { return }
             phase = .thinking
 
         case "input_audio_buffer.committed":
@@ -888,6 +919,18 @@ final class VoiceSession: ObservableObject {
             guard let itemID = event["item_id"] as? String else { return }
             var msg = Message(id: itemID, role: .user, text: "", pending: true)
             if conversationActive {
+                let confirmed = turnIsSpeech
+                let speech = confirmed || PCM.voicedFrames(conversationAudio) >= Self.minTurnVoicedFrames
+                turnIsSpeech = false
+                guard speech else {
+                    // Noise: forget the turn here and at OpenAI; Ilan carries on.
+                    _ = takeTurnAudio()
+                    client?.send(["type": "conversation.item.delete", "item_id": itemID])
+                    return
+                }
+                if !confirmed { interrupt() }  // only now known to be speech
+                phase = .thinking
+                client?.send(["type": "response.create"])
                 // Not transcribed live: grey "Transcribing…" until the conversation ends.
                 pendingUserAudio = takeTurnAudio()
                 msg.pending = false

@@ -13,7 +13,10 @@ enum PCM {
     /// True if some of the recording is louder than a quiet room: at least
     /// 100 ms, in 20 ms frames, above about -40 dBFS. Background hiss on a
     /// built-in mic sits well below that; normal speech well above.
-    static func containsSpeech(_ data: Data) -> Bool {
+    static func containsSpeech(_ data: Data) -> Bool { voicedFrames(data) >= 5 }
+
+    /// How many 20 ms frames are above about -40 dBFS (voice, not room hiss).
+    static func voicedFrames(_ data: Data) -> Int {
         let frame = 480, threshold = 0.01 * 32_768.0
         var loudFrames = 0
         data.withUnsafeBytes { raw in
@@ -29,7 +32,7 @@ enum PCM {
                 start += frame
             }
         }
-        return loudFrames >= 5
+        return loudFrames
     }
 
     /// Wraps raw PCM in a 44-byte RIFF header.

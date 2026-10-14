@@ -20,6 +20,8 @@ final class FakeMic: VoiceInput {
     var onChunk: ((Data, Float) -> Void)?
     var deviceName: String? = "Test Microphone"
     var running = false
+    /// False: the mic hears only quiet room noise.
+    var loud = true
     var starts = 0
     /// How long the permission check takes (the first-run prompt is slow).
     var permissionDelay = 0.0
@@ -36,7 +38,7 @@ final class FakeMic: VoiceInput {
     private func tick() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
             guard let self, self.running else { return }
-            self.onChunk?(Self.speech, 0.3)
+            self.onChunk?(self.loud ? Self.speech : Data(count: Self.speech.count), self.loud ? 0.3 : 0)
             self.tick()
         }
     }
@@ -254,9 +256,9 @@ func registerTapKeepsSpeechTests() {
         }
         test("a single tap during a chain of tool calls stops it") {
             let (session, speaker, _) = makeSession()
-            usingTool(session, speaker, seconds: 0.6)
+            usingTool(session, speaker, seconds: 0.45)
             tap(session)
-            pause(window + 0.5)  // past the tool's end too
+            pause(window + 0.2)  // past the tool's end too
             expectEqual(session.phase, .offline)  // stopped; no API key in tests, so offline
         }
         test("a tap after a tool result went back cancels the reply asked for, once it starts") {
