@@ -66,14 +66,23 @@ final class FakeMic: VoiceInput {
 /// stops Ilan. Every corner case here is driven through a real VoiceSession.
 @MainActor
 func registerTapKeepsSpeechTests() {
-    let window = VoiceSession.secondTapWindow
-    func makeSession(remote: Bool = false) -> (VoiceSession, FakeSpeaker, FakeMic) {
+    // The sessions here run on half-length tap timings (see makeSession), and
+    // every wait is scaled the same way: the same sequences, in half the time.
+    let speed = 0.5
+    func s(_ seconds: Double) -> Double { seconds * speed }
+    let window = s(VoiceSession.secondTapWindow)
+    /// realTimings: the app's own timings, for a test that compares them with the pill's.
+    func makeSession(remote: Bool = false, realTimings: Bool = false) -> (VoiceSession, FakeSpeaker, FakeMic) {
         let store = ConversationStore()
         let conv = store.newConversation()
         let speaker = FakeSpeaker(), mic = FakeMic()
         let session = VoiceSession(store: store, mcp: MCPManager(), input: mic, output: speaker,
                                    isRemote: remote, target: { conv.id })
         session.conversationID = conv.id
+        if !realTimings {
+            session.holdForTalk = s(VoiceSession.minRecordingSeconds)
+            session.tapStopDelay = window
+        }
         return (session, speaker, mic)
     }
     func pause(_ seconds: Double) { waitFor(seconds) { false } }
@@ -85,7 +94,7 @@ func registerTapKeepsSpeechTests() {
     /// Two taps, then what the double-tap handler does.
     func doubleTap(_ session: VoiceSession) {
         tap(session)
-        pause(0.1)
+        pause(s(0.1))
         tap(session)
         session.keepIlanGoing()
     }
@@ -127,10 +136,10 @@ func registerTapKeepsSpeechTests() {
             let (sub, seen) = outcomes(session)
             let start = Date()
             tap(session)
-            pause(0.2)
+            pause(s(0.2))
             expectEqual(speaker.stops, 0)  // a second tap may still come
             expect(waitFor(2) { speaker.stops == 1 }, "never stopped")
-            expect(Date().timeIntervalSince(start) >= DoubleTapDetector().maxGap)
+            expect(Date().timeIntervalSince(start) >= s(DoubleTapDetector().maxGap))
             expectEqual(seen(), [.stoppedSpeech])
             sub.cancel()
         }
@@ -138,16 +147,16 @@ func registerTapKeepsSpeechTests() {
             let (session, speaker, _) = makeSession()
             let (sub, seen) = outcomes(session)
             doubleTap(session)
-            pause(window + 0.1)
+            pause(window + s(0.1))
             expectEqual(speaker.stops, 0)
             expect(speaker.isPlaying)
             expectEqual(seen(), [])
             sub.cancel()
         }
         test("holding the key stops Ilan once it is past a tap, and the pill shows at once") {
-            let (session, speaker, mic) = makeSession()
+            let (session, speaker, mic) = makeSession(realTimings: true)  // compared with the pill's own wait
             press(session)
-            pause(0.1)
+            pause(s(0.1))
             expectEqual(speaker.stops, 0)
             expect(waitFor(1) { session.phase == .recording }, "never went live")
             expectEqual(speaker.stops, 1)
@@ -163,7 +172,7 @@ func registerTapKeepsSpeechTests() {
             var phases: [VoiceSession.Phase] = []
             let sub = session.$phase.sink { phases.append($0) }
             press(session)
-            pause(0.1)
+            pause(s(0.1))
             expect(mic.running)  // recording quietly, in case it is a hold
             session.releaseToTalk()
             expect(!mic.running)
@@ -190,13 +199,13 @@ func registerTapKeepsSpeechTests() {
             let (session, speaker, _) = makeSession()
             let (sub, seen) = outcomes(session)
             tap(session)
-            pause(0.12)
+            pause(s(0.12))
             press(session)
-            pause(0.1)
+            pause(s(0.1))
             expectEqual(speaker.stops, 0)  // still undecided
             expect(waitFor(1) { session.phase == .recording })
             expectEqual(speaker.stops, 1)
-            pause(0.15)  // now well past the first tap's window: its stop was called off
+            pause(s(0.15))  // now well past the first tap's window: its stop was called off
             expectEqual(session.phase, .recording)
             expectEqual(seen(), [])
             session.cancelRecording()
@@ -206,12 +215,12 @@ func registerTapKeepsSpeechTests() {
             let (session, speaker, _) = makeSession()
             let (sub, seen) = outcomes(session)
             tap(session)
-            pause(0.12)
+            pause(s(0.12))
             tap(session)  // e.g. too slow to count as a double tap
-            pause(0.2)
+            pause(s(0.2))
             expectEqual(speaker.stops, 0)  // the second tap waits too
             expect(waitFor(2) { speaker.stops == 1 }, "never stopped")
-            pause(0.1)
+            pause(s(0.1))
             expectEqual(speaker.stops, 1)
             expectEqual(seen(), [.stoppedSpeech])
             sub.cancel()
@@ -219,20 +228,20 @@ func registerTapKeepsSpeechTests() {
         test("a late, slow second tap still counts: the first tap's stop is called off when it goes down") {
             let (session, speaker, _) = makeSession()
             tap(session)
-            pause(0.3)  // the second tap starts late in the double-tap gap...
+            pause(s(0.3))  // the second tap starts late in the double-tap gap...
             press(session)
-            pause(0.12)  // ...and is still down when the first tap's wait would end
+            pause(s(0.12))  // ...and is still down when the first tap's wait would end
             session.releaseToTalk()
             session.keepIlanGoing()
-            pause(window + 0.05)
+            pause(window + s(0.05))
             expectEqual(speaker.stops, 0)
         }
         test("a third tap after a double tap stops Ilan") {
             let (session, speaker, _) = makeSession()
             doubleTap(session)
-            pause(0.1)
+            pause(s(0.1))
             tap(session)
-            pause(0.15)
+            pause(s(0.15))
             expectEqual(speaker.stops, 0)
             expect(waitFor(2) { speaker.stops == 1 }, "never stopped")
         }
@@ -243,7 +252,7 @@ func registerTapKeepsSpeechTests() {
             let (sub, seen) = outcomes(session)
             tap(session)
             speaker.isPlaying = false  // the reply ends on its own
-            pause(window + 0.15)
+            pause(window + s(0.15))
             expectEqual(speaker.stops, 0)
             expectEqual(seen(), [.discarded])
             sub.cancel()
@@ -258,9 +267,9 @@ func registerTapKeepsSpeechTests() {
         }
         test("a double tap during a chain of tool calls lets the chain and the next reply carry on") {
             let (session, speaker, _) = makeSession()
-            usingTool(session, speaker, seconds: 0.1)
+            usingTool(session, speaker, seconds: s(0.1))
             doubleTap(session)
-            pause(window + 0.1)
+            pause(window + s(0.1))
             expectEqual(session.phase, .thinking)  // the tool's result went back
             nextReplyStarts(session)
             expectEqual(speaker.enqueued, 1)
@@ -268,14 +277,14 @@ func registerTapKeepsSpeechTests() {
         }
         test("a single tap during a chain of tool calls stops it") {
             let (session, speaker, _) = makeSession()
-            usingTool(session, speaker, seconds: 0.45)
+            usingTool(session, speaker, seconds: s(0.45))
             tap(session)
-            pause(window + 0.1)  // past the tool's end too
+            pause(window + s(0.1))  // past the tool's end too
             expectEqual(session.phase, .offline)  // stopped; no API key in tests, so offline
         }
         test("a tap after a tool result went back cancels the reply asked for, once it starts") {
             let (session, speaker, _) = makeSession()
-            usingTool(session, speaker, seconds: 0.05)
+            usingTool(session, speaker, seconds: s(0.05))
             expect(waitFor(1) { session.phase == .thinking })
             tap(session)
             expect(waitFor(2) { session.phase != .thinking }, "never stopped")
@@ -294,7 +303,7 @@ func registerTapKeepsSpeechTests() {
             expect(session.clips.playingID == nil)  // not while the key is down
             session.releaseToTalk()
             session.replayLast()
-            pause(window + 0.15)
+            pause(window + s(0.15))
             expectEqual(session.clips.playingID, "old")
             session.clips.stop()
         }
@@ -304,7 +313,7 @@ func registerTapKeepsSpeechTests() {
             expect(!session.sendText("hello"))
             session.releaseToTalk()
             expect(session.sendText("hello"))
-            pause(window + 0.15)
+            pause(window + s(0.15))
             expectEqual(session.phase, .thinking)  // still waiting for Ilan's reply
         }
         test("playing a reply right after a tap isn't cut by the tap's late stop") {
@@ -312,7 +321,7 @@ func registerTapKeepsSpeechTests() {
             let (message, _) = savedReply(session)
             tap(session)
             session.play(message)
-            pause(window + 0.15)
+            pause(window + s(0.15))
             expectEqual(session.clips.playingID, "old")
             session.clips.stop()
         }
@@ -321,7 +330,7 @@ func registerTapKeepsSpeechTests() {
             speaker.isPlaying = false
             let (sub, seen) = outcomes(session)
             tap(session)
-            pause(0.05)
+            pause(s(0.05))
             expectEqual(seen(), [.discarded])
             sub.cancel()
         }
@@ -337,18 +346,18 @@ func registerTapKeepsSpeechTests() {
         // A slow microphone-permission check (the first-run prompt).
         test("a slow permission check starts the microphone only for its own press") {
             let (session, _, mic) = makeSession()
-            mic.permissionDelay = 0.3
+            mic.permissionDelay = s(0.3)
             tap(session)
-            pause(0.1)
+            pause(s(0.1))
             press(session)  // held: talking
             expect(waitFor(1.5) { session.phase == .recording }, "never went live")
-            pause(0.15)  // both checks are back
+            pause(s(0.15))  // both checks are back
             expectEqual(mic.starts, 1)
             session.cancelRecording()
         }
         test("a held press let go before a slow permission check still says it stopped Ilan") {
             let (session, speaker, mic) = makeSession()
-            mic.permissionDelay = 0.4
+            mic.permissionDelay = s(0.4)
             let (sub, seen) = outcomes(session)
             press(session)
             expect(waitFor(1) { speaker.stops == 1 }, "never stopped")
