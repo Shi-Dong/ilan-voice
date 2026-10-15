@@ -247,9 +247,9 @@ struct ChatView: View {
             .labelsHidden()
             .frame(width: 210)
             .help("Real-time plays replies as they arrive; Cached keeps them until you press play.")
-            ReconnectButton(session: session)
-            .disabled(session.phase == .recording || session.phase == .connecting)
-            .help("Reconnect (⇧⌘R): start a fresh session so changes to agent.md, the dictionary, tools and voice take effect. The conversation is kept.")
+            ReconnectButton(session: session, mcp: mcp)
+            .disabled(session.phase == .recording || session.phase == .connecting || mcp.loading)
+            .help("Reconnect (⇧⌘R): restart the MCP servers and start a fresh session, so changes to agent.md, the dictionary, MCP servers, tools and voice take effect. The conversation is kept.")
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
     }
@@ -483,15 +483,17 @@ extension Updater.State {
 /// like the toolbar's New Conversation button.
 private struct ReconnectButton: View {
     @ObservedObject var session: VoiceSession
+    @ObservedObject var mcp: MCPManager
     @Local private var hovering = false
+    private var busy: Bool { session.phase == .connecting || mcp.loading }
 
     var body: some View {
-        Button { session.connect() } label: {
+        Button { Task { await session.reconnect() } } label: {
             Image(systemName: "arrow.clockwise")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(hovering ? Theme.accent : Theme.textDim)
-                .rotationEffect(.degrees(session.phase == .connecting ? 180 : 0))
-                .animation(.easeInOut(duration: 0.4), value: session.phase == .connecting)
+                .rotationEffect(.degrees(busy ? 180 : 0))
+                .animation(.easeInOut(duration: 0.4), value: busy)
                 .frame(width: 30, height: 30)
                 .glassEffect(.regular.tint(hovering ? .white.opacity(0.14) : .clear).interactive(), in: .circle)
                 .scaleEffect(hovering ? 1.08 : 1)

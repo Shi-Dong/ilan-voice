@@ -158,7 +158,7 @@ final class VoiceSession: ObservableObject {
             self.connectionClosed(reason: reason)
         }
         self.client = client
-        connectedFingerprint = settings.sessionFingerprint
+        connectedFingerprint = sessionFingerprint
         sessionStartedAt = Date()
         sessionModel = settings.model
         client.connect(apiKey: settings.apiKey, model: settings.model)
@@ -218,7 +218,7 @@ final class VoiceSession: ObservableObject {
 
     /// Re-dial if the conversation or a session-level setting changed.
     func ensureSession() {
-        let stale = connectedFingerprint != settings.sessionFingerprint || conversationID != target()
+        let stale = connectedFingerprint != sessionFingerprint || conversationID != target()
             || Date().timeIntervalSince(sessionStartedAt) > Self.sessionRefreshAge
             || someoneElseSpoke
         if client == nil || stale { connect() }
@@ -1339,6 +1339,22 @@ final class VoiceSession: ObservableObject {
 
     /// MCP tools plus the built-in ones that are turned on.
     /// Internal (not private) so the unit tests can check which tools Ilan gets.
+    /// What a session is configured with: the settings, plus the MCP tools it
+    /// was given. When either changes (e.g. the MCP servers were reloaded in
+    /// Settings), the next press starts a fresh session with the new tools.
+    private var sessionFingerprint: String {
+        settings.sessionFingerprint + "|" + mcp.tools.map(\.functionName).joined(separator: ",")
+    }
+
+    /// Reconnect (the header's button, ⇧⌘R): restarts every MCP server, so
+    /// changes to mcp.json or to the servers themselves take effect, then
+    /// starts a fresh session with their tools. The conversation is kept.
+    func reconnect() async {
+        guard !mcp.loading else { return }
+        await mcp.reload()
+        connect()
+    }
+
     func builtInTools() -> [[String: Any]] {
         var tools: [[String: Any]] = mcp.realtimeTools
         // Only during a live iPhone conversation: hands-free, so it can be ended by voice.
