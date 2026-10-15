@@ -547,6 +547,11 @@ final class VoiceSession: ObservableObject {
 
     /// How long after a tap a second tap may still come (the double-tap gap, plus a margin).
     static let secondTapWindow = DoubleTapDetector().maxGap + 0.05
+    /// This session's timings: how long a press is held before it counts as
+    /// talking, and how long after a tap a second tap may still come. The app
+    /// uses the defaults; tests run the same sequences on shorter ones.
+    var holdForTalk: TimeInterval = VoiceSession.minRecordingSeconds
+    var tapStopDelay: TimeInterval = VoiceSession.secondTapWindow
 
     /// What the current (or last) press is, as far as stopping Ilan goes.
     private enum Press { case plain, undecided, talk, tap }
@@ -612,7 +617,7 @@ final class VoiceSession: ObservableObject {
             press = .undecided
             interruptedThisPress = false
             forgetTap()
-            holdCheck = after(Self.minRecordingSeconds) { [weak self] in self?.pressIsTalk() }
+            holdCheck = after(holdForTalk) { [weak self] in self?.pressIsTalk() }
         } else {
             // Stop Ilan the instant the key goes down, even for a quick tap that
             // never becomes a recording. Remembered so the pill can say so.
@@ -756,7 +761,7 @@ final class VoiceSession: ObservableObject {
                 recording = Data()
                 inputLevel = 0
             }
-            tapStop = after(Self.secondTapWindow) { [weak self] in self?.stopAfterTap() }
+            tapStop = after(tapStopDelay) { [weak self] in self?.stopAfterTap() }
             return
         }
         guard phase == .recording, !finishingRecording else {
