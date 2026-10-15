@@ -146,7 +146,7 @@ struct IlanVoiceApp: App {
                 Button("Stop Playback") { model.session.clips.stop() }
                     .keyboardShortcut(".")
                 Divider()
-                Button("Reconnect") { model.session.connect() }
+                Button("Reconnect") { Task { await model.session.reconnect() } }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
             }
         }

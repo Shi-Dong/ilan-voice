@@ -18,6 +18,8 @@ Ilan can call any MCP server in `mcp.json`, remote (Streamable HTTP) or local (s
 }
 ```
 
+Changed `mcp.json` or a server itself? Press **Reconnect** (↻ at the top of the window, or ⇧⌘R): it restarts every MCP server and starts a fresh session with their tools. The conversation is kept.
+
 ## Shell commands (optional)
 
 Turn on Settings → Shell and Ilan can run bash commands on your Mac with its `run_shell` tool. It never asks for permission:
