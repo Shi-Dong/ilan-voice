@@ -1253,7 +1253,10 @@ final class VoiceSession: ObservableObject {
             closing sound. NEVER call this unless the user has clearly said they want to end, \
             finish, close or stop the conversation (for example "let's end this conversation"). \
             Pauses, silence, thanks, "that's all for now" without asking to end, or finishing \
-            a task are NOT reasons to call it; if unsure, ask. Say a short goodbye first, then call it.
+            a task are NOT reasons to call it; if unsure, ask. When the user does ask to end, reply \
+            with nothing but a brief, natural goodbye, such as "Talk to you later!" or "Bye for now!", \
+            then call this tool. Don't describe what you are doing: never say that you will say \
+            goodbye, wrap up or end the conversation.
             """,
             "parameters": ["type": "object", "properties": [String: Any]()] as [String: Any],
         ]
