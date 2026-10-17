@@ -62,8 +62,15 @@ struct TalkOrb: View {
                     session.releaseToTalk()
                 }
         )
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever()) { breathe = true }
+        // Breathes only while Ilan talks. A breath that never stopped redrew
+        // the window every frame even when idle: the chat re-measured all its
+        // messages each time, so the window jittered and the app spun the CPU.
+        .onChange(of: session.phase == .speaking, initial: true) { _, speaking in
+            if speaking {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever()) { breathe = true }
+            } else {
+                withAnimation(.easeOut(duration: 0.2)) { breathe = false }
+            }
         }
         .help("Hold to talk")
     }
