@@ -445,6 +445,12 @@ func registerEndByVoiceTests() {
             expect(text.contains("NEVER call this unless the user has clearly said they want to end"))
             expect(text.contains("finish, close or stop"))
         }
+        test("its description asks Ilan to say it is ending the conversation, with no goodbye needed") {
+            let text = VoiceSession.endConversationDefinition["description"] as? String ?? ""
+            expect(text.contains("tell them in a few words that you're ending the conversation"))
+            expect(text.contains("No goodbye is needed."))
+            expect(!text.contains("Say a short goodbye first"), "the old wording, which Ilan read out as a plan")
+        }
         test("Ilan's goodbye finishes playing, then the conversation ends; no reply follows") {
             let (session, speaker) = makeSession()
             var endedByIlan = 0

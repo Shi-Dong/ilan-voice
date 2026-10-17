@@ -1253,7 +1253,9 @@ final class VoiceSession: ObservableObject {
             closing sound. NEVER call this unless the user has clearly said they want to end, \
             finish, close or stop the conversation (for example "let's end this conversation"). \
             Pauses, silence, thanks, "that's all for now" without asking to end, or finishing \
-            a task are NOT reasons to call it; if unsure, ask. Say a short goodbye first, then call it.
+            a task are NOT reasons to call it; if unsure, ask. When the user does ask to end, tell \
+            them in a few words that you're ending the conversation, such as "OK, ending the \
+            conversation now.", then call this tool. No goodbye is needed.
             """,
             "parameters": ["type": "object", "properties": [String: Any]()] as [String: Any],
         ]
@@ -1300,7 +1302,7 @@ final class VoiceSession: ObservableObject {
                         switch name {
                         case Self.endConversationName where self.conversationActive:
                             self.endRequested = true
-                            output = "The conversation ends as soon as your goodbye has finished playing."
+                            output = "The conversation ends as soon as what you just said has finished playing."
                         case _ where self.toolOverride != nil: output = await self.toolOverride!(name, args)
                         case ShellTool.functionName: output = await self.runShell(arguments: args, conversation: convID)
                         case ShellTool.closeFunctionName:
