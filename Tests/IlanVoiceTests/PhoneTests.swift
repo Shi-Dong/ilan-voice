@@ -423,9 +423,9 @@ func registerPhoneTests() {
             expect(steady.allSatisfy { $0 >= 700 }, "a sound started before the audio had run 0.7 s: \(steady)")
             expect(hum.allSatisfy { $0 >= 700 }, "a sound started without the hum warming the speaker up for 0.7 s: \(hum)")
             let humAfter = json["humAfterSoundMs"] as? [Int] ?? []
-            expect(humAfter.allSatisfy { $0 >= 1350 }, "the hum stopped before the sound was over: \(humAfter)")
+            expect(humAfter.allSatisfy { $0 >= 1900 }, "the hum stopped before the sound was over: \(humAfter)")
             expectEqual(json["humsLeftOn"] as? Int, 0)
-            // Starting goes in order: the sound (after the 250 ms switch), all of it (1.35 s plus
+            // Starting goes in order: the sound (after the 250 ms switch), all of it (1.9 s plus
             // its echo); only then is the Mac told, and the mic opened.
             let startSound = json["startSound"] as? [String: Any]
             expectEqual(startSound?["chimed"] as? Bool, true)
@@ -433,7 +433,7 @@ func registerPhoneTests() {
             expectEqual(startSound?["toldMacAtTap"] as? Bool, false)
             expectEqual(startSound?["hintAtTap"] as? String, "Starting…")
             expect((startSound?["soundAfterMs"] as? Int ?? -1) >= 950, "the start sound played before the loudspeaker was surely on")
-            expect((startSound?["micAfterMs"] as? Int ?? -1) >= (startSound?["soundAfterMs"] as? Int ?? 0) + 1700,
+            expect((startSound?["micAfterMs"] as? Int ?? -1) >= (startSound?["soundAfterMs"] as? Int ?? 0) + 2250,
                    "the mic opened before the start sound was over")
             expectEqual(startSound?["toldMac"] as? Bool, true)
             // Ended during the start sound: the Mac never hears of it, and no mic opens.

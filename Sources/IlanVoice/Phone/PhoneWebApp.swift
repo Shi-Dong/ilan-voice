@@ -776,7 +776,7 @@ enum PhoneWebApp {
     }
     // ---- Sound feedback for starting and ending a conversation ----
     // "Halo", made on the spot (no files): two soft sine notes a fifth apart
-    // that fade in, linger a moment and fade out, about 1.35 s. Start: D and
+    // that burst in, linger and fade out slowly (1.9 s; the end 2.3 s). Start: D and
     // A, rising; end: A and E an octave below, settling low. A short, darkened echo adds
     // space, and a gentle compressor evens it out.
     // iOS cuts off the start of a sound that plays while it is still
@@ -792,7 +792,11 @@ enum PhoneWebApp {
     // playSound resolves once the sound and its echo are over, timed on the
     // audio clock (which stops while iOS pauses it, so a paused sound is
     // still waited for).
-    const SOUND_LEN = 1.35, SOUND_TAIL = 0.35, SOUND_SETTLE_MS = 700, SOUND_WAIT_MAX_MS = 2500, SOUND_POLL_MS = 20;
+    // Each sound bursts in (90 ms), lingers, then fades out slowly; the end
+    // sound lingers and fades a little longer than the start (both picked
+    // by ear on an iPhone).
+    const START_SOUND = { len: 1.9, linger: 0.35, to: 0.7 }, END_SOUND = { len: 2.3, linger: 0.45, to: 0.75 };
+    const SOUND_TAIL = 0.35, SOUND_SETTLE_MS = 700, SOUND_WAIT_MAX_MS = 2500, SOUND_POLL_MS = 20;
     const wait = ms => new Promise(r => setTimeout(r, ms));
     async function soundReady(c) {
       let steadySince = null;  // audio-clock time since when the context has been running
@@ -817,17 +821,18 @@ enum PhoneWebApp {
       const stopHum = hum(c);
       await soundReady(c);
       if (c.state === "closed") { stopHum(); return; }
-      const bus = soundBus(c), t = c.currentTime + 0.03, end = t + SOUND_LEN + SOUND_TAIL;
+      const shape = starting ? START_SOUND : END_SOUND;
+      const bus = soundBus(c), t = c.currentTime + 0.03, end = t + shape.len + SOUND_TAIL;
       if (starting) {
-        note(c, bus, D5, t, 0.17, 0.09, SOUND_LEN);
-        note(c, bus, A5, t + 0.06, 0.136, 0.09, SOUND_LEN);
+        note(c, bus, D5, t, 0.17, shape);
+        note(c, bus, A5, t + 0.06, 0.136, shape);
       } else {
         // Low A and E. A phone's small speaker barely plays notes this low,
         // so each has a soft octave above it, which the speaker does play.
-        note(c, bus, A3, t, 0.135, 0.072, SOUND_LEN, 0.5);
-        note(c, bus, E4, t, 0.086, 0.072, SOUND_LEN * 0.9, 0.5);
+        note(c, bus, A3, t, 0.135, shape, 0.5);
+        note(c, bus, E4, t, 0.086, shape, 0.5);
       }
-      const limit = (SOUND_LEN + SOUND_TAIL) * 1000 + SOUND_WAIT_MAX_MS;
+      const limit = (shape.len + SOUND_TAIL) * 1000 + SOUND_WAIT_MAX_MS;
       for (let waited = 0; c.state !== "closed" && c.currentTime < end && waited < limit; waited += SOUND_POLL_MS) await wait(SOUND_POLL_MS);
       stopHum();
     }
@@ -850,13 +855,16 @@ enum PhoneWebApp {
       soundOut = { context: c, dry: comp, echo };
       return soundOut;
     }
+    // The burst: up to full in 90 ms, then a linger down to `to` (of full)
+    // over `linger` seconds, then a slow fade to silence at `len`.
     // octave: how loud a soft octave above the note is (0: none).
-    function note(c, bus, freq, at, peak, attack, len, octave = 0) {
+    const SOUND_ATTACK = 0.09;
+    function note(c, bus, freq, at, peak, { len, linger, to }, octave = 0) {
       const g = c.createGain();
-      g.gain.setValueAtTime(0.0001, at);
-      g.gain.exponentialRampToValueAtTime(peak, at + attack);
-      g.gain.exponentialRampToValueAtTime(peak * 0.55, at + attack + 0.225);  // lingers a moment
-      g.gain.exponentialRampToValueAtTime(0.0001, at + len);
+      g.gain.setValueAtTime(peak * 1e-4, at);  // from and to -80 dB of the note's own level
+      g.gain.exponentialRampToValueAtTime(peak, at + SOUND_ATTACK);
+      g.gain.exponentialRampToValueAtTime(peak * to, at + SOUND_ATTACK + linger);
+      g.gain.exponentialRampToValueAtTime(peak * 1e-4, at + len);
       g.connect(bus.dry); g.connect(bus.echo);
       for (const [mult, level] of [[1, 1], [2, octave]]) {
         if (!level) continue;
