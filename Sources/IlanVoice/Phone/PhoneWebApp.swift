@@ -215,7 +215,8 @@ enum PhoneWebApp {
       html.short-page footer { bottom: 22px; }
       /* The talk button: a flat pane of coral glass. An even, see-through
          tint over a uniform backdrop blur, a thin crisp edge and one fine
-         highlight along the top edge; no curved shine. Held: the pane turns
+         highlight along the top edge; no curved shine. Ready (microphone
+         allowed, connected, no conversation on): green. Held: the pane turns
          red; swipe-to-cancel armed: grey. */
       #talk { color: #FFE3E1;
         background: rgba(244,167,163,.24);
@@ -223,6 +224,9 @@ enum PhoneWebApp {
         border: 1px solid rgba(255,255,255,.30);
         box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 12px 28px rgba(0,0,0,.35); }
       #talk svg { color: #FFE3E1; }
+      #talk.ready { color: #E2FBEE; background: rgba(61,214,140,.30);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 12px 28px rgba(0,0,0,.35), 0 0 22px rgba(61,214,140,.22); }
+      #talk.ready svg { color: #E2FBEE; }
       #talk.held { color: #fff; background: rgba(255,107,107,.48);
         border-color: rgba(255,255,255,.40);
         box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 12px 30px rgba(0,0,0,.35), 0 0 26px rgba(255,107,107,.35); }
@@ -426,6 +430,9 @@ enum PhoneWebApp {
     function showState() {
       // Without the microphone the button shows a crossed-out mic: a tap only asks for it.
       $("talk").classList.toggle("nomic", micPermission !== "granted" && !held);
+      // Green when a tap would start a conversation right away: the microphone
+      // is allowed, the Mac is connected, and no conversation is on.
+      $("talk").classList.toggle("ready", micPermission === "granted" && online && !held);
       // Mid-conversation without the Mac: the mic stays on (dimmed) and the conversation waits.
       document.body.classList.toggle("away", held && !online);
       if (!online) {

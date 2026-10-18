@@ -126,18 +126,23 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   };
   // No microphone permission yet: the first tap only asks for it.
   const nomicAtLoad = el("talk").classes.has("nomic");
+  const green = () => el("talk").classes.has("ready");
+  const readyLook = { atLoad: green() };  // no microphone yet: not green
   tap(); await settle();
   const allowTap = { started: conversing(), asked: g.micAsks || 0, released: g.micStops || 0,
                      nomicAfter: el("talk").classes.has("nomic") };
+  readyLook.micAllowed = green();  // microphone allowed, connected, no conversation: green
   const oscBeforeStart = chimes(), tapAt = now;
   tap();                                   // start a conversation (the second tap)
   const micBeforeStartSound = (g.micAsks || 0) > 1, toldMacAtTap = count("conversation_start") > 0;
   const hintAtTap = el("hint").textContent;
+  readyLook.starting = green();  // the start sound is playing: red already
   await settle();
   // The sound waits for the loudspeaker; the mic opens, and the Mac hears of it, only once the sound is over.
   const startSound = { chimed: chimes() > oscBeforeStart, micBefore: micBeforeStartSound, toldMacAtTap, hintAtTap,
                        soundAfterMs: sounds.at(-1).at - tapAt, steadyMs: sounds.at(-1).steadyMs,
                        micAfterMs: (g.micAsks || 0) === 2 ? g.micAt - tapAt : -1, toldMac: count("conversation_start") === 1 };
+  readyLook.conversing = green();
   const during = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length,
                    screenKeptOn: screenOn() };
 
@@ -174,8 +179,10 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   const stale = g.socket; sockets = g.sockets;
   g.skew = (g.skew || 0) + 7000; tick();
   const silence = { ponged, abandoned: stale.closed, status: el("status").textContent };
+  readyLook.reconnecting = green();  // no connection: not green
   await run();
   silence.reconnected = g.sockets > sockets && g.socket !== stale;
+  readyLook.reconnected = green();  // connected again: green
 
   // ---- Away too long ----
   // No Mac for over AWAY_LIMIT_MS: the page lets the conversation go itself.
@@ -237,7 +244,7 @@ new Function(...Object.keys(g), script)(...Object.values(g));
                   screenKeptOn: wakeLocks.some(l => !l.released) };
   const viewport = sent.map(m => { try { return JSON.parse(m); } catch (e) { return {}; } }).find(m => m.type === "viewport");
   const shortPage = el("html").classes.has("short-page");
-  console.log(JSON.stringify({ nomicAtLoad, allowTap, startSound, chimeSessions: [...chimeSessions], soundSteadyMs: sounds.map(x => x.steadyMs), soundHumMs: sounds.map(x => x.humMs), humsLeftOn: hums.filter(h => h.on).length,
+  console.log(JSON.stringify({ nomicAtLoad, readyLook, allowTap, startSound, chimeSessions: [...chimeSessions], soundSteadyMs: sounds.map(x => x.steadyMs), soundHumMs: sounds.map(x => x.humMs), humsLeftOn: hums.filter(h => h.on).length,
     humAfterSoundMs: sounds.map(x => x.hum && x.hum.stoppedAt !== undefined ? x.hum.stoppedAt - x.at : -1),
     endedWhileStarting, quickRestart, endedByIlan, atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
     pocket: { afterStrayTap, afterShortPush, afterSmallPush, afterDrift, afterEndGesture },
