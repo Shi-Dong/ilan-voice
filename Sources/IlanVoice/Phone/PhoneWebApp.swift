@@ -769,8 +769,8 @@ enum PhoneWebApp {
     }
     // ---- Sound feedback for starting and ending a conversation ----
     // "Halo", made on the spot (no files): two soft sine notes a fifth apart
-    // that fade in, linger a moment and fade out, about 1.35 s. Start: E and
-    // B, rising; end: A and E an octave below, settling low. A short, darkened echo adds
+    // that fade in, linger a moment and fade out, about 1.35 s. Start: D and
+    // A, rising; end: A and E an octave below, settling low. A short, darkened echo adds
     // space, and a gentle compressor evens it out.
     // iOS cuts off the start of a sound that plays while it is still
     // switching the phone's audio on, or over to another route (the
@@ -812,8 +812,8 @@ enum PhoneWebApp {
       if (c.state === "closed") { stopHum(); return; }
       const bus = soundBus(c), t = c.currentTime + 0.03, end = t + SOUND_LEN + SOUND_TAIL;
       if (starting) {
-        note(c, bus, E5, t, 0.17, 0.09, SOUND_LEN);
-        note(c, bus, B5, t + 0.06, 0.136, 0.09, SOUND_LEN);
+        note(c, bus, D5, t, 0.17, 0.09, SOUND_LEN);
+        note(c, bus, A5, t + 0.06, 0.136, 0.09, SOUND_LEN);
       } else {
         // Low A and E. A phone's small speaker barely plays notes this low,
         // so each has a soft octave above it, which the speaker does play.
@@ -830,7 +830,7 @@ enum PhoneWebApp {
       const comp = c.createDynamicsCompressor();
       comp.threshold.value = -20; comp.knee.value = 14; comp.ratio.value = 3;
       comp.attack.value = 0.004; comp.release.value = 0.2;
-      const out = c.createGain(); out.gain.value = 2.1;  // as loud as it goes without clipping (peaks just under 0.9)
+      const out = c.createGain(); out.gain.value = 1.8;
       comp.connect(out); out.connect(c.destination);
       const echo = c.createDelay(0.5), fb = c.createGain(), dark = c.createBiquadFilter(), wet = c.createGain();
       echo.delayTime.value = 0.09; fb.gain.value = 0.32; dark.type = "lowpass"; dark.frequency.value = 2600; wet.gain.value = 0.2;
@@ -854,7 +854,7 @@ enum PhoneWebApp {
         o.start(at); o.stop(at + len + 0.05);
       }
     }
-    const A3 = 220, E4 = 329.63, E5 = 659.25, B5 = 987.77;
+    const A3 = 220, E4 = 329.63, D5 = 587.33, A5 = 880;
 
     // Starting is a tap. Ending is deliberate, so a phone in a pocket (screen
     // on) can't end it by a stray touch: touching the button shows a track
