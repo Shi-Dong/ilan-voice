@@ -42,14 +42,15 @@ class FakeAudioContext {
     if (sounds.at(-1)?.at !== now) {
       // The inaudible hum warming the speaker up: still on, or stopped just as the sound starts.
       const hum = hums.filter(h => h.context === this && (h.on || h.stoppedAt === now)).at(-1);
-      sounds.push({ at: now, steadyMs: this.since === null ? -1 : now - this.since, humMs: hum ? now - hum.startedAt : -1 });
+      sounds.push({ at: now, steadyMs: this.since === null ? -1 : now - this.since, humMs: hum ? now - hum.startedAt : -1, hum });
     }
     return any(); }
   createGain() { return any(); } createDynamicsCompressor() { return any(); } createBiquadFilter() { return any(); }
   createDelay() { return any(); } createBuffer() { return { getChannelData: () => new Float32Array(1), duration: 0 }; }
   // A looping buffer source is the page's warm-up hum: when it starts and stops is kept.
   createBufferSource() { const src = { context: this, loop: false, on: false, connect() {}, disconnect() {},
-    start() { src.startedAt = now; src.on = true; if (src.loop) hums.push(src); }, stop() { src.on = false; src.stoppedAt = now; } }; return src; } createMediaStreamSource() { return any(); } createAnalyser() { return any(); }
+    start() { src.startedAt = now; src.on = true; if (src.loop) hums.push(src); }, stop() { if (src.on) { src.on = false; src.stoppedAt = now; } } }; return src; }  // (a second stop() changes nothing)
+  createMediaStreamSource() { return any(); } createAnalyser() { return any(); }
 }
 const sent = [];
 const audioSessionTypes = [];
@@ -237,6 +238,7 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   const viewport = sent.map(m => { try { return JSON.parse(m); } catch (e) { return {}; } }).find(m => m.type === "viewport");
   const shortPage = el("html").classes.has("short-page");
   console.log(JSON.stringify({ nomicAtLoad, allowTap, startSound, chimeSessions: [...chimeSessions], soundSteadyMs: sounds.map(x => x.steadyMs), soundHumMs: sounds.map(x => x.humMs), humsLeftOn: hums.filter(h => h.on).length,
+    humAfterSoundMs: sounds.map(x => x.hum && x.hum.stoppedAt !== undefined ? x.hum.stoppedAt - x.at : -1),
     endedWhileStarting, quickRestart, endedByIlan, atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
     pocket: { afterStrayTap, afterShortPush, afterSmallPush, afterDrift, afterEndGesture },
     whileAway, resumed, letGo, endedAway, silence, tooLong, replaced, stalled }));

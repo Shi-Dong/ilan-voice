@@ -412,21 +412,23 @@ func registerPhoneTests() {
             // No sound starts while iOS is still switching the audio on or over to the
             // loudspeaker (the harness pauses audio for 250 ms after each switch, as iOS
             // does): an inaudible hum plays first, until the audio has run steadily for
-            // 0.3 s; then the sound, and the hum stops.
+            // 0.7 s; then the sound, with the hum going on under it until it is over.
             let steady = json["soundSteadyMs"] as? [Int] ?? [], hum = json["soundHumMs"] as? [Int] ?? []
             expect(steady.count >= 10, "too few sounds played: \(steady)")
-            expect(steady.allSatisfy { $0 >= 300 }, "a sound started before the audio had run 0.3 s: \(steady)")
-            expect(hum.allSatisfy { $0 >= 300 }, "a sound started without the hum warming the speaker up for 0.3 s: \(hum)")
+            expect(steady.allSatisfy { $0 >= 700 }, "a sound started before the audio had run 0.7 s: \(steady)")
+            expect(hum.allSatisfy { $0 >= 700 }, "a sound started without the hum warming the speaker up for 0.7 s: \(hum)")
+            let humAfter = json["humAfterSoundMs"] as? [Int] ?? []
+            expect(humAfter.allSatisfy { $0 >= 1350 }, "the hum stopped before the sound was over: \(humAfter)")
             expectEqual(json["humsLeftOn"] as? Int, 0)
-            // Starting goes in order: the sound (after the 250 ms switch), all of it (0.9 s plus
+            // Starting goes in order: the sound (after the 250 ms switch), all of it (1.35 s plus
             // its echo); only then is the Mac told, and the mic opened.
             let startSound = json["startSound"] as? [String: Any]
             expectEqual(startSound?["chimed"] as? Bool, true)
             expectEqual(startSound?["micBefore"] as? Bool, false)
             expectEqual(startSound?["toldMacAtTap"] as? Bool, false)
             expectEqual(startSound?["hintAtTap"] as? String, "Starting…")
-            expect((startSound?["soundAfterMs"] as? Int ?? -1) >= 550, "the start sound played before the loudspeaker was surely on")
-            expect((startSound?["micAfterMs"] as? Int ?? -1) >= (startSound?["soundAfterMs"] as? Int ?? 0) + 1250,
+            expect((startSound?["soundAfterMs"] as? Int ?? -1) >= 950, "the start sound played before the loudspeaker was surely on")
+            expect((startSound?["micAfterMs"] as? Int ?? -1) >= (startSound?["soundAfterMs"] as? Int ?? 0) + 1700,
                    "the mic opened before the start sound was over")
             expectEqual(startSound?["toldMac"] as? Bool, true)
             // Ended during the start sound: the Mac never hears of it, and no mic opens.
