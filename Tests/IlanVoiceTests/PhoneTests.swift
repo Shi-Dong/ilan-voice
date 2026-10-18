@@ -406,6 +406,11 @@ func registerPhoneTests() {
             expectEqual(allow?["asked"] as? Int, 1)
             expectEqual(allow?["released"] as? Int, 1)
             expectEqual(allow?["nomicAfter"] as? Bool, false)
+            // The button is green only when a tap would start a conversation right away:
+            // microphone allowed, connected, no conversation on.
+            let ready = json["readyLook"] as? [String: Bool]
+            expectEqual(ready, ["atLoad": false, "micAllowed": true, "starting": false, "conversing": false,
+                                "reconnecting": false, "reconnected": true])
             // The start and end sounds play on the loudspeaker: the session is "playback"
             // for every one of them.
             expectEqual(json["chimeSessions"] as? [String], ["playback"])
