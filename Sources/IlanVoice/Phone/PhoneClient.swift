@@ -38,6 +38,11 @@ final class PhoneClient {
     private var conversationID: UUID?
     private var cancellables: Set<AnyCancellable> = []
     private var lastSentMessages: [[String: Any]] = []
+    /// Why the Mac is about to drop the connection (nil: the network or the page closed it).
+    private var dropReason: String?
+    /// Reply audio sent to the page lately (when, how many bytes), for the log.
+    private var recentAudio: [(Date, Int)] = []
+    private var loggedCutWhileAway = false
 
     init(device: String, store: ConversationStore, mcp: MCPManager) {
         self.device = device
@@ -50,10 +55,22 @@ final class PhoneClient {
 
         output.sendAudio = { [weak self] pcm in
             guard let self else { return }
-            if let peer = self.peer { peer.send(binary: pcm); return }
+            if let peer = self.peer {
+                peer.send(binary: pcm)
+                let now = Date()
+                self.recentAudio.append((now, pcm.count))
+                if let first = self.recentAudio.first, now.timeIntervalSince(first.0) > 20 {
+                    self.recentAudio.removeAll { now.timeIntervalSince($0.0) > 10 }
+                }
+                return
+            }
             // A reply that starts while the phone is away can't be heard: cut it
             // (once the session has finished handling this piece of it).
             guard self.isAway, !self.cuttingReply else { return }
+            if !self.loggedCutWhileAway {
+                self.loggedCutWhileAway = true
+                self.log("reply cut", ["why": "the phone is away"])
+            }
             self.cuttingReply = true
             DispatchQueue.main.async { self.cuttingReply = false; self.session.interrupt() }
         }
@@ -79,8 +96,13 @@ final class PhoneClient {
     /// dropped and is back carries on; a page that ended it while away, or a
     /// new window, ends it; and a page that still thinks it is conversing
     /// when the Mac has let the conversation go is told so in hello_ok, and ends.
-    func attach(_ newPeer: WebSocketPeer, conversing: Bool) {
+    func attach(_ newPeer: WebSocketPeer, conversing: Bool, pageReport: [String: Any]? = nil) {
+        var entry: [String: Any] = ["pageConversing": conversing, "macConversing": session.conversationActive, "wasAway": isAway]
+        if let pageReport { entry["previousDrop"] = pageReport }  // the page's side of the last drop
+        log("connected", entry)
+        loggedCutWhileAway = false
         if let old = peer, old !== newPeer {
+            log("replaced", ["why": "a newer connection from this phone"])
             // A newer window for the same phone takes over (or the same page is
             // back before its old connection was found dead): the old one is
             // told so and does not reconnect on its own (otherwise the two
@@ -108,6 +130,10 @@ final class PhoneClient {
         }
         newPeer.onClose = { [weak self, weak newPeer] in
             guard let self, newPeer === self.peer else { return }
+            self.log("dropped", ["why": self.dropReason ?? "closed (network or page)",
+                                 "silentSeconds": Self.round(Date().timeIntervalSince(self.lastHeard)),
+                                 "replyAudioSecondsLast10s": self.recentReplySeconds()])
+            self.dropReason = nil
             self.peer = nil
             self.stopHeartbeat()
             if self.session.conversationActive {
@@ -135,6 +161,7 @@ final class PhoneClient {
     /// The phone never came back: the conversation ends after all.
     private func awayTooLong() {
         guard isAway else { return }
+        log("conversation ended", ["why": "the phone stayed away \(Int(Self.awayLimit)) s"])
         isAway = false
         session.stopConversation()
     }
@@ -158,7 +185,11 @@ final class PhoneClient {
     /// is dropped here, which goes like any other drop (onClose above).
     private func beat() {
         guard let peer else { return }
-        if Date().timeIntervalSince(lastHeard) > Self.heartbeatTimeout { peer.drop(); return }
+        if Date().timeIntervalSince(lastHeard) > Self.heartbeatTimeout {
+            dropReason = "silent: no answer to pings for \(Self.round(Date().timeIntervalSince(lastHeard))) s"
+            peer.drop()
+            return
+        }
         peer.send(json: ["type": "ping"])
     }
 
@@ -198,14 +229,51 @@ final class PhoneClient {
         var entry = report
         entry["time"] = ISO8601DateFormatter().string(from: Date())
         entry["device"] = device
+        Self.append(entry, to: Self.viewportLog)
+    }
+
+    /// The phone's connection coming and going, one JSON line per event, in
+    /// phone-connection.log next to agent.md: why a connection ended (on both
+    /// sides), how long the phone was away, and whether a reply was being
+    /// played, so cut-off replies on a bad network can be diagnosed.
+    static var connectionLog: URL { Paths.root.appendingPathComponent("phone-connection.log") }
+    /// Past this size the log starts over (the old one is kept as .old).
+    static let connectionLogLimit = 2_000_000
+
+    private func log(_ event: String, _ fields: [String: Any] = [:]) {
+        var entry = fields
+        entry["event"] = event
+        entry["time"] = ISO8601DateFormatter().string(from: Date())
+        entry["device"] = device
+        entry["phase"] = session.phase.label
+        entry["conversing"] = session.conversationActive
+        let url = Self.connectionLog
+        if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int, size > Self.connectionLogLimit {
+            let old = url.appendingPathExtension("old")
+            try? FileManager.default.removeItem(at: old)
+            try? FileManager.default.moveItem(at: url, to: old)
+        }
+        Self.append(entry, to: url)
+    }
+
+    private static func append(_ entry: [String: Any], to url: URL) {
         guard var line = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]) else { return }
         line.append(0x0A)
-        if let handle = try? FileHandle(forWritingTo: Self.viewportLog) {
+        if let handle = try? FileHandle(forWritingTo: url) {
             handle.seekToEndOfFile(); handle.write(line); try? handle.close()
         } else {
-            try? line.write(to: Self.viewportLog)
+            try? line.write(to: url)
         }
     }
+
+    /// Seconds of reply audio (24 kHz, 16-bit) sent to the page in the last 10 s.
+    private func recentReplySeconds() -> Double {
+        let since = Date().addingTimeInterval(-10)
+        recentAudio.removeAll { $0.0 < since }
+        return Self.round(Double(recentAudio.reduce(0) { $0 + $1.1 }) / 48_000)
+    }
+
+    private static func round(_ x: Double) -> Double { (x * 10).rounded() / 10 }
 
     private func command(_ type: String) {
         switch type {

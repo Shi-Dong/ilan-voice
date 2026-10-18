@@ -227,6 +227,34 @@ func registerPhoneTests() {
     }
 
     suite("Phone connection drops") { test in
+        test("the connection log records connects with the page's last drop, and drops with their reason") {
+            let store = ConversationStore()
+            let phone = PhoneServer(store: store, mcp: MCPManager())
+            let port = try startOnSparePort(phone.http)
+            defer { phone.http.stop() }
+            try? FileManager.default.removeItem(at: PhoneClient.connectionLog)
+            let task = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:\(port)/ws")!)
+            task.resume()
+            let hello = try JSONSerialization.data(withJSONObject: [
+                "type": "hello", "token": phone.token, "device": "log-phone", "conversing": false,
+                "drop": ["reason": "silent (6000 ms)", "offlineMs": 4200, "unplayedMs": 3100, "conversing": true]])
+            send(task, .string(String(decoding: hello, as: UTF8.self)))
+            _ = receive(task)
+            task.cancel(with: .goingAway, reason: nil)  // the network takes the connection away
+            let events = { () -> [[String: Any]] in
+                ((try? String(contentsOf: PhoneClient.connectionLog, encoding: .utf8)) ?? "")
+                    .split(separator: "\n").compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+                    .filter { $0["device"] as? String == "log-phone" }
+            }
+            expect(waitFor(2) { events().contains { $0["event"] as? String == "dropped" } }, "no drop logged: \(events())")
+            let connected = events().first { $0["event"] as? String == "connected" }
+            expectEqual((connected?["previousDrop"] as? [String: Any])?["reason"] as? String, "silent (6000 ms)")
+            expectEqual((connected?["previousDrop"] as? [String: Any])?["unplayedMs"] as? Int, 3100)
+            let dropped = events().first { $0["event"] as? String == "dropped" }
+            expectEqual(dropped?["why"] as? String, "closed (network or page)")
+            expect(dropped?["silentSeconds"] is Double && dropped?["replyAudioSecondsLast10s"] is Double, "\(String(describing: dropped))")
+            expect(connected?["time"] is String && connected?["phase"] is String)
+        }
         test("a conversation waits for a dropped iPhone, carries on when it is back, and ends when it stays away") {
             let (interval, timeout, limit) = (PhoneClient.heartbeatInterval, PhoneClient.heartbeatTimeout, PhoneClient.awayLimit)
             (PhoneClient.heartbeatInterval, PhoneClient.heartbeatTimeout, PhoneClient.awayLimit) = (0.02, 0.06, 0.15)
@@ -256,6 +284,12 @@ func registerPhoneTests() {
             expect(waitFor(1) { !client.isConnected }, "a silent page was never dropped")
             expect(client.isAway)
             expect(client.session.conversationActive, "the conversation ended when the phone dropped")
+            // The Mac's side of the drop is in the connection log, with why.
+            let logged = ((try? String(contentsOf: PhoneClient.connectionLog, encoding: .utf8)) ?? "").split(separator: "\n")
+                .compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+                .filter { $0["device"] as? String == "drop-phone" && $0["event"] as? String == "dropped" }
+            expect((logged.last?["why"] as? String)?.hasPrefix("silent: no answer to pings") == true, "\(logged)")
+            expectEqual(logged.last?["conversing"] as? Bool, true)
             a.cancel(with: .goingAway, reason: nil)
             // A reply that starts while the phone is away can't be heard: it is cut.
             client.session.conversationID = store.iPhoneConversation(device: "drop-phone", create: false)  // no OpenAI here
@@ -476,6 +510,12 @@ func registerPhoneTests() {
             expectEqual(resumed?["conversing"] as? Bool, true)
             expectEqual(resumed?["restarted"] as? Bool, false)         // no second conversation_start
             expectEqual(resumed?["chimed"] as? Bool, false)
+            // The next hello tells the Mac why the connection ended, for its connection log.
+            let drop = resumed?["drop"] as? [String: Any]
+            expectEqual(drop?["reason"] as? String, "closed")
+            expectEqual(drop?["conversing"] as? Bool, true)
+            expect(drop?["offlineMs"] is Int && drop?["unplayedMs"] is Int && drop?["silentMs"] is Int, "\(String(describing: drop))")
+            expect(drop?["at"] == nil, "only the offline time is sent")
             expectEqual(resumed?["away"] as? Bool, false)
             expectEqual(resumed?["status"] as? String, "Listening")
             expectEqual(resumed?["hint"] as? String, "Listening — just talk · push the button up to end")
@@ -500,6 +540,7 @@ func registerPhoneTests() {
             expectEqual(silence?["abandoned"] as? Bool, true)
             expectEqual(silence?["status"] as? String, "Reconnecting…")
             expectEqual(silence?["reconnected"] as? Bool, true)
+            expectEqual((silence?["drop"] as? [String: Any])?["reason"] as? String, "silent (6000 ms)")
             // No Mac for over AWAY_LIMIT_MS: the page lets the conversation go itself.
             let tooLong = json["tooLong"] as? [String: Any]
             expectEqual(tooLong?["conversing"] as? Bool, false)
