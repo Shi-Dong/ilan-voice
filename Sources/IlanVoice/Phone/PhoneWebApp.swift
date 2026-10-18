@@ -323,20 +323,35 @@ enum PhoneWebApp {
       if (!token) { banner("Open the link shown in Ilan Voice on your Mac (Settings → General → iPhone)."); return; }
       const socket = ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
       socket.binaryType = "arraybuffer";
-      socket.onopen = () => { lastHeard = Date.now(); socket.send(JSON.stringify({ type: "hello", token, device, conversing: held && !starting })); };
+      socket.onopen = () => {
+        lastHeard = Date.now();
+        // Why the previous connection ended, for the Mac's connection log.
+        const drop = lastDrop && { ...lastDrop, offlineMs: Date.now() - lastDrop.at, tries: attempt };
+        if (drop) delete drop.at;
+        socket.send(JSON.stringify({ type: "hello", token, device, conversing: held && !starting, drop }));
+      };
       socket.onmessage = e => { lastHeard = Date.now(); if (typeof e.data === "string") onJSON(JSON.parse(e.data)); else playPCM(e.data); };
-      socket.onclose = () => dropped(socket);
+      socket.onclose = e => dropped(socket, "closed" + (e && e.code ? " (code " + e.code + ")" : ""));
       // iOS can take ages to give up on a connection that isn't going anywhere.
-      setTimeout(() => { if (socket === ws && socket.readyState !== 1) abandon(socket); }, CONNECT_TIMEOUT_MS);
+      setTimeout(() => { if (socket === ws && socket.readyState !== 1) abandon(socket, "never opened (" + CONNECT_TIMEOUT_MS + " ms)"); }, CONNECT_TIMEOUT_MS);
     }
     // Gives up on a connection (dead, or never opening): nothing more is heard
     // from it, not even a late "replaced", and a new one is tried.
-    function abandon(socket) {
+    function abandon(socket, reason) {
       socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
       try { socket.close(); } catch (e) {}
-      dropped(socket);
+      dropped(socket, reason);
     }
-    function dropped(socket) {
+    // Why the last connection ended, reported to the Mac in the next hello:
+    // the reason, how long nothing had been heard, whether a conversation was
+    // on, and how much of Ilan's reply was still waiting to play (lost).
+    let lastDrop = null;
+    function dropped(socket, reason) {
+      if (socket === ws) {
+        const unplayed = ctx && playHead > ctx.currentTime ? Math.round((playHead - ctx.currentTime) * 1000) : 0;
+        lastDrop = { reason: reason || "closed", at: Date.now(), silentMs: Date.now() - lastHeard,
+                     conversing: held, unplayedMs: unplayed, hidden: !!document.hidden };
+      }
       if (socket !== ws) return;  // a connection already given up on, closing late
       ws = null; online = false;
       if (replaced || !paired) {  // another window took over, or the link is no longer paired: no retrying
@@ -356,7 +371,7 @@ enum PhoneWebApp {
         stopConversation(true);
         banner("Connection lost — the conversation ended. Tap the button to start again.");
       }
-      if (ws && ws.readyState === 1 && Date.now() - lastHeard > SILENCE_MS) abandon(ws);
+      if (ws && ws.readyState === 1 && Date.now() - lastHeard > SILENCE_MS) abandon(ws, "silent (" + SILENCE_MS + " ms)");
     }
     setInterval(checkConnection, 1000);
     // The network or the page is back: don't wait for the next retry.
@@ -364,7 +379,7 @@ enum PhoneWebApp {
       if (replaced || !paired) return;
       attempt = 0;
       if (ws && ws.readyState === 1 && Date.now() - lastHeard <= SILENCE_MS) return;  // still fine
-      if (ws) abandon(ws); else connect();
+      if (ws) abandon(ws, "retried (network back)"); else connect();
     }
     window.addEventListener("online", retryNow);
     function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }

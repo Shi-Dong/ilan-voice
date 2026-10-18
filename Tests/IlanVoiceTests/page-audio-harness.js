@@ -154,7 +154,7 @@ new Function(...Object.keys(g), script)(...Object.values(g));
                       away: el("body").classes.has("away"), hint: el("hint").textContent, status: el("status").textContent };
   // The retry connects; the Mac still has the conversation: it carries on, nothing restarted, no sound.
   g.macConversing = true; await run();
-  const resumed = { helloConversing: lastHello().conversing, conversing: conversing(), restarted: count("conversation_start") > starts,
+  const resumed = { drop: lastHello().drop, helloConversing: lastHello().conversing, conversing: conversing(), restarted: count("conversation_start") > starts,
                     chimed: chimes() > osc, away: el("body").classes.has("away"), hint: el("hint").textContent,
                     status: el("status").textContent, micAsks: g.micAsks || 0, reconnected: g.sockets > sockets };
   // It drops again, and now the Mac has let the conversation go (too long away,
@@ -182,6 +182,7 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   readyLook.reconnecting = green();  // no connection: not green
   await run();
   silence.reconnected = g.sockets > sockets && g.socket !== stale;
+  silence.drop = lastHello().drop;
   readyLook.reconnected = green();  // connected again: green
 
   // ---- Away too long ----
