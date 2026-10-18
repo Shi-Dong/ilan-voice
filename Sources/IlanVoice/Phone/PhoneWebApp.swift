@@ -224,9 +224,9 @@ enum PhoneWebApp {
         border: 1px solid rgba(255,255,255,.30);
         box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 12px 28px rgba(0,0,0,.35); }
       #talk svg { color: #FFE3E1; }
-      #talk.ready { color: #E2FBEE; background: rgba(61,214,140,.30);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 12px 28px rgba(0,0,0,.35), 0 0 22px rgba(61,214,140,.22); }
-      #talk.ready svg { color: #E2FBEE; }
+      #talk.ready { color: #EEFDF4; background: rgba(120,235,170,.30);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 12px 28px rgba(0,0,0,.35), 0 0 22px rgba(120,235,170,.20); }
+      #talk.ready svg { color: #EEFDF4; }
       #talk.held { color: #fff; background: rgba(255,107,107,.48);
         border-color: rgba(255,255,255,.40);
         box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 12px 30px rgba(0,0,0,.35), 0 0 26px rgba(255,107,107,.35); }
