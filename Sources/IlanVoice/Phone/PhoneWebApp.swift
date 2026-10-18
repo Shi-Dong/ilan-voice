@@ -769,23 +769,25 @@ enum PhoneWebApp {
     }
     // ---- Sound feedback for starting and ending a conversation ----
     // "Halo", made on the spot (no files): two soft sine notes a fifth apart
-    // that fade in, linger a moment and fade out, about 0.9 s. Start: E and
+    // that fade in, linger a moment and fade out, about 1.35 s. Start: E and
     // B, rising; end: A and E an octave below, settling low. A short, darkened echo adds
     // space, and a gentle compressor evens it out.
     // iOS cuts off the start of a sound that plays while it is still
     // switching the phone's audio on, or over to another route (the
     // loudspeaker, after the mic): the audio context's clock can already be
-    // running while the speaker is still silent. So soundReady first plays
+    // running while the speaker is still silent. So playSound first plays
     // an inaudible hum until the context has been running steadily for
     // SOUND_SETTLE_MS, so the speaker is really on when the sound starts
-    // (tried on an iPhone: the most reliable of several waits). playSound
-    // then resolves once the sound and its echo are over, timed on the audio
-    // clock (which stops while iOS pauses it, so a paused sound is still
-    // waited for).
-    const SOUND_LEN = 0.9, SOUND_TAIL = 0.35, SOUND_SETTLE_MS = 300, SOUND_WAIT_MAX_MS = 2000, SOUND_POLL_MS = 20;
+    // (tried on an iPhone: the most reliable of several waits). The hum goes
+    // on under the sound until it is over, so the speaker never idles in
+    // between. After a long quiet spell the phone's audio takes longer to
+    // wake up than right after another sound, hence the generous wait.
+    // playSound resolves once the sound and its echo are over, timed on the
+    // audio clock (which stops while iOS pauses it, so a paused sound is
+    // still waited for).
+    const SOUND_LEN = 1.35, SOUND_TAIL = 0.35, SOUND_SETTLE_MS = 700, SOUND_WAIT_MAX_MS = 2500, SOUND_POLL_MS = 20;
     const wait = ms => new Promise(r => setTimeout(r, ms));
     async function soundReady(c) {
-      const stopHum = hum(c);
       let steadySince = null;  // audio-clock time since when the context has been running
       for (let waited = 0; waited < SOUND_WAIT_MAX_MS; waited += SOUND_POLL_MS) {
         if (c.state === "closed") break;
@@ -794,7 +796,6 @@ enum PhoneWebApp {
         else if (c.currentTime - steadySince >= SOUND_SETTLE_MS / 1000) break;
         await wait(SOUND_POLL_MS);
       }
-      stopHum();
     }
     // A very quiet tone (about -66 dB, far below hearing on a phone).
     function hum(c) {
@@ -806,18 +807,22 @@ enum PhoneWebApp {
     }
     async function playSound(starting) {
       const c = audioContext();
+      const stopHum = hum(c);
       await soundReady(c);
-      if (c.state === "closed") return;
+      if (c.state === "closed") { stopHum(); return; }
       const bus = soundBus(c), t = c.currentTime + 0.03, end = t + SOUND_LEN + SOUND_TAIL;
       if (starting) {
-        note(c, bus, E5, t, 0.17, 0.06, SOUND_LEN);
-        note(c, bus, B5, t + 0.04, 0.136, 0.06, SOUND_LEN);
+        note(c, bus, E5, t, 0.17, 0.09, SOUND_LEN);
+        note(c, bus, B5, t + 0.06, 0.136, 0.09, SOUND_LEN);
       } else {
-        note(c, bus, A3, t, 0.187, 0.048, SOUND_LEN);
-        note(c, bus, E4, t, 0.119, 0.048, SOUND_LEN * 0.9);
+        // Low A and E. A phone's small speaker barely plays notes this low,
+        // so each has a soft octave above it, which the speaker does play.
+        note(c, bus, A3, t, 0.135, 0.072, SOUND_LEN, 0.5);
+        note(c, bus, E4, t, 0.086, 0.072, SOUND_LEN * 0.9, 0.5);
       }
       const limit = (SOUND_LEN + SOUND_TAIL) * 1000 + SOUND_WAIT_MAX_MS;
       for (let waited = 0; c.state !== "closed" && c.currentTime < end && waited < limit; waited += SOUND_POLL_MS) await wait(SOUND_POLL_MS);
+      stopHum();
     }
     let soundOut = null;
     function soundBus(c) {
@@ -825,7 +830,7 @@ enum PhoneWebApp {
       const comp = c.createDynamicsCompressor();
       comp.threshold.value = -20; comp.knee.value = 14; comp.ratio.value = 3;
       comp.attack.value = 0.004; comp.release.value = 0.2;
-      const out = c.createGain(); out.gain.value = 1.2;  // a third louder than the first Halo level (0.9)
+      const out = c.createGain(); out.gain.value = 2.1;  // as loud as it goes without clipping (peaks just under 0.9)
       comp.connect(out); out.connect(c.destination);
       const echo = c.createDelay(0.5), fb = c.createGain(), dark = c.createBiquadFilter(), wet = c.createGain();
       echo.delayTime.value = 0.09; fb.gain.value = 0.32; dark.type = "lowpass"; dark.frequency.value = 2600; wet.gain.value = 0.2;
@@ -833,15 +838,21 @@ enum PhoneWebApp {
       soundOut = { context: c, dry: comp, echo };
       return soundOut;
     }
-    function note(c, bus, freq, at, peak, attack, len) {
-      const o = c.createOscillator(), g = c.createGain();
-      o.type = "sine"; o.frequency.value = freq;
+    // octave: how loud a soft octave above the note is (0: none).
+    function note(c, bus, freq, at, peak, attack, len, octave = 0) {
+      const g = c.createGain();
       g.gain.setValueAtTime(0.0001, at);
       g.gain.exponentialRampToValueAtTime(peak, at + attack);
-      g.gain.exponentialRampToValueAtTime(peak * 0.55, at + attack + 0.15);  // lingers a moment
+      g.gain.exponentialRampToValueAtTime(peak * 0.55, at + attack + 0.225);  // lingers a moment
       g.gain.exponentialRampToValueAtTime(0.0001, at + len);
-      o.connect(g); g.connect(bus.dry); g.connect(bus.echo);
-      o.start(at); o.stop(at + len + 0.05);
+      g.connect(bus.dry); g.connect(bus.echo);
+      for (const [mult, level] of [[1, 1], [2, octave]]) {
+        if (!level) continue;
+        const o = c.createOscillator(), v = c.createGain();
+        o.type = "sine"; o.frequency.value = freq * mult; v.gain.value = level;
+        o.connect(v); v.connect(g);
+        o.start(at); o.stop(at + len + 0.05);
+      }
     }
     const A3 = 220, E4 = 329.63, E5 = 659.25, B5 = 987.77;
 
