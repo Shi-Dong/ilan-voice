@@ -19,14 +19,32 @@ final class MiniHTTPServer {
     var onSocket: ((WebSocketPeer) -> Void)?
 
     private var listener: NWListener?
+    /// The listener is up: until then connections are refused. (start returns
+    /// before that; the tests wait for it.)
+    private(set) var isListening = false
+    /// The listener could not start (say, the port is taken).
+    private(set) var listenFailed = false
 
     func start(port: UInt16) throws {
         let params = NWParameters.tcp
         params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!)
         params.allowLocalEndpointReuse = true
+        listenFailed = false
         let listener = try NWListener(using: params)
         listener.newConnectionHandler = { [weak self] connection in
             MainActor.assumeIsolated { self?.accept(connection) }
+        }
+        listener.stateUpdateHandler = { [weak self] state in
+            MainActor.assumeIsolated {
+                switch state {
+                case .ready: self?.isListening = true
+                case .failed, .waiting:
+                    self?.isListening = false
+                    self?.listenFailed = true
+                case .cancelled: self?.isListening = false
+                default: break
+                }
+            }
         }
         listener.start(queue: .main)
         self.listener = listener
@@ -35,6 +53,7 @@ final class MiniHTTPServer {
     func stop() {
         listener?.cancel()
         listener = nil
+        isListening = false
     }
 
     private func accept(_ connection: NWConnection) {

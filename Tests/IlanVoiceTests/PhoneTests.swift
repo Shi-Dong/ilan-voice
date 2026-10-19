@@ -25,13 +25,18 @@ func waitFor(_ seconds: Double = 3, _ done: () -> Bool) -> Bool {
     return done()
 }
 
-/// Starts `server` on a free port and returns it.
+/// Starts `server` on a free port and returns it once it is listening (a
+/// connection made sooner is refused).
 @MainActor
 func startOnSparePort(_ server: MiniHTTPServer) throws -> UInt16 {
     var lastError: Error?
     for _ in 0..<20 {
         let port = UInt16.random(in: 50_000...60_000)
-        do { try server.start(port: port); return port } catch { lastError = error }
+        do {
+            try server.start(port: port)
+            if waitFor(2, { server.isListening || server.listenFailed }), server.isListening { return port }
+            server.stop()  // that port was taken after all: try another
+        } catch { lastError = error }
     }
     throw lastError ?? URLError(.cannotConnectToHost)
 }
@@ -291,18 +296,21 @@ func registerPhoneTests() {
             expect((logged.last?["why"] as? String)?.hasPrefix("silent: no answer to pings") == true, "\(logged)")
             expectEqual(logged.last?["conversing"] as? Bool, true)
             a.cancel(with: .goingAway, reason: nil)
-            // A reply that starts while the phone is away can't be heard: it is cut.
+            // A reply that starts while the phone is away is kept for it, not played.
             client.session.conversationID = store.iPhoneConversation(device: "drop-phone", create: false)  // no OpenAI here
             client.session.handle(["type": "response.created", "response": ["id": "r1"]])
             client.session.handle(["type": "response.output_audio.delta", "response_id": "r1", "item_id": "i1",
                                    "delta": Data(count: 4800).base64EncodedString()])
             expectEqual(client.session.phase, .speaking)
-            expect(waitFor(1) { client.session.phase == .recording }, "the unheard reply was not cut")
-            // Back in time, mid-conversation: it carries on.
+            expect(client.session.remoteHold, "a reply the phone can't hear yet should be held")
+            expectEqual(client.session.turnReplies.first?.pcm.count, 4800)
+            // Back in time, mid-conversation: it carries on. This page is from before catch-ups
+            // (no micSent in its hello), so the reply it missed stays missed, as it used to.
             let (b, okB) = try open(conversing: true)
             expectEqual(okB["conversing"] as? Bool, true)
             expect(!client.isAway && client.isConnected)
             expect(client.session.conversationActive)
+            expect(!client.session.remoteHold && client.session.turnReplies.isEmpty, "an older page's missed reply should be let go")
             // Gone again (a proper close this time) and not back in time: the conversation ends after all.
             b.cancel(with: .goingAway, reason: nil)
             expect(waitFor(1) { client.isAway }, "the close was not noticed")
@@ -503,7 +511,29 @@ func registerPhoneTests() {
             expectEqual(away?["screenKeptOn"] as? Bool, true)
             expectEqual(away?["away"] as? Bool, true)
             expectEqual(away?["status"] as? String, "Reconnecting…")
-            expectEqual(away?["hint"] as? String, "Reconnecting… · push the button up to end")
+            expectEqual(away?["hint"] as? String, "Reconnecting… still listening · push the button up to end")
+            // Nothing lost on a bad network: the microphone is numbered and kept; while the
+            // connection is down nothing is sent; back, the page says how much it recorded and
+            // where it was in Ilan's reply, then sends what the Mac missed (its catch-up) before
+            // going live again. The catch-up is the pieces after the 960 bytes the Mac got.
+            let lost = json["nothingLost"] as? [String: Any]
+            expectEqual(lost?["liveBytes"] as? Int, 1_920)
+            expectEqual(lost?["sentWhileAway"] as? Int, 0)
+            expectEqual(lost?["micSent"] as? Int, 4_800)
+            let playback = lost?["playback"] as? [String: Any]
+            expectEqual(playback?["item"] as? String, "a1")
+            expectEqual(playback?["bytes"] as? Int, 9_600)
+            expect(playback?["queuedMs"] is Int, "\(String(describing: playback))")
+            expectEqual((lost?["catchup"] as? [String: Any])?["bytes"] as? Int, 3_840)
+            expectEqual((lost?["catchup"] as? [String: Any])?["lost"] as? Int, 0)
+            expectEqual(lost?["catchBytes"] as? [Int], [960, 960, 960, 960])
+            expectEqual(lost?["endAfter"] as? Bool, true)
+            expectEqual(lost?["liveAfter"] as? Bool, true)
+            expect((lost?["afterStop"] as? [String: Any])?["item"] is NSNull, "after a stop there is no reply: \(String(describing: lost?["afterStop"]))")
+            // A minute (2,880,000 bytes) is kept; the rest, past what the Mac got, is reported lost.
+            let capped = lost?["capped"] as? [String: Any]
+            expectEqual(capped?["bytes"] as? Int, 2_880_000)
+            expectEqual(capped?["lost"] as? Int, ((capped?["micSent"] as? Int) ?? 0) - 2_880_000 - 960)
             let resumed = json["resumed"] as? [String: Any]
             expectEqual(resumed?["reconnected"] as? Bool, true)
             expectEqual(resumed?["helloConversing"] as? Bool, true)    // the hello says so

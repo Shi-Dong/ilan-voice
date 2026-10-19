@@ -84,14 +84,19 @@ const g = {
   WebSocket: class { constructor() { g.sockets = (g.sockets || 0) + 1; g.socket = this; this.closed = false;
                        if (g.stallNext > 0) { g.stallNext--; this.readyState = 0; return; }
                        this.readyState = 1; g.setTimeout(() => this.onopen && this.onopen(), 0); }
-                     send(m) { sent.push(m);
+                     // Everything sent, in order (g.wire: JSON objects, and audio as its byte count).
+                     send(m) {
+                       if (typeof m !== "string") { (g.wire = g.wire || []).push(m.byteLength); return; }
+                       sent.push(m); (g.wire = g.wire || []).push(JSON.parse(m));
                        if (m.includes('"hello"')) g.setTimeout(() => {
                          if (!this.onmessage) return;
-                         this.onmessage({ data: JSON.stringify({ type: "hello_ok", conversing: !!g.macConversing }) });
+                         const ok = { type: "hello_ok", conversing: !!g.macConversing };
+                         if (g.macMicReceived !== undefined) ok.micReceived = g.macMicReceived;  // how much mic audio the Mac got
+                         this.onmessage({ data: JSON.stringify(ok) });
                          this.onmessage({ data: JSON.stringify({ type: "state", phase: g.macConversing ? "Listening" : "Ready", busy: false }) });
                        }, 0); }
                      close() { this.closed = true; this.readyState = 3; } },
-  AudioContext: FakeAudioContext, AudioWorkletNode: class { constructor() { this.port = {}; } connect() {} disconnect() {} },
+  AudioContext: FakeAudioContext, AudioWorkletNode: class { constructor() { this.port = {}; (g.workletNodes = g.workletNodes || []).push(this); } connect() {} disconnect() {} },
   setTimeout: (fn, ms) => { timers.push({ fn, at: now + (ms || 0) }); return timers.length; }, clearTimeout() {},
   setInterval: fn => { intervals.push(fn); return intervals.length; }, requestAnimationFrame() {}, ResizeObserver: class { observe() {} },
   // The page's clock; tests move it forward with g.skew (ms).
@@ -245,7 +250,44 @@ new Function(...Object.keys(g), script)(...Object.values(g));
                   screenKeptOn: wakeLocks.some(l => !l.released) };
   const viewport = sent.map(m => { try { return JSON.parse(m); } catch (e) { return {}; } }).find(m => m.type === "viewport");
   const shortPage = el("html").classes.has("short-page");
-  console.log(JSON.stringify({ nomicAtLoad, readyLook, allowTap, startSound, chimeSessions: [...chimeSessions], soundSteadyMs: sounds.map(x => x.steadyMs), soundHumMs: sounds.map(x => x.humMs), humsLeftOn: hums.filter(h => h.on).length,
+  // ---- Nothing lost on a bad network ----
+  g.macConversing = false; g.macMicReceived = undefined;
+  tap(); await settle();                                     // a conversation, the mic on
+  const node = g.workletNodes.at(-1);
+  const chunk = () => node.port.onmessage({ data: new Float32Array(960).fill(0.25) });  // 20 ms at 48 kHz: 960 bytes at 24 kHz
+  const bytes = list => list.filter(x => typeof x === "number");
+  g.wire = [];
+  chunk(); chunk();                                          // live: sent as recorded
+  const nothingLost = { liveBytes: bytes(g.wire).reduce((a, b) => a + b, 0) };
+  g.socket.onmessage({ data: JSON.stringify({ type: "reply", item: "a1", at: 0 }) });  // Ilan's reply: which, from where
+  g.socket.onmessage({ data: new ArrayBuffer(4800) });
+  g.socket.onmessage({ data: new ArrayBuffer(4800) });
+  g.socket.onclose(); g.wire = [];                           // the connection drops...
+  chunk(); chunk(); chunk();                                 // ...while three more pieces are recorded
+  nothingLost.sentWhileAway = g.wire.length;
+  // Back: the Mac got only the first live piece (the second went into a dead connection).
+  g.macConversing = true; g.macMicReceived = 960;
+  await run();
+  const back = lastHello(), wire = g.wire;
+  const iCatch = wire.findIndex(x => x && x.type === "catchup"), iEnd = wire.findIndex(x => x && x.type === "catchup_end");
+  Object.assign(nothingLost, { micSent: back.micSent, playback: back.playback, catchup: wire[iCatch],
+                               catchBytes: bytes(wire.slice(iCatch + 1, iEnd)), endAfter: iEnd > iCatch });
+  chunk();                                                   // live again, after the catch-up
+  nothingLost.liveAfter = typeof g.wire.at(-1) === "number" && g.wire.length - 1 > iEnd;
+  // Ilan was stopped: the page has no reply to report any more.
+  g.socket.onmessage({ data: JSON.stringify({ type: "audio_stop" }) });
+  g.socket.onclose(); g.macMicReceived = undefined; await run();
+  nothingLost.afterStop = lastHello().playback;
+  // At most a minute is kept: what is older is reported lost.
+  g.socket.onclose();
+  for (let i = 0; i < 3010; i++) chunk();
+  g.macMicReceived = 960; g.wire = [];
+  await run();
+  const cap = g.wire.find(x => x && x.type === "catchup");
+  nothingLost.capped = { bytes: cap && cap.bytes, lost: cap && cap.lost, micSent: lastHello().micSent };
+  push(170); await run();                                    // end it
+
+  console.log(JSON.stringify({ nothingLost, nomicAtLoad, readyLook, allowTap, startSound, chimeSessions: [...chimeSessions], soundSteadyMs: sounds.map(x => x.steadyMs), soundHumMs: sounds.map(x => x.humMs), humsLeftOn: hums.filter(h => h.on).length,
     humAfterSoundMs: sounds.map(x => x.hum && x.hum.stoppedAt !== undefined ? x.hum.stoppedAt - x.at : -1),
     endedWhileStarting, quickRestart, endedByIlan, atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
     pocket: { afterStrayTap, afterShortPush, afterSmallPush, afterDrift, afterEndGesture },

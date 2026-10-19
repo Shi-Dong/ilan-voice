@@ -45,6 +45,9 @@ final class RemoteSpeaker: VoiceOutput {
     private var startedAt: Date?
     private var startFrame = 0
     private var drainWork: DispatchWorkItem?
+    /// Until then the phone is still playing audio sent before a drop: audio
+    /// sent now plays after it.
+    private var queuedUntil: Date?
 
     var playedFrames: Int {
         guard let startedAt else { return enqueuedFrames }
@@ -57,9 +60,13 @@ final class RemoteSpeaker: VoiceOutput {
     func enqueue(_ pcm: Data) {
         drainWork?.cancel()
         if !isPlaying {
-            startedAt = Date()
+            // The phone plays new audio after a short buffer, or right after
+            // what it still has queued from before a drop.
+            let ahead = queuedUntil.map { $0.timeIntervalSinceNow } ?? 0
+            startedAt = Date().addingTimeInterval(ahead > 0 ? ahead - Self.prebufferSeconds : 0)
             startFrame = enqueuedFrames
         }
+        queuedUntil = nil
         enqueuedFrames += pcm.count / 2
         sendAudio?(pcm)
     }
@@ -75,6 +82,15 @@ final class RemoteSpeaker: VoiceOutput {
         }
         drainWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + remaining + 0.1, execute: work)
+    }
+
+    /// The phone's connection dropped: what was sent but not yet played is
+    /// gone with it. `stillQueued`: once back, the phone still had this much
+    /// to play, so what is sent next starts after it.
+    func forgetPlayback(stillQueued: TimeInterval = 0) {
+        drainWork?.cancel()
+        startedAt = nil
+        queuedUntil = stillQueued > 0 ? Date().addingTimeInterval(stillQueued) : nil
     }
 
     func stop() {

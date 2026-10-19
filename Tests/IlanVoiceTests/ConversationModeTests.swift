@@ -204,15 +204,15 @@ func registerConversationEdgeTests() {
             expect(!store.liveOnPhone.contains(convID))
             expect(session.errorMessage?.contains("Lost the iPhone") == true)
         }
-        test("a dropped phone pauses the silence watchdog and cuts a reply it can't hear; silence counts again once it is back") {
+        test("a dropped phone pauses the silence watchdog and holds Ilan's reply for it; silence counts again once it is back") {
             let (session, speaker, mic, _, _) = makeSession()
             session.conversationSilenceLimit = 0.06
             session.startConversation()
             speaker.isPlaying = true  // Ilan is mid-reply
             let stops = speaker.stops
             session.remoteDropped()
-            expect(speaker.stops > stops, "a reply the phone can't hear should be cut")
-            expectEqual(session.phase, .recording)
+            expectEqual(speaker.stops, stops)  // not cut: kept for when the phone is back
+            expect(session.remoteHold)
             mic.running = false  // and nothing more arrives from the phone
             expect(!waitFor(0.15) { !session.conversationActive }, "silence ended the conversation while the phone was away")
             session.remoteReturned()
