@@ -59,7 +59,7 @@ Settings → General → iPhone → **Start Web Server** lets you talk to Ilan f
 <summary>More about the iPhone app</summary>
 
 - **Replies** always play in real time. The Reconnect button at the top starts a fresh session.
-- **A flaky network.** If the connection to the Mac drops mid-conversation (a tunnel, a Wi-Fi hand-off), the conversation waits: the page shows "Reconnecting…", keeps the microphone, and carries on as soon as the Mac is back. Whatever you said meanwhile was not heard, and a reply that was playing is cut, so just say it again. If the phone stays away for two minutes, the Mac ends the conversation, and the phone plays the closing sound once it reconnects.
+- **A flaky network.** A network that stalls for a few seconds and then catches up (common on a train's Wi-Fi) is ridden out without reconnecting. If the connection to the Mac really drops mid-conversation (a tunnel, a Wi-Fi hand-off), the conversation waits: the page shows "Reconnecting…", keeps the microphone, and carries on as soon as the Mac is back. Whatever you said meanwhile was not heard, and a reply that was playing is cut, so just say it again. If the phone stays away for two minutes, the Mac ends the conversation, and the phone plays the closing sound once it reconnects.
 - **One conversation per iPhone.** Each iPhone has its own conversation ("iPhone 1", "iPhone 2", …), marked with an iPhone in the sidebar. You can continue it on the Mac, and several iPhones can be used at once.
 - **Same setup as the Mac.** It uses the same instructions, tools and settings.
 - **After reinstalling.** If you remove the home-screen app and add it again, the page asks "Which iPhone is this?"; pick the old name to carry on with its conversation.
