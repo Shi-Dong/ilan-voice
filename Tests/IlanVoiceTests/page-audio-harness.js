@@ -65,7 +65,8 @@ const g = {
   // An upright iPhone (393 x 852 pt) whose home-screen page is 62 pt short.
   screen: { width: 393, height: 852 }, innerWidth: 393, innerHeight: 790, visualViewport: { height: 790 },
   matchMedia: () => ({ matches: true }),
-  addEventListener() {},
+  // window events (e.g. "online"), so tests can fire them
+  addEventListener(type, fn) { (handlers["window:" + type] = handlers["window:" + type] || []).push(fn); },
   getComputedStyle: () => ({ paddingTop: "62px", paddingBottom: "34px" }),
   navigator: { standalone: true, wakeLock: { request: async type => { const l = { type, released: false, release: async () => { l.released = true; } };
                                                     wakeLocks.push(l); return l; } },
@@ -178,16 +179,30 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   endedAway.helloConversing = lastHello().conversing; endedAway.sounds = sounds.length - soundsBefore;
 
   // ---- Silence ----
-  // The Mac's pings are answered; a connection with nothing heard for 6 s is given up on and replaced.
+  // The Mac's pings are answered. A stall of several seconds is ridden out
+  // (the network often delivers late); a connection with nothing heard for
+  // 15 s is given up on and replaced.
   g.socket.onmessage({ data: JSON.stringify({ type: "ping" }) });
   const ponged = sent.at(-1) === JSON.stringify({ type: "pong" });
   const stale = g.socket; sockets = g.sockets;
   g.skew = (g.skew || 0) + 7000; tick();
-  const silence = { ponged, abandoned: stale.closed, status: el("status").textContent };
+  const rodeOut = !stale.closed && el("status").textContent !== "Reconnecting…";
+  g.skew += 9000; tick();
+  const silence = { ponged, rodeOut, abandoned: stale.closed, status: el("status").textContent };
   readyLook.reconnecting = green();  // no connection: not green
   await run();
   silence.reconnected = g.sockets > sockets && g.socket !== stale;
   silence.drop = lastHello().drop;
+  // iOS says the network is back: a connection quiet for more than one ping
+  // is given up on at once, but not one heard from a moment ago.
+  const fireWindow = (type) => (handlers["window:" + type] || []).forEach(fn => fn());
+  const live = g.socket; sockets = g.sockets;
+  g.skew += 1000; fireWindow("online");
+  silence.keptWhenFresh = !live.closed && g.sockets === sockets;
+  g.skew += 3000; fireWindow("online");
+  silence.droppedWhenQuiet = live.closed;
+  await run();
+  silence.reasonWhenQuiet = lastHello().drop && lastHello().drop.reason;
   readyLook.reconnected = green();  // connected again: green
 
   // ---- Away too long ----

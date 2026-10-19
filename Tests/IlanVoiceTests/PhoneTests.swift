@@ -242,7 +242,7 @@ func registerPhoneTests() {
             task.resume()
             let hello = try JSONSerialization.data(withJSONObject: [
                 "type": "hello", "token": phone.token, "device": "log-phone", "conversing": false,
-                "drop": ["reason": "silent (6000 ms)", "offlineMs": 4200, "unplayedMs": 3100, "conversing": true]])
+                "drop": ["reason": "silent (15000 ms)", "offlineMs": 4200, "unplayedMs": 3100, "conversing": true]])
             send(task, .string(String(decoding: hello, as: UTF8.self)))
             _ = receive(task)
             task.cancel(with: .goingAway, reason: nil)  // the network takes the connection away
@@ -253,7 +253,7 @@ func registerPhoneTests() {
             }
             expect(waitFor(2) { events().contains { $0["event"] as? String == "dropped" } }, "no drop logged: \(events())")
             let connected = events().first { $0["event"] as? String == "connected" }
-            expectEqual((connected?["previousDrop"] as? [String: Any])?["reason"] as? String, "silent (6000 ms)")
+            expectEqual((connected?["previousDrop"] as? [String: Any])?["reason"] as? String, "silent (15000 ms)")
             expectEqual((connected?["previousDrop"] as? [String: Any])?["unplayedMs"] as? Int, 3100)
             let dropped = events().first { $0["event"] as? String == "dropped" }
             expectEqual(dropped?["why"] as? String, "closed (network or page)")
@@ -335,7 +335,7 @@ func registerPhoneTests() {
         test("the Mac decides first: the page waits longer than the Mac, and the Mac's silence watchdog longer than its heartbeat") {
             let html = PhoneWebApp.html
             expect(html.contains("AWAY_LIMIT_MS = \(Int(PhoneClient.awayLimit * 1000) + 30_000)"), "the page should wait 30 s longer than the Mac")
-            expect(html.contains("SILENCE_MS = \(Int(PhoneClient.heartbeatInterval * 3 * 1000))"), "the page should allow three missed pings")
+            expect(html.contains("SILENCE_MS = \(Int(PhoneClient.heartbeatTimeout * 1000))"), "the page should ride out stalls as long as the Mac")
             expect(VoiceSession.defaultConversationSilenceLimit > PhoneClient.heartbeatTimeout + PhoneClient.heartbeatInterval,
                    "a dropped connection must be noticed as a drop before it counts as a lost microphone")
         }
@@ -564,13 +564,20 @@ func registerPhoneTests() {
             expectEqual(endedAway?["sentStop"] as? Bool, false)         // nothing to send it on
             expectEqual(endedAway?["helloConversing"] as? Bool, false)
             expectEqual(endedAway?["sounds"] as? Int, 1)                // the end sound, and nothing on reconnecting
-            // Pings are answered; a connection silent for 6 s is given up on and a new one opened.
+            // Pings are answered; a 7 s stall is ridden out; a connection silent for 15 s is
+            // given up on and a new one opened.
             let silence = json["silence"] as? [String: Any]
             expectEqual(silence?["ponged"] as? Bool, true)
+            expectEqual(silence?["rodeOut"] as? Bool, true)
             expectEqual(silence?["abandoned"] as? Bool, true)
             expectEqual(silence?["status"] as? String, "Reconnecting…")
             expectEqual(silence?["reconnected"] as? Bool, true)
-            expectEqual((silence?["drop"] as? [String: Any])?["reason"] as? String, "silent (6000 ms)")
+            expectEqual((silence?["drop"] as? [String: Any])?["reason"] as? String, "silent (15000 ms)")
+            // iOS says the network is back: a connection quiet for over 3 s is replaced at once,
+            // one heard from a second ago is kept.
+            expectEqual(silence?["keptWhenFresh"] as? Bool, true)
+            expectEqual(silence?["droppedWhenQuiet"] as? Bool, true)
+            expectEqual(silence?["reasonWhenQuiet"] as? String, "retried (network back)")
             // No Mac for over AWAY_LIMIT_MS: the page lets the conversation go itself.
             let tooLong = json["tooLong"] as? [String: Any]
             expectEqual(tooLong?["conversing"] as? Bool, false)

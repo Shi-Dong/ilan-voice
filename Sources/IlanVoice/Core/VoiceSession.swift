@@ -474,8 +474,9 @@ final class VoiceSession: ObservableObject {
     /// phone's microphone is gone without a word (iOS took it for a call, say).
     /// A phone whose connection dropped is another matter: PhoneClient notices
     /// that first (its heartbeat gives up sooner than this), and the
-    /// conversation waits for the phone instead (remoteDropped). (Tests shorten it.)
-    static let defaultConversationSilenceLimit: TimeInterval = 8
+    /// conversation waits for the phone instead (remoteDropped). So this must
+    /// stay longer than the heartbeat's timeout. (Tests shorten it.)
+    static let defaultConversationSilenceLimit: TimeInterval = 20
     var conversationSilenceLimit = defaultConversationSilenceLimit
     private var lastConversationAudio = Date()
     /// The phone's connection dropped mid-conversation; it may be back soon.

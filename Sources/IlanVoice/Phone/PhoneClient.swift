@@ -15,8 +15,11 @@ final class PhoneClient {
     /// How often the page is pinged, and how long without a word from it (a
     /// pong, audio, a command) before its connection counts as dead.
     /// (Tests shorten these.)
+    /// The timeout is generous: on a train's Wi-Fi the network often stalls
+    /// for several seconds and then delivers everything late, and riding that
+    /// out beats reconnecting. (The page gives up after as long; see SILENCE_MS.)
     static var heartbeatInterval: TimeInterval = 2
-    static var heartbeatTimeout: TimeInterval = 5
+    static var heartbeatTimeout: TimeInterval = 15
     /// How long a conversation waits for a dropped phone to come back.
     static var awayLimit: TimeInterval = 120
 
