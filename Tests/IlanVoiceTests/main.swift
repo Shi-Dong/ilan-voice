@@ -22,6 +22,7 @@ MainActor.assumeIsolated {
     registerTruncateTests()
     registerConnectionTests()
     registerReplayHotkeyTests()
+    registerTalkKeyTapTests()
     registerUpdateCheckTests()
     registerTranscriptQualityTests()
     registerTranscriptRetryTests()

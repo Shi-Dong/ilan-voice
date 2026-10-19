@@ -1,6 +1,8 @@
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
+import Combine
+import os
 
 /// Watches the recorded talk trigger everywhere, and records a new one.
 ///
@@ -11,7 +13,9 @@ import Carbon.HIToolbox
 /// Ordinary keys and mouse buttons go through an event tap (also needs
 /// Accessibility) that sees them in every app and swallows them, so the key
 /// doesn't type and a side button doesn't also go Back. Without the tap, local
-/// monitors still make them work inside the app's own windows.
+/// monitors still make them work inside the app's own windows. The tap runs
+/// on its own thread (see `TalkKeyTap`), so a busy main thread can't make
+/// macOS switch it off and lose a press.
 @MainActor
 final class PushToTalk: ObservableObject {
     @Published private(set) var trusted = AXIsProcessTrusted()
@@ -27,9 +31,22 @@ final class PushToTalk: ObservableObject {
 
     private var monitors: [Any] = []
     private var tap: CFMachPort?
+    /// The tap's side: which events to swallow, decided on the tap's thread.
+    let tapState = TalkKeyTap()
+    private var cancellables: Set<AnyCancellable> = []
     private var isDown = false
     private var replayDown = false
     private let settings = AppSettings.shared
+
+    init() {
+        // The tap's thread decides from a copy of the triggers, kept up to date here.
+        settings.$talkTrigger.combineLatest(settings.$replayTrigger, $recording)
+            .sink { [tapState] talk, replay, recording in
+                tapState.update(.init(talk: talk, replay: replay, recording: recording != nil))
+            }
+            .store(in: &cancellables)
+        tapState.deliver = { [weak self] event in self?.handleTapped(event) }
+    }
 
     func start() {
         if let m = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: { [weak self] event in
@@ -102,7 +119,7 @@ final class PushToTalk: ObservableObject {
     }
 
     /// Whether an event of `kind` with `code` is `trigger`.
-    static func matches(_ trigger: TalkTrigger?, kind: TalkTrigger.Kind, code: Int) -> Bool {
+    nonisolated static func matches(_ trigger: TalkTrigger?, kind: TalkTrigger.Kind, code: Int) -> Bool {
         guard let trigger else { return false }
         return trigger.kind == kind && trigger.code == code
     }
@@ -184,40 +201,113 @@ final class PushToTalk: ObservableObject {
     /// Fails until Accessibility is granted; the timer retries.
     private func installTap() {
         guard AXIsProcessTrusted() else { return }
+        tap = tapState.install()
+    }
+
+    /// A key or button the tap swallowed, now on the main thread.
+    private func handleTapped(_ event: TalkKeyTap.Event) {
+        switch event.kind {
+        case .mouse: _ = handleMouse(button: event.code, down: event.down)
+        default: _ = handleKey(code: event.code, down: event.down, characters: event.characters)
+        }
+    }
+}
+
+/// The event tap for the talk and replay triggers, on a thread of its own.
+///
+/// macOS switches a tap off when it doesn't answer an event in time (about a
+/// second), and the event that did it is lost. On the main thread, a moment
+/// of heavy work there (say the window redrawing a long conversation while
+/// another app is in front) could do that mid-press: the talk button went
+/// down, nothing recorded, and no pill showed. So the tap decides here, at
+/// once, from a copy of the triggers, whether an event is ours (swallowed),
+/// and hands it to the main thread to act on, in order. A busy main thread
+/// now only makes a press start a little late.
+final class TalkKeyTap: @unchecked Sendable {
+    struct Triggers: Equatable {
+        var talk: TalkTrigger
+        var replay: TalkTrigger?
+        /// Settings is waiting for a new trigger to be pressed.
+        var recording: Bool
+    }
+    struct Event: Equatable {
+        var kind: TalkTrigger.Kind
+        var code: Int
+        var down: Bool
+        var characters: String?
+    }
+    /// Gets each swallowed event, on the main thread.
+    @MainActor var deliver: ((Event) -> Void)?
+
+    private let lock = NSLock()
+    private var triggers = Triggers(talk: .rightOption, replay: nil, recording: false)
+    private var port: CFMachPort?
+    private let log = Logger(subsystem: "me.dongshi.ilan-voice", category: "talk-key")
+
+    func update(_ new: Triggers) { lock.withLock { triggers = new } }
+
+    /// Whether the tap swallows an event: the talk or replay trigger, or any
+    /// key (and a usable mouse button, on its way down) while Settings
+    /// records a new trigger. The same answers as PushToTalk.handleKey/handleMouse.
+    static func swallows(_ t: Triggers, kind: TalkTrigger.Kind, code: Int, down: Bool) -> Bool {
+        if t.recording { return kind == .mouse ? down && TalkTrigger.mouse(button: code) != nil : true }
+        if PushToTalk.matches(t.replay, kind: kind, code: code) { return true }
+        return PushToTalk.matches(t.talk, kind: kind, code: code)
+    }
+
+    /// One event, on the tap's thread: whether to swallow it. Never waits on
+    /// the main thread; what to do about it is queued there.
+    func process(kind: TalkTrigger.Kind, code: Int, down: Bool, characters: () -> String? = { nil }) -> Bool {
+        let t = lock.withLock { triggers }
+        guard Self.swallows(t, kind: kind, code: code, down: down) else { return false }
+        let event = Event(kind: kind, code: code, down: down, characters: t.recording ? characters() : nil)
+        DispatchQueue.main.async { [self] in MainActor.assumeIsolated { deliver?(event) } }
+        return true
+    }
+
+    /// Creates the tap and runs it on its own thread; nil if macOS refuses
+    /// (no Accessibility yet).
+    func install() -> CFMachPort? {
         let types: [CGEventType] = [.keyDown, .keyUp, .otherMouseDown, .otherMouseUp]
         let mask = types.reduce(CGEventMask(0)) { $0 | CGEventMask(1 << $1.rawValue) }
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
                                           options: .defaultTap, eventsOfInterest: mask,
-                                          callback: PushToTalk.tapCallback, userInfo: refcon) else { return }
+                                          callback: Self.callback, userInfo: refcon) else { return nil }
+        port = tap
         let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        self.tap = tap
+        let thread = Thread {
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+            CFRunLoopRun()
+        }
+        thread.name = "Ilan Voice talk key"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        log.notice("tap installed on its own thread")
+        return tap
     }
 
-    /// Runs on the main run loop. Returning nil swallows the event.
-    private static let tapCallback: CGEventTapCallBack = { _, type, event, refcon in
+    /// Runs on the tap's thread. Returning nil swallows the event.
+    private static let callback: CGEventTapCallBack = { _, type, event, refcon in
         guard let refcon else { return Unmanaged.passUnretained(event) }
-        let me = Unmanaged<PushToTalk>.fromOpaque(refcon).takeUnretainedValue()
-        return MainActor.assumeIsolated {
-            let swallowed: Bool
-            switch type {
-            case .tapDisabledByTimeout, .tapDisabledByUserInput:
-                if let tap = me.tap { CGEvent.tapEnable(tap: tap, enable: true) }
-                swallowed = false
-            case .keyDown, .keyUp:
-                let code = Int(event.getIntegerValueField(.keyboardEventKeycode))
-                swallowed = me.handleKey(code: code, down: type == .keyDown,
-                                         characters: NSEvent(cgEvent: event)?.charactersIgnoringModifiers)
-            case .otherMouseDown, .otherMouseUp:
-                let button = Int(event.getIntegerValueField(.mouseEventButtonNumber))
-                swallowed = me.handleMouse(button: button, down: type == .otherMouseDown)
-            default:
-                swallowed = false
-            }
-            return swallowed ? nil : Unmanaged.passUnretained(event)
+        let me = Unmanaged<TalkKeyTap>.fromOpaque(refcon).takeUnretainedValue()
+        let swallowed: Bool
+        switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            me.log.notice("tap switched off by macOS (\(type == .tapDisabledByTimeout ? "timeout" : "user input", privacy: .public)); switching it back on")
+            if let port = me.port { CGEvent.tapEnable(tap: port, enable: true) }
+            swallowed = false
+        case .keyDown, .keyUp:
+            swallowed = me.process(kind: .key, code: Int(event.getIntegerValueField(.keyboardEventKeycode)), down: type == .keyDown,
+                                   characters: { NSEvent(cgEvent: event)?.charactersIgnoringModifiers })
+        case .otherMouseDown, .otherMouseUp:
+            swallowed = me.process(kind: .mouse, code: Int(event.getIntegerValueField(.mouseEventButtonNumber)),
+                                   down: type == .otherMouseDown)
+        default:
+            swallowed = false
         }
+        return swallowed ? nil : Unmanaged.passUnretained(event)
     }
 }
 
