@@ -395,6 +395,13 @@ final class VoiceSession: ObservableObject {
     private var turnScanned = 0
     /// This turn has enough voice to count. (Read by the tests.)
     private(set) var turnIsSpeech = false
+    private var turnStartedAt = Date()
+
+    /// Each conversation turn as it ends (kept, or dropped and why), and the
+    /// moment a turn interrupts Ilan, for the phone's connection log: so the
+    /// bars above can be checked, and tuned, on real turns.
+    var onTurn: (([String: Any]) -> Void)?
+    private static func tenths(_ x: Double) -> Double { (x * 10).rounded() / 10 }
 
     /// Enough voice in this turn: now it interrupts Ilan.
     private func countTurnVoice() {
@@ -407,6 +414,10 @@ final class VoiceSession: ObservableObject {
         }
         guard turnVoicedFrames >= turnVoiceNeeded else { return }
         turnIsSpeech = true
+        if turnOverIlan {
+            onTurn?(["outcome": "interrupted Ilan", "afterSeconds": Self.tenths(Date().timeIntervalSince(turnStartedAt)),
+                     "voicedFrames": turnVoicedFrames, "needed": turnVoiceNeeded])
+        }
         interrupt()  // speaking over Ilan stops its reply
         phase = .recording
     }
@@ -1085,6 +1096,7 @@ final class VoiceSession: ObservableObject {
             turnScanned = 0  // counts from the moment just before, kept in conversationAudio
             turnOverIlan = speaker.isPlaying || phase == .speaking
             turnIsSpeech = false
+            turnStartedAt = Date()
             countTurnVoice()
 
         case "input_audio_buffer.speech_stopped":
@@ -1098,8 +1110,13 @@ final class VoiceSession: ObservableObject {
             var msg = Message(id: itemID, role: .user, text: "", pending: true)
             if conversationActive {
                 let confirmed = turnIsSpeech
-                let speech = confirmed || PCM.voicedFrames(conversationAudio) >= turnVoiceNeeded
+                let voiced = PCM.voicedFrames(conversationAudio)
+                let speech = confirmed || voiced >= turnVoiceNeeded
                 turnIsSpeech = false
+                onTurn?(["outcome": speech ? "kept" : "dropped: too little voice", "item": itemID,
+                         "voicedFrames": voiced, "needed": turnVoiceNeeded, "overIlan": turnOverIlan,
+                         "seconds": Self.tenths(PCM.seconds(conversationAudio)),
+                         "turnSeconds": Self.tenths(Date().timeIntervalSince(turnStartedAt))])
                 guard speech else {
                     // Noise: forget the turn here and at OpenAI; Ilan carries on.
                     _ = takeTurnAudio()
@@ -1133,6 +1150,7 @@ final class VoiceSession: ObservableObject {
             guard let itemID = event["item_id"] as? String else { return }
             let text = (event["transcript"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else {
+                if conversationActive { onTurn?(["outcome": "dropped: no words", "item": itemID]) }
                 discardSilentTurn(convID, itemID)
                 return
             }
