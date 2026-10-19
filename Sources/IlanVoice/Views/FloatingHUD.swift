@@ -105,9 +105,12 @@ final class FloatingHUD {
     }
 
     private func show() {
-        // Sit above the Dock on whichever screen the pointer is on.
+        // Sit above the Dock on the screen you are working on.
         let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
+        let focused = Self.focusedWindowFrame()
+        let screens = NSScreen.screens
+        let index = Self.screenIndex(focusedWindow: focused, mouse: mouse, screens: screens.map(\.frame))
+        let screen = index.map { screens[$0] } ?? NSScreen.main
         if let visible = screen?.visibleFrame {
             let size = panel.frame.size
             panel.setFrameOrigin(NSPoint(x: visible.midX - size.width / 2, y: visible.minY + 28))
@@ -120,11 +123,56 @@ final class FloatingHUD {
         panel.orderFrontRegardless()
         visibilityChange += 1
         let change = visibilityChange
-        log.info("show: mode=\(String(describing: self.model.mode), privacy: .public) screen=\(String(describing: self.panel.screen?.localizedName), privacy: .public) active=\(NSApp.isActive)")
+        log.notice("show: mode=\(String(describing: self.model.mode), privacy: .public) screen=\(String(describing: screen?.localizedName), privacy: .public) focused=\(String(describing: focused), privacy: .public) mouse=\(String(describing: mouse), privacy: .public) screens=\(screens.count) active=\(NSApp.isActive)")
         DispatchQueue.main.async { [weak self] in
             guard let self, self.visibilityChange == change else { return }
             self.model.shown = true
         }
+        // In case it still doesn't appear: whether macOS actually shows it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, self.visibilityChange == change else { return }
+            let seen = self.panel.occlusionState.contains(.visible)
+            self.log.notice("shown: visible=\(seen) onScreen=\(String(describing: self.panel.screen?.localizedName), privacy: .public) frame=\(String(describing: self.panel.frame), privacy: .public)")
+        }
+    }
+
+    /// Which screen the pill goes on (an index into `screens`): the one
+    /// showing most of the window you are working in, else the one with the
+    /// pointer, else nil (the main screen). Not just the pointer's: with
+    /// Ilan Voice open on one display and another app focused on another,
+    /// the pointer is often left on the first, and the pill appeared there,
+    /// out of sight.
+    static func screenIndex(focusedWindow: CGRect?, mouse: CGPoint, screens: [CGRect]) -> Int? {
+        if let window = focusedWindow {
+            let overlaps = screens.map { screen -> CGFloat in
+                let common = screen.intersection(window)
+                return common.isNull ? 0 : common.width * common.height
+            }
+            if let best = overlaps.indices.max(by: { overlaps[$0] < overlaps[$1] }), overlaps[best] > 0 { return best }
+        }
+        return screens.firstIndex { NSMouseInRect(mouse, $0, false) }
+    }
+
+    /// The front window of the app you are working in (in AppKit's screen
+    /// coordinates), or nil if it has none on screen.
+    private static func focusedWindowFrame() -> CGRect? {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              let primary = NSScreen.screens.first?.frame,
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]] else { return nil }
+        // Front to back: the first ordinary window of that app is its front one.
+        for info in windows where info[kCGWindowOwnerPID as String] as? pid_t == pid && info[kCGWindowLayer as String] as? Int == 0 {
+            guard let dict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: dict), bounds.width > 50, bounds.height > 50 else { continue }
+            return appKitFrame(bounds, primaryHeight: primary.height)
+        }
+        return nil
+    }
+
+    /// A window list frame (top-left origin, y down) in AppKit's screen
+    /// coordinates (bottom-left origin of the primary screen, y up).
+    static func appKitFrame(_ bounds: CGRect, primaryHeight: CGFloat) -> CGRect {
+        CGRect(x: bounds.minX, y: primaryHeight - bounds.maxY, width: bounds.width, height: bounds.height)
     }
 
     private func hide() {
