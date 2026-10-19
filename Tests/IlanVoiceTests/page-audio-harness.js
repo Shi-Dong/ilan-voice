@@ -75,7 +75,9 @@ const g = {
                                 audioSessionTypes.push(v); },
                               get type() { return audioSessionTypes.at(-1); }, },
                mediaDevices: { getUserMedia: async () => { g.micAsks = (g.micAsks || 0) + 1; g.micAt = now;
-                 return { getTracks: () => [{ stop() { g.micStops = (g.micStops || 0) + 1; } }] }; } } },
+                 const track = { label: "Car Hands-Free", getSettings: () => ({ sampleRate: 16000, echoCancellation: true }),
+                                 stop() { g.micStops = (g.micStops || 0) + 1; } };
+                 return { getTracks: () => [track], getAudioTracks: () => [track] }; } } },
   localStorage: { getItem: k => (k === "ilanToken" ? "t" : k === "ilanDevice" ? "d" : null), setItem() {}, removeItem() {} },
   location: { protocol: "https:", host: "h", search: "" }, URLSearchParams: class { get() { return null; } },
   // Opens, and answers the page's hello the way the Mac does: hello_ok saying
@@ -123,6 +125,8 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   const lastHello = () => JSON.parse(sent.filter(m => m.includes('"hello"')).at(-1));
   const screenOn = () => wakeLocks.some(l => l.type === "screen" && !l.released);
   const chimes = () => g.oscillators || 0;
+  // What the page reported to the Mac's log ("diag"), from the `from`th message sent on.
+  const diags = (from = 0) => sent.slice(from).map(m => JSON.parse(m)).filter(m => m.type === "diag");
   // Press, push up `px` (drifting `side` px sideways at the end), let go. No holding.
   const push = (px, side = 0) => {
     fire("pointerdown", { clientX: 200, clientY: 500, timeStamp: 0 });
@@ -138,7 +142,7 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   const allowTap = { started: conversing(), asked: g.micAsks || 0, released: g.micStops || 0,
                      nomicAfter: el("talk").classes.has("nomic") };
   readyLook.micAllowed = green();  // microphone allowed, connected, no conversation: green
-  const oscBeforeStart = chimes(), tapAt = now;
+  const oscBeforeStart = chimes(), tapAt = now, sentBeforeStart = sent.length;
   tap();                                   // start a conversation (the second tap)
   const micBeforeStartSound = (g.micAsks || 0) > 1, toldMacAtTap = count("conversation_start") > 0;
   const hintAtTap = el("hint").textContent;
@@ -149,6 +153,13 @@ new Function(...Object.keys(g), script)(...Object.values(g));
                        soundAfterMs: sounds.at(-1).at - tapAt, steadyMs: sounds.at(-1).steadyMs,
                        micAfterMs: (g.micAsks || 0) === 2 ? g.micAt - tapAt : -1, toldMac: count("conversation_start") === 1 };
   readyLook.conversing = green();
+  // The page's report of the start: each step in order, the audio pausing as iOS
+  // switches routes, and which microphone it got.
+  const startDiags = diags(sentBeforeStart);
+  const startReport = { steps: startDiags.map(d => d.what).filter(w => !w.startsWith("audio ")),
+                        audio: startDiags.filter(d => d.what.startsWith("audio ")).length,
+                        mic: startDiags.find(d => d.what === "microphone on"),
+                        sound: startDiags.find(d => d.what === "start sound done") };
   const during = { session: audioSessionTypes.at(-1), openContexts: contexts.filter(c => !c.closed).length,
                    screenKeptOn: screenOn() };
 
@@ -175,8 +186,15 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   let soundsBefore = sounds.length;
   push(170);
   const endedAway = { conversing: conversing(), sentStop: count("conversation_stop") > stops };
+  const sentWhileAway = sent.length;
+  g.skew = (g.skew || 0) + 5000;  // 5 s offline
   await run();  // the end sound plays; the page reconnects
   endedAway.helloConversing = lastHello().conversing; endedAway.sounds = sounds.length - soundsBefore;
+  // What the page did while away is reported once the Mac is back (after its hello), with how long ago.
+  const awayMsgs = sent.slice(sentWhileAway).map(m => JSON.parse(m));
+  const endedDiag = awayMsgs.findIndex(m => m.type === "diag" && m.what === "conversation ended");
+  endedAway.report = { afterHello: endedDiag > awayMsgs.findIndex(m => m.type === "hello"), agoMs: awayMsgs[endedDiag] && awayMsgs[endedDiag].agoMs,
+                       once: diags().filter(d => d.what === "conversation ended" && d.byIlan === false).length };
 
   // ---- Silence ----
   // The Mac's pings are answered. A stall of several seconds is ridden out
@@ -302,7 +320,7 @@ new Function(...Object.keys(g), script)(...Object.values(g));
   nothingLost.capped = { bytes: cap && cap.bytes, lost: cap && cap.lost, micSent: lastHello().micSent };
   push(170); await run();                                    // end it
 
-  console.log(JSON.stringify({ nothingLost, nomicAtLoad, readyLook, allowTap, startSound, chimeSessions: [...chimeSessions], soundSteadyMs: sounds.map(x => x.steadyMs), soundHumMs: sounds.map(x => x.humMs), humsLeftOn: hums.filter(h => h.on).length,
+  console.log(JSON.stringify({ startReport, nothingLost, nomicAtLoad, readyLook, allowTap, startSound, chimeSessions: [...chimeSessions], soundSteadyMs: sounds.map(x => x.steadyMs), soundHumMs: sounds.map(x => x.humMs), humsLeftOn: hums.filter(h => h.on).length,
     humAfterSoundMs: sounds.map(x => x.hum && x.hum.stoppedAt !== undefined ? x.hum.stoppedAt - x.at : -1),
     endedWhileStarting, quickRestart, endedByIlan, atLoad: audioSessionTypes[0], during, after, shortPage, gapVar: cssVars["--gap"], viewport,
     pocket: { afterStrayTap, afterShortPush, afterSmallPush, afterDrift, afterEndGesture },

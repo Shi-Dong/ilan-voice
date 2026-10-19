@@ -115,6 +115,7 @@ final class PhoneClient {
             self?.peer?.send(json: ["type": "audio_stop"])
         }
         session.onConversationEndedByIlan = { [weak self] in self?.peer?.send(json: ["type": "conversation_ended"]) }
+        session.onTurn = { [weak self] report in self?.log("turn", report) }
         session.$phase.removeDuplicates()
             .sink { [weak self] _ in DispatchQueue.main.async { self?.sendState() } }
             .store(in: &cancellables)
@@ -283,6 +284,7 @@ final class PhoneClient {
         guard let obj = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
               let type = obj["type"] as? String else { return }
         if type == "viewport" { logViewport(obj); return }
+        if type == "diag" { logPage(obj); return }
         if type == "catchup" {
             catchUp?.receiving = true
             catchUp?.lostBytes = obj["lost"] as? Int ?? 0
@@ -389,6 +391,18 @@ final class PhoneClient {
         } else {
             try? line.write(to: url)
         }
+    }
+
+    /// What the page did, as it reports it ("diag"): the tap, the start sound,
+    /// the microphone (which one), the page hidden. It may report late (kept
+    /// while offline), so `at` is when it happened, from how long ago it says.
+    private func logPage(_ report: [String: Any]) {
+        var entry = report
+        entry["type"] = nil
+        entry["agoMs"] = nil
+        let ago = Double(report["agoMs"] as? Int ?? 0) / 1000
+        entry["at"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-ago))
+        log("page", entry)
     }
 
     /// Seconds of reply audio (24 kHz, 16-bit) sent to the page in the last 10 s.

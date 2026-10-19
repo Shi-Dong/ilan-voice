@@ -407,6 +407,50 @@ func registerConversationEchoTests() {
             expect(store.message(convID, "u1") != nil)
             session.stopConversation()
         }
+        test("every turn is reported for the log: kept or dropped, how much voice, and whether Ilan was talking") {
+            let (session, speaker, mic, _, _) = makeSession()
+            var reports: [[String: Any]] = []
+            session.onTurn = { reports.append($0) }
+            session.startConversation()
+            ilanTalks(session, speaker)
+            burst(session, mic, item: "e1")  // an echo while Ilan talks: dropped
+            speaker.isPlaying = false
+            session.handle(["type": "response.done", "response": ["id": "r1", "output": []]])
+            burst(session, mic, item: "u1")  // the same while Ilan is quiet: kept
+            session.handle(["type": "conversation.item.input_audio_transcription.completed", "item_id": "u1", "transcript": ""])
+            session.stopConversation()
+            expectEqual(reports.map { $0["outcome"] as? String }, ["dropped: too little voice", "kept", "dropped: no words"])
+            guard reports.count == 3 else { return }
+            let echo = reports[0], kept = reports[1]
+            expectEqual(echo["item"] as? String, "e1")
+            expectEqual(echo["overIlan"] as? Bool, true)
+            expectEqual(echo["needed"] as? Int, 40)
+            let echoVoice = echo["voicedFrames"] as? Int ?? -1
+            expect(echoVoice >= 10 && echoVoice < 40, "the echo's voice: \(echoVoice)")
+            expectEqual(kept["overIlan"] as? Bool, false)
+            expectEqual(kept["needed"] as? Int, 10)
+            expect((kept["voicedFrames"] as? Int ?? 0) >= 10 && (kept["seconds"] as? Double ?? 0) > 0 && kept["turnSeconds"] is Double,
+                   "\(kept)")
+            expectEqual(reports[2]["item"] as? String, "u1")
+        }
+        test("talking over Ilan is reported the moment it interrupts, with how long the voice took to count") {
+            let (session, speaker, mic, _, _) = makeSession()
+            var reports: [[String: Any]] = []
+            session.onTurn = { reports.append($0) }
+            mic.framesPerTick = 4
+            session.startConversation()
+            ilanTalks(session, speaker)
+            let stops = speaker.stops
+            session.handle(["type": "input_audio_buffer.speech_started"])
+            expect(waitFor(3) { speaker.stops > stops }, "not interrupted")
+            expectEqual(reports.map { $0["outcome"] as? String }, ["interrupted Ilan"])
+            expect(reports.first?["afterSeconds"] is Double && (reports.first?["voicedFrames"] as? Int ?? 0) >= 40, "\(reports)")
+            session.handle(["type": "input_audio_buffer.speech_stopped"])
+            session.handle(["type": "input_audio_buffer.committed", "item_id": "u1"])
+            expectEqual(reports.last?["outcome"] as? String, "kept")
+            expectEqual(reports.last?["overIlan"] as? Bool, true)
+            session.stopConversation()
+        }
         test("while Ilan talks, under 0.8 s of voice is never sent; while quiet, 0.2 s is enough") {
             expectEqual(VoiceSession.minBargeInVoicedFrames, 40)  // 0.8 s of 20 ms frames
             expectEqual(VoiceSession.minTurnVoicedFrames, 10)     // 0.2 s
