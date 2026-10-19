@@ -260,6 +260,36 @@ func registerPhoneTests() {
             expect(dropped?["silentSeconds"] is Double && dropped?["replyAudioSecondsLast10s"] is Double, "\(String(describing: dropped))")
             expect(connected?["time"] is String && connected?["phase"] is String)
         }
+        test("the connection log has the page's own reports (when they happened) and each conversation turn") {
+            let store = ConversationStore()
+            let phone = PhoneServer(store: store, mcp: MCPManager())
+            let port = try startOnSparePort(phone.http)
+            defer { phone.http.stop() }
+            let task = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:\(port)/ws")!)
+            task.resume()
+            defer { task.cancel(with: .goingAway, reason: nil) }
+            let hello = try JSONSerialization.data(withJSONObject: ["type": "hello", "token": phone.token, "device": "diag-phone", "conversing": false])
+            send(task, .string(String(decoding: hello, as: UTF8.self)))
+            _ = receive(task)
+            send(task, .string(#"{"type":"diag","what":"microphone on","label":"Car Hands-Free","agoMs":30000}"#))
+            let events = { (kind: String) -> [[String: Any]] in
+                ((try? String(contentsOf: PhoneClient.connectionLog, encoding: .utf8)) ?? "")
+                    .split(separator: "\n").compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+                    .filter { $0["device"] as? String == "diag-phone" && $0["event"] as? String == kind }
+            }
+            expect(waitFor(2) { !events("page").isEmpty }, "the page's report was not logged")
+            let page = events("page").last
+            expectEqual(page?["what"] as? String, "microphone on")
+            expectEqual(page?["label"] as? String, "Car Hands-Free")
+            expect(page?["type"] == nil && page?["agoMs"] == nil)
+            let iso = ISO8601DateFormatter()
+            if let at = (page?["at"] as? String).flatMap(iso.date), let time = (page?["time"] as? String).flatMap(iso.date) {
+                expect(abs(time.timeIntervalSince(at) - 30) <= 1, "at \(at), logged \(time)")
+            } else { expect(false, "no at/time: \(String(describing: page))") }
+            guard let client = phone.client(for: "diag-phone") else { return expect(false, "no client for the phone") }
+            client.session.onTurn?(["outcome": "dropped: too little voice", "voicedFrames": 13])
+            expectEqual(events("turn").last?["voicedFrames"] as? Int, 13)
+        }
         test("a conversation waits for a dropped iPhone, carries on when it is back, and ends when it stays away") {
             let (interval, timeout, limit) = (PhoneClient.heartbeatInterval, PhoneClient.heartbeatTimeout, PhoneClient.awayLimit)
             (PhoneClient.heartbeatInterval, PhoneClient.heartbeatTimeout, PhoneClient.awayLimit) = (0.02, 0.06, 0.15)
@@ -478,6 +508,18 @@ func registerPhoneTests() {
             expect((startSound?["micAfterMs"] as? Int ?? -1) >= (startSound?["soundAfterMs"] as? Int ?? 0) + 2250,
                    "the mic opened before the start sound was over")
             expectEqual(startSound?["toldMac"] as? Bool, true)
+            // The page reports each step of the start to the Mac's log, in order, with the
+            // microphone it got (the phone's, or e.g. a car's) and how long the sound took.
+            let report = json["startReport"] as? [String: Any]
+            expectEqual(report?["steps"] as? [String], ["start tapped", "start sound playing", "start sound done",
+                                                        "conversation started", "microphone on"])
+            expect((report?["audio"] as? Int ?? 0) > 0, "the audio pausing for route switches was not reported")
+            let mic = report?["mic"] as? [String: Any]
+            expectEqual(mic?["label"] as? String, "Car Hands-Free")
+            expectEqual(mic?["sampleRate"] as? Int, 16000)
+            expect(mic?["sinceTapMs"] is Int && mic?["agoMs"] is Int, "\(String(describing: mic))")
+            let sound = report?["sound"] as? [String: Any]
+            expect((sound?["audioMs"] as? Int ?? 0) >= 2_200 && sound?["wallMs"] is Int, "\(String(describing: sound))")
             // Ended during the start sound: the Mac never hears of it, and no mic opens.
             let endedWhileStarting = json["endedWhileStarting"] as? [String: Any]
             expectEqual(endedWhileStarting?["told"] as? Int, 0)
@@ -505,6 +547,12 @@ func registerPhoneTests() {
             expectEqual(after?["openContexts"] as? Int, 0)              // …and nothing left running (no Now Playing)
             // The connection drops mid-conversation: the conversation waits (mic and screen
             // kept, "Reconnecting…") and carries on when the Mac is back and still has it.
+            // Ended while the Mac was out of reach: the page's report of it is kept and sent
+            // once, after the next hello, saying how long ago it happened.
+            let awayReport = (json["endedAway"] as? [String: Any])?["report"] as? [String: Any]
+            expectEqual(awayReport?["afterHello"] as? Bool, true)
+            expectEqual(awayReport?["once"] as? Int, 1)
+            expect((awayReport?["agoMs"] as? Int ?? 0) >= 5_000, "\(String(describing: awayReport))")
             let away = json["whileAway"] as? [String: Any]
             expectEqual(away?["conversing"] as? Bool, true)
             expectEqual(away?["micKept"] as? Bool, true)

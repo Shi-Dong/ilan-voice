@@ -396,6 +396,23 @@ enum PhoneWebApp {
     }
     window.addEventListener("online", retryNow);
     function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+    // What the page did when, for the Mac's connection log: starting a
+    // conversation (the tap, the start sound, the microphone and which one it
+    // is), the audio pausing, the page hidden. Kept while the Mac is out of
+    // reach (the last DIAG_KEEP) and sent once it is back, each saying how
+    // long ago it happened.
+    const DIAG_KEEP = 50;
+    let diags = [], tappedAt = 0;
+    function diag(what, fields) {
+      diags.push({ type: "diag", what, ...fields, ms: Date.now() });
+      if (diags.length > DIAG_KEEP) diags.shift();
+      sendDiags();
+    }
+    function sendDiags() {
+      if (!online || !ws || ws.readyState !== 1) return;
+      for (const { ms, ...d } of diags) send({ ...d, agoMs: Date.now() - ms });
+      diags = [];
+    }
 
     function onJSON(m) {
       if (m.type === "hello_ok") {
@@ -407,6 +424,7 @@ enum PhoneWebApp {
         if (held && !starting && !m.conversing) stopConversation(true);
         else if (held && !starting && typeof m.micReceived === "number") sendCatchUp(m.micReceived);
         showState();
+        sendDiags();
       }
       else if (m.type === "ping") { send({ type: "pong" }); }
       else if (m.type === "choose_phone") { choosePhone(m.phones); }
@@ -588,7 +606,11 @@ enum PhoneWebApp {
         // iOS pauses it when the mic switches routes; resume it, but only
         // during a conversation and its end sound (otherwise a paused context
         // is what we want).
-        ctx.onstatechange = () => { if ((held || ending) && ctx && ctx.state !== "running") ctx.resume().catch(() => {}); };
+        const c = ctx;
+        c.onstatechange = () => {
+          if (held || ending) diag("audio " + c.state);
+          if ((held || ending) && ctx === c && c.state !== "running") c.resume().catch(() => {});
+        };
       }
       if (ctx.state !== "running") ctx.resume().catch(() => {});
       return ctx;
@@ -807,6 +829,8 @@ enum PhoneWebApp {
     function startConversation() {
       if (held || !online) return;
       held = true; starting = true;
+      tappedAt = Date.now();
+      diag("start tapped");
       document.body.classList.add("conversing");
       setAudioSession("playback");  // the start sound plays on the loudspeaker
       audioContext();  // unlocks reply playback; iOS only allows that inside a touch
@@ -821,8 +845,18 @@ enum PhoneWebApp {
         micSent = 0; micKept = [];  // counted from the start of the conversation (the Mac too)
         replyItem = null; replyBytes = 0;
         send({ type: "conversation_start" });
+        diag("conversation started", { sinceTapMs: Date.now() - tappedAt });
         showState();
-        startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
+        startMic().then(() => {
+          // Which microphone: the phone's, or e.g. a car's over Bluetooth.
+          const track = micStream && micStream.getAudioTracks ? micStream.getAudioTracks()[0] : null;
+          const set = track && track.getSettings ? track.getSettings() : {};
+          if (track) diag("microphone on", { label: track.label, sampleRate: set.sampleRate, echoCancellation: set.echoCancellation,
+                                             sinceTapMs: Date.now() - tappedAt });
+        }).catch(err => {
+          diag("microphone failed", { error: String(err && err.message) });
+          banner("Microphone unavailable: " + err.message); stopConversation();
+        });
       });
     }
     let conversations = 0;
@@ -831,6 +865,7 @@ enum PhoneWebApp {
     function stopConversation(byIlan) {
       if (!held) return;
       const started = !starting;  // ended during the start sound: the Mac never heard of it
+      diag("conversation ended", { byIlan: !!byIlan, duringStartSound: !started });
       held = false; sending = false; starting = false; awaySince = 0;
       micKept = [];
       document.body.classList.remove("conversing");
@@ -891,7 +926,9 @@ enum PhoneWebApp {
     async function playSound(starting) {
       const c = audioContext();
       const stopHum = hum(c);
+      const name = starting ? "start sound" : "end sound", from = Date.now();
       await soundReady(c);
+      diag(name + " playing", { waitedMs: Date.now() - from, audio: c.state });
       if (c.state === "closed") { stopHum(); return; }
       const shape = starting ? START_SOUND : END_SOUND;
       const bus = soundBus(c), t = c.currentTime + 0.03, end = t + shape.len + SOUND_TAIL;
@@ -905,8 +942,10 @@ enum PhoneWebApp {
         note(c, bus, E4, t, 0.086, shape, 0.5);
       }
       const limit = (shape.len + SOUND_TAIL) * 1000 + SOUND_WAIT_MAX_MS;
+      const playFrom = Date.now(), clockFrom = c.currentTime;
       for (let waited = 0; c.state !== "closed" && c.currentTime < end && waited < limit; waited += SOUND_POLL_MS) await wait(SOUND_POLL_MS);
       stopHum();
+      diag(name + " done", { wallMs: Date.now() - playFrom, audioMs: Math.round((c.currentTime - clockFrom) * 1000), audio: c.state });
     }
     let soundOut = null;
     function soundBus(c) {
@@ -1026,6 +1065,7 @@ enum PhoneWebApp {
       else { replaced = false; retryNow(); }
     });
     document.addEventListener("visibilitychange", () => {
+      if (document.hidden && held) diag("page hidden");
       if (document.hidden) { if (held) stopConversation(); }
       else retryNow();
     });
