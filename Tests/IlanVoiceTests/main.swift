@@ -34,6 +34,7 @@ MainActor.assumeIsolated {
     registerTapKeepsSpeechTests()
     registerUsageTests()
     registerPillMicrophoneTests()
+    registerPillScreenTests()
     registerPressEndsTests()
     registerReconnectTests()
     registerReconnectMCPTests()
