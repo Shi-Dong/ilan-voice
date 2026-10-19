@@ -465,6 +465,7 @@ final class VoiceSession: ObservableObject {
         }
         ackWait = nil
         if phase == .thinking { phase = idlePhase }
+        onTurn?(["outcome": "no reply: acknowledgement", "item": itemID, "words": text])
         return true
     }
 

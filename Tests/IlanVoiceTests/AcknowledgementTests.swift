@@ -46,6 +46,8 @@ func registerAcknowledgementTests() {
         }
         test("a short turn waits for its transcript; just \"Hmm.\" gets no reply, and is still kept") {
             let (session, _, mic, store, convID) = makeSession()
+            var reports: [[String: Any]] = []
+            session.onTurn = { reports.append($0) }
             session.startConversation()
             say(session, mic, item: "u1")
             expectEqual(session.replyRequests, 0)  // waiting for the words
@@ -54,6 +56,8 @@ func registerAcknowledgementTests() {
             expectEqual(session.replyRequests, 0)
             expectEqual(session.phase, .recording)  // listening again
             expectEqual(store.message(convID, "u1")?.text, "Hmm.")
+            expectEqual(reports.last?["outcome"] as? String, "no reply: acknowledgement")  // in the phone's log
+            expectEqual(reports.last?["words"] as? String, "Hmm.")
             // With no reply to wait for, its transcript turns final (not grey) right away.
             expect(waitFor(2) { store.message(convID, "u1")?.awaitingCorrection == nil }, "the transcript stayed grey")
             session.stopConversation()
