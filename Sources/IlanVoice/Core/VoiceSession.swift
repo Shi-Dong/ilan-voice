@@ -422,6 +422,84 @@ final class VoiceSession: ObservableObject {
         phase = .recording
     }
 
+    // No reply to a bare acknowledgement. "Hmm.", "Good.", "I see." said
+    // while Ilan is quiet only say the user is listening; answering them
+    // makes Ilan talk for nothing. Which turns are just that is only known
+    // from the transcript, so a short turn (at most `maxAckVoicedFrames` of
+    // voice, about 2 s) waits for it before Ilan is asked to reply; longer
+    // turns, and turns that cut Ilan off, are answered at once. An
+    // acknowledgement that answers Ilan's question ("Shall I go on?" "Okay.")
+    // is answered too, and so is a short turn whose transcript is late
+    // (`ackTranscriptWait`).
+    static let maxAckVoicedFrames = 100
+    static var ackTranscriptWait: TimeInterval = 1.5
+    /// Ilan was quiet when this turn started (no reply playing, coming or being worked on).
+    private var turnIlanIdle = false
+    /// The short turn waiting for its transcript, and when to stop waiting.
+    private var ackWait: (item: String, timeout: DispatchWorkItem)? { didSet { oldValue?.timeout.cancel() } }
+    /// Replies asked for in conversation mode. (Read by the tests.)
+    private(set) var replyRequests = 0
+
+    private func requestReply() {
+        ackWait = nil
+        replyRequests += 1
+        client?.send(["type": "response.create"])
+    }
+
+    private func awaitTranscript(_ itemID: String) {
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.conversationActive, self.ackWait?.item == itemID else { return }
+            self.requestReply()  // no transcript in time: answer anyway
+        }
+        ackWait = (itemID, timeout)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.ackTranscriptWait, execute: timeout)
+    }
+
+    /// The transcript of the short turn waiting for it is in. Returns true
+    /// if it was a bare acknowledgement, left without a reply.
+    private func settleShortTurn(_ convID: UUID, _ itemID: String, _ text: String) -> Bool {
+        guard ackWait?.item == itemID else { return false }
+        guard Self.isAcknowledgement(text), !ilanAsked(convID, before: itemID) else {
+            requestReply()
+            return false
+        }
+        ackWait = nil
+        if phase == .thinking { phase = idlePhase }
+        onTurn?(["outcome": "no reply: acknowledgement", "item": itemID, "words": text])
+        return true
+    }
+
+    /// Ilan's last words before this turn were a question.
+    private func ilanAsked(_ convID: UUID, before itemID: String) -> Bool {
+        let messages = store.conversations.first(where: { $0.id == convID })?.messages ?? []
+        let earlier = messages.prefix { $0.id != itemID }
+        guard let last = earlier.last(where: { $0.role == .assistant }) else { return false }
+        return last.text.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?")
+    }
+
+    /// Only acknowledgements, possibly repeated: "Hmm.", "Good, good.", "Okay, I see.", "Got it, thanks."
+    /// Anything more ("Okay, and then?", "I see a car"), or a question ("Right?"), is not.
+    static func isAcknowledgement(_ transcript: String) -> Bool {
+        guard !transcript.contains("?"), !transcript.contains("？") else { return false }
+        let words = transcript.lowercased()
+            .replacingOccurrences(of: "’", with: "'")
+            .components(separatedBy: CharacterSet.letters.union(CharacterSet(charactersIn: "'")).inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard !words.isEmpty else { return false }
+        return words.wholeMatch(of: acknowledgement) != nil
+    }
+    private static let acknowledgement = try! Regex(
+        "(?:(?:" + [
+            "h?m+", "h?m+ ?h?m+", "uh huh", "ah+", "oh+", "a?ha+",
+            "ok", "okay", "okey", "kay", "all ?right", "sure", "fine",
+            "good", "great", "nice", "cool", "perfect", "awesome", "wow",
+            "right", "yeah", "yep", "yup", "exactly", "indeed", "true",
+            "i see", "got it", "gotcha", "understood", "that makes sense", "makes sense",
+            "thanks", "thank you", "very",
+            "嗯+", "哦+", "好+的?", "对+", "行", "明白了?", "知道了", "了解",
+        ].joined(separator: "|") + ") ?)+")
+
     /// Off (push to talk: the app says when a turn ends) or semantic.
     private var turnDetection: Any { conversationActive ? Self.semanticTurns : NSNull() }
 
@@ -465,6 +543,7 @@ final class VoiceSession: ObservableObject {
 
     func stopConversation() {
         guard conversationActive else { return }
+        ackWait = nil
         interrupt()  // ending the conversation silences Ilan at once
         conversationActive = false
         remoteAway = false
@@ -798,7 +877,8 @@ final class VoiceSession: ObservableObject {
         forgetTap()
         turnReplies = []  // a reply that was cut off is never played again
         // Asked for a reply that hasn't started yet: cancel it once it starts.
-        let replyRequested = phase == .thinking && !responseActive
+        // (Not a short turn waiting for its transcript: no reply was asked for yet.)
+        let replyRequested = phase == .thinking && !responseActive && ackWait == nil
         if replyRequested { cancelNextResponse = true }
         let wasSpeaking = speaker.isPlaying || responseActive || replyRequested || phase == .speaking || phase == .working
         let wasReplaying = clips.playingID != nil
@@ -1095,6 +1175,7 @@ final class VoiceSession: ObservableObject {
             turnVoicedFrames = 0
             turnScanned = 0  // counts from the moment just before, kept in conversationAudio
             turnOverIlan = speaker.isPlaying || phase == .speaking
+            turnIlanIdle = !turnOverIlan && !responseActive && (phase == .recording || ackWait != nil)
             turnIsSpeech = false
             turnStartedAt = Date()
             countTurnVoice()
@@ -1126,7 +1207,11 @@ final class VoiceSession: ObservableObject {
                 if !confirmed { interrupt() }  // only now known to be speech
                 turnReplies = []  // a new turn: earlier replies are done with
                 phase = .thinking
-                client?.send(["type": "response.create"])
+                if turnIlanIdle && voiced <= Self.maxAckVoicedFrames {
+                    awaitTranscript(itemID)  // maybe just "Hmm."
+                } else {
+                    requestReply()
+                }
                 // Transcribed live like a push-to-talk turn; Luna repairs it once Ilan has answered.
                 pendingUserAudio = takeTurnAudio()
             }
@@ -1152,18 +1237,25 @@ final class VoiceSession: ObservableObject {
             guard !text.isEmpty else {
                 if conversationActive { onTurn?(["outcome": "dropped: no words", "item": itemID]) }
                 discardSilentTurn(convID, itemID)
+                if ackWait?.item == itemID {
+                    ackWait = nil
+                    if phase == .thinking { phase = idlePhase }
+                }
                 return
             }
+            let acknowledged = settleShortTurn(convID, itemID, text)
             store.updateMessage(convID, itemID) {
                 $0.text = text
                 $0.pending = false
-                $0.awaitingCorrection = true  // grey until Luna has had its go
+                // Grey until Luna has had its go, once Ilan has answered. "Hmm." gets no answer, and needs no repair.
+                $0.awaitingCorrection = acknowledged ? nil : true
             }
             correctTranscript(convID)
 
         case "conversation.item.input_audio_transcription.failed":
             guard let itemID = event["item_id"] as? String else { return }
             store.updateMessage(convID, itemID) { $0.text = "(transcription failed)"; $0.pending = false }
+            if ackWait?.item == itemID { requestReply() }
             retitleWhenSettled(convID)
 
         case "response.created":

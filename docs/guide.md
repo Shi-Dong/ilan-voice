@@ -52,7 +52,7 @@ Settings → General → iPhone → **Start Web Server** lets you talk to Ilan f
 1. Install [Tailscale](https://tailscale.com) on the Mac and the iPhone. The page is published on this Mac's tailnet name over HTTPS (`tailscale serve`, port 8767), reachable only from your own devices.
 2. Scan the QR code, open the page, then Share → **Add to Home Screen**.
 3. Tap the button to start a conversation, then just talk: Ilan works out from what you say when you have finished, and answers. Speak over Ilan to interrupt it. To end it, touch the button: a track appears above it; push the button all the way up to End and let go (a tap or a short push does nothing, and the other buttons are locked), so it is safe in a pocket. You can also just say so ("let's end this conversation"): Ilan says goodbye and ends it, with the same closing sound. The screen stays on while a conversation runs, because a locked iPhone stops the page's microphone.
-4. Each turn is transcribed as soon as you finish it (grey at first), and Luna repairs it once Ilan has answered, just like push to talk. Background noise that is not speech never becomes a turn.
+4. Each turn is transcribed as soon as you finish it (grey at first), and Luna repairs it once Ilan has answered, just like push to talk. Background noise that is not speech never becomes a turn. A bare acknowledgement while Ilan is quiet ("Hmm.", "Good.", "Okay, I see.") is kept but gets no reply, unless Ilan had just asked you something. To know it is one, Ilan waits for the transcript of very short turns, up to 1.5 s, before answering.
 5. While an iPhone conversation is live, the Mac can read that conversation but not talk or type in it; every other conversation works as usual.
 
 <details>
