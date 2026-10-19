@@ -46,6 +46,7 @@ MainActor.assumeIsolated {
     registerConversationStopTests()
     registerConversationNoiseTests()
     registerConversationEchoTests()
+    registerAcknowledgementTests()
     registerViewportLogTests()
     registerEndByVoiceTests()
     let failed = runAll()
