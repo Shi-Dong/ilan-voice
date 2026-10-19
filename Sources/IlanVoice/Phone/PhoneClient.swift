@@ -37,7 +37,6 @@ final class PhoneClient {
     private var heartbeat: Timer?
     private var lastHeard = Date()
     private var awayTimer: DispatchWorkItem? { didSet { oldValue?.cancel() } }
-    private var cuttingReply = false
     private var conversationID: UUID?
     private var cancellables: Set<AnyCancellable> = []
     private var lastSentMessages: [[String: Any]] = []
@@ -45,7 +44,44 @@ final class PhoneClient {
     private var dropReason: String?
     /// Reply audio sent to the page lately (when, how many bytes), for the log.
     private var recentAudio: [(Date, Int)] = []
-    private var loggedCutWhileAway = false
+
+    // Nothing lost on a bad network. Both directions are counted, so a page
+    // that comes back is sent exactly what it missed, and sends exactly what
+    // the Mac missed:
+    // - its microphone: the page numbers its audio (micSent) and keeps the
+    //   last minute of it, including all it records while away; hello_ok says
+    //   how much arrived here (micReceived), and the page sends the rest first
+    //   (its catch-up);
+    // - Ilan's reply: each reply item's audio is announced to the page
+    //   ("reply", with where in the item it starts), the page counts what
+    //   arrives and says in its hello where it was; the session keeps the
+    //   turn's replies and plays the phone the rest (remoteResume).
+    // Until the catch-up is in, the reply is held: if the user spoke while
+    // away, their words come first (remoteSpokeOver), otherwise the reply
+    // carries on.
+
+    /// Microphone audio received from the page in this conversation (bytes).
+    private(set) var micReceived = 0
+    /// A page that came back mid-conversation: where it was in the reply, and
+    /// its catch-up audio as it arrives.
+    private var catchUp: CatchUp?
+    private struct CatchUp {
+        var playback: VoiceSession.RemotePlayback
+        var receiving = false
+        var audio = Data()
+        var lostBytes = 0
+    }
+    private var catchUpTimer: DispatchWorkItem? { didSet { oldValue?.cancel() } }
+    /// How long to wait for a page's catch-up (from its return, then from
+    /// each piece of it) before carrying on without the rest. (Tests shorten it.)
+    static var catchUpTimeout: TimeInterval = 15
+    /// Speech while away means at least this much voice (as when interrupting
+    /// Ilan, VoiceSession.minBargeInVoicedFrames) within any 3 s.
+    static let gapSpeechWindowFrames = 150
+    /// The catch-up goes to the session in pieces this size (0.1 s), like live audio.
+    static let catchUpPiece = 4_800
+    /// The reply item the page has been told it is getting, on this connection.
+    private var markedItem: String?
 
     init(device: String, store: ConversationStore, mcp: MCPManager) {
         self.device = device
@@ -57,27 +93,27 @@ final class PhoneClient {
         conversationID = store.iPhoneConversation(device: device, create: false)
 
         output.sendAudio = { [weak self] pcm in
-            guard let self else { return }
-            if let peer = self.peer {
-                peer.send(binary: pcm)
-                let now = Date()
-                self.recentAudio.append((now, pcm.count))
-                if let first = self.recentAudio.first, now.timeIntervalSince(first.0) > 20 {
-                    self.recentAudio.removeAll { now.timeIntervalSince($0.0) > 10 }
-                }
-                return
+            // While the phone is away the session holds the reply instead (remoteDropped).
+            guard let self, let peer = self.peer else { return }
+            // A new reply item, or the first audio on this connection: say which
+            // one and where in it this audio starts, so the page knows where it is.
+            if let item = self.session.speakingItemID, item != self.markedItem {
+                let chunkStart = self.output.enqueuedFrames - pcm.count / 2
+                let itemStart = self.session.speakingItemStartFrame ?? chunkStart
+                peer.send(json: ["type": "reply", "item": item, "at": max(0, chunkStart - itemStart) * 2])
+                self.markedItem = item
             }
-            // A reply that starts while the phone is away can't be heard: cut it
-            // (once the session has finished handling this piece of it).
-            guard self.isAway, !self.cuttingReply else { return }
-            if !self.loggedCutWhileAway {
-                self.loggedCutWhileAway = true
-                self.log("reply cut", ["why": "the phone is away"])
+            peer.send(binary: pcm)
+            let now = Date()
+            self.recentAudio.append((now, pcm.count))
+            if let first = self.recentAudio.first, now.timeIntervalSince(first.0) > 20 {
+                self.recentAudio.removeAll { now.timeIntervalSince($0.0) > 10 }
             }
-            self.cuttingReply = true
-            DispatchQueue.main.async { self.cuttingReply = false; self.session.interrupt() }
         }
-        output.sendStop = { [weak self] in self?.peer?.send(json: ["type": "audio_stop"]) }
+        output.sendStop = { [weak self] in
+            self?.markedItem = nil
+            self?.peer?.send(json: ["type": "audio_stop"])
+        }
         session.onConversationEndedByIlan = { [weak self] in self?.peer?.send(json: ["type": "conversation_ended"]) }
         session.$phase.removeDuplicates()
             .sink { [weak self] _ in DispatchQueue.main.async { self?.sendState() } }
@@ -94,16 +130,21 @@ final class PhoneClient {
             .store(in: &cancellables)
     }
 
-    /// A page for this phone connected, `conversing` as far as it knows. The
-    /// conversation goes on only if both sides think so: the page that
-    /// dropped and is back carries on; a page that ended it while away, or a
-    /// new window, ends it; and a page that still thinks it is conversing
-    /// when the Mac has let the conversation go is told so in hello_ok, and ends.
-    func attach(_ newPeer: WebSocketPeer, conversing: Bool, pageReport: [String: Any]? = nil) {
+    /// A page for this phone connected (its `hello`), `conversing` as far as
+    /// it knows. The conversation goes on only if both sides think so: the
+    /// page that dropped and is back carries on; a page that ended it while
+    /// away, or a new window, ends it; and a page that still thinks it is
+    /// conversing when the Mac has let the conversation go is told so in
+    /// hello_ok, and ends.
+    func attach(_ newPeer: WebSocketPeer, hello: [String: Any]) {
+        let conversing = hello["conversing"] as? Bool ?? false
+        // A page from this version counts and keeps its microphone audio.
+        let canCatchUp = hello["micSent"] as? Int != nil
         var entry: [String: Any] = ["pageConversing": conversing, "macConversing": session.conversationActive, "wasAway": isAway]
-        if let pageReport { entry["previousDrop"] = pageReport }  // the page's side of the last drop
+        if let report = hello["drop"] as? [String: Any] { entry["previousDrop"] = report }  // the page's side of the last drop
+        if let playback = hello["playback"] as? [String: Any] { entry["playback"] = playback }
+        if let micSent = hello["micSent"] as? Int { entry["micSent"] = micSent; entry["micReceived"] = micReceived }
         log("connected", entry)
-        loggedCutWhileAway = false
         if let old = peer, old !== newPeer {
             log("replaced", ["why": "a newer connection from this phone"])
             // A newer window for the same phone takes over (or the same page is
@@ -115,15 +156,35 @@ final class PhoneClient {
             old.close()
         }
         peer = newPeer
+        markedItem = nil
         awayTimer = nil
+        catchUp = nil
+        catchUpTimer = nil
         if session.conversationActive, !conversing { session.stopConversation() }
-        if isAway {
+        if session.conversationActive && conversing && canCatchUp {
+            if !isAway {
+                // Back before the Mac noticed the drop: what was sent meanwhile
+                // went nowhere, so it is handled as a drop and return.
+                output.forgetPlayback()
+                session.remoteDropped()
+            }
+            isAway = false
+            session.remoteReturned(continuous: true)
+            catchUp = CatchUp(playback: Self.playback(hello["playback"]))
+            armCatchUpTimer()
+        } else if isAway {
             isAway = false
             session.remoteReturned()
         }
         newPeer.onBinary = { [weak self, weak newPeer] data in
             guard let self, newPeer === self.peer else { return }
             self.lastHeard = Date()
+            if self.catchUp?.receiving == true {
+                self.catchUp?.audio.append(data)
+                self.armCatchUpTimer()  // still coming: a slow network gets its time
+                return
+            }
+            if self.session.conversationActive { self.micReceived += data.count }
             self.input.deliver(data)
         }
         newPeer.onText = { [weak self, weak newPeer] text in
@@ -138,11 +199,16 @@ final class PhoneClient {
                                  "replyAudioSecondsLast10s": self.recentReplySeconds()])
             self.dropReason = nil
             self.peer = nil
+            self.markedItem = nil
+            // A catch-up cut short isn't counted: the page sends it again.
+            self.catchUp = nil
+            self.catchUpTimer = nil
             self.stopHeartbeat()
             if self.session.conversationActive {
                 // Mid-conversation: the phone may well be back in a moment, so
                 // the conversation waits for it rather than ending.
                 self.isAway = true
+                self.output.forgetPlayback()  // what was on its way is lost
                 self.session.remoteDropped()
                 let work = DispatchWorkItem { [weak self] in self?.awayTooLong() }
                 self.awayTimer = work
@@ -155,7 +221,7 @@ final class PhoneClient {
         lastHeard = Date()
         startHeartbeat()
         lastSentMessages = []
-        newPeer.send(json: ["type": "hello_ok", "conversing": session.conversationActive])
+        newPeer.send(json: ["type": "hello_ok", "conversing": session.conversationActive, "micReceived": micReceived])
         sendMessages(force: true)
         sendState()
         onConnectionChange?()
@@ -217,7 +283,63 @@ final class PhoneClient {
         guard let obj = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
               let type = obj["type"] as? String else { return }
         if type == "viewport" { logViewport(obj); return }
+        if type == "catchup" {
+            catchUp?.receiving = true
+            catchUp?.lostBytes = obj["lost"] as? Int ?? 0
+            return
+        }
+        if type == "catchup_end" { finishCatchUp(timedOut: false); return }
         command(type)
+    }
+
+    private func armCatchUpTimer() {
+        let work = DispatchWorkItem { [weak self] in self?.finishCatchUp(timedOut: true) }
+        catchUpTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.catchUpTimeout, execute: work)
+    }
+
+    /// The page's catch-up is in (or never came): did the user speak while
+    /// the phone was away? Then their words come first; otherwise Ilan's
+    /// reply carries on from where the phone was. Either way the audio then
+    /// goes to the session, as if it had arrived live.
+    private func finishCatchUp(timedOut: Bool) {
+        guard let c = catchUp else { return }
+        catchUp = nil
+        catchUpTimer = nil
+        micReceived += c.audio.count
+        let spoke = PCM.densestVoice(c.audio, windowFrames: Self.gapSpeechWindowFrames) >= VoiceSession.minBargeInVoicedFrames
+        log("caught up", ["seconds": Self.round(PCM.seconds(c.audio)), "lostSeconds": Self.round(Double(c.lostBytes) / Double(PCM.bytesPerSecond)),
+                          "spoke": spoke, "timedOut": timedOut,
+                          "playback": ["item": c.playback.item ?? "", "bytes": c.playback.bytes, "queuedMs": c.playback.queuedMs]])
+        if spoke {
+            markedItem = nil
+            peer?.send(json: ["type": "audio_stop"])
+            session.remoteSpokeOver(c.playback)
+        } else {
+            var still = Double(c.playback.queuedMs) / 1000
+            if still > 0, let item = c.playback.item, !session.turnReplies.contains(where: { $0.id == item }) {
+                // Still playing a reply the Mac has let go of (Ilan was stopped and
+                // the stop got lost with the connection): stop it first.
+                markedItem = nil
+                peer?.send(json: ["type": "audio_stop"])
+                still = 0
+            }
+            output.forgetPlayback(stillQueued: still)
+            session.remoteResume(c.playback)
+        }
+        var at = 0
+        while at < c.audio.count {
+            let end = min(c.audio.count, at + Self.catchUpPiece)
+            input.deliver(c.audio.subdata(in: at..<end))
+            at = end
+        }
+    }
+
+    /// The page's "playback" in its hello: the reply item it was on, the bytes
+    /// of it that had arrived, and the milliseconds of it still to play.
+    static func playback(_ value: Any?) -> VoiceSession.RemotePlayback {
+        let d = value as? [String: Any] ?? [:]
+        return .init(item: d["item"] as? String, bytes: d["bytes"] as? Int ?? 0, queuedMs: d["queuedMs"] as? Int ?? 0)
     }
 
     /// Unit tests only: a message as if the page had sent it.
@@ -280,7 +402,9 @@ final class PhoneClient {
 
     private func command(_ type: String) {
         switch type {
-        case "conversation_start": session.startConversation()
+        case "conversation_start":
+            micReceived = 0  // the page counts from the start of each conversation too
+            session.startConversation()
         case "conversation_stop": session.stopConversation()
         case "press": session.pressToTalk()
         case "release": session.releaseToTalk()

@@ -16,9 +16,26 @@ enum PCM {
     static func containsSpeech(_ data: Data) -> Bool { voicedFrames(data) >= 5 }
 
     /// How many 20 ms frames are above about -40 dBFS (voice, not room hiss).
-    static func voicedFrames(_ data: Data) -> Int {
+    static func voicedFrames(_ data: Data) -> Int { voicedFlags(data).filter { $0 }.count }
+
+    /// The most voiced 20 ms frames within any `window` frames in a row:
+    /// someone talking packs them densely, while noise over a long stretch
+    /// only adds up loud moments here and there.
+    static func densestVoice(_ data: Data, windowFrames window: Int) -> Int {
+        let flags = voicedFlags(data)
+        var best = 0, running = 0
+        for i in flags.indices {
+            if flags[i] { running += 1 }
+            if i >= window, flags[i - window] { running -= 1 }
+            best = max(best, running)
+        }
+        return best
+    }
+
+    /// For each whole 20 ms frame: is it above about -40 dBFS?
+    private static func voicedFlags(_ data: Data) -> [Bool] {
         let frame = 480, threshold = 0.01 * 32_768.0
-        var loudFrames = 0
+        var flags: [Bool] = []
         data.withUnsafeBytes { raw in
             let samples = raw.bindMemory(to: Int16.self)
             var start = 0
@@ -28,11 +45,11 @@ enum PCM {
                     let v = Double(Int16(littleEndian: samples[i]))
                     sum += v * v
                 }
-                if (sum / Double(frame)).squareRoot() > threshold { loudFrames += 1 }
+                flags.append((sum / Double(frame)).squareRoot() > threshold)
                 start += frame
             }
         }
-        return loudFrames
+        return flags
     }
 
     /// Wraps raw PCM in a 44-byte RIFF header.

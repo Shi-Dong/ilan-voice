@@ -88,8 +88,11 @@ final class VoiceSession: ObservableObject {
     private var cancelNextResponse = false
     /// Bumped on every interrupt so a tool loop knows not to ask for a reply.
     private var interruptGeneration = 0
-    private var speakingItemID: String?
-    private var speakingItemStartFrame: Int?
+    /// The reply item being played, and where its audio started in the
+    /// speaker's frame count. (Read by PhoneClient, to tell the phone which
+    /// reply it is getting and where in it.)
+    private(set) var speakingItemID: String?
+    private(set) var speakingItemStartFrame: Int?
     private var replyAudio: [String: Data] = [:]
     private var pendingUserAudio: Data?
 
@@ -428,6 +431,7 @@ final class VoiceSession: ObservableObject {
         interrupt()
         conversationActive = true
         remoteAway = false
+        remoteHold = false
         if let id = target() { store.liveOnPhone.insert(id) }
         lastConversationAudio = Date()
         watchConversationAudio()
@@ -453,6 +457,8 @@ final class VoiceSession: ObservableObject {
         interrupt()  // ending the conversation silences Ilan at once
         conversationActive = false
         remoteAway = false
+        remoteHold = false
+        turnReplies = []
         if let id = conversationID ?? target() { store.liveOnPhone.remove(id) }
         mic.stop()
         inputLevel = 0
@@ -488,27 +494,138 @@ final class VoiceSession: ObservableObject {
         }
     }
 
+    // MARK: The iPhone's connection drops
+
+    /// Where the phone was in Ilan's reply when it came back: the reply item
+    /// it was on, how much of that item's audio had arrived (bytes), and how
+    /// much of it was still waiting to play (ms).
+    struct RemotePlayback: Equatable {
+        var item: String?
+        var bytes = 0
+        var queuedMs = 0
+    }
+    /// Ilan's spoken replies since the user last spoke, in order (a turn's
+    /// replies, with tool calls between, are kept whole), so a phone that
+    /// dropped mid-reply can be played what it missed. Past the limit the
+    /// oldest go. (Read by the tests.)
+    private(set) var turnReplies: [(id: String, pcm: Data)] = []
+    static let turnRepliesLimit = 6_000_000  // bytes, about two minutes
+    /// The phone is away, or back and catching up: Ilan's reply goes on (and
+    /// is kept in `turnReplies`) but isn't played until PhoneClient decides
+    /// how to carry on (remoteResume or remoteSpokeOver).
+    private(set) var remoteHold = false
+    /// A reply resumed after the phone had gone quiet replays this much of
+    /// what it already heard, so the sentence makes sense.
+    static let resumeRewindBytes = 72_000  // 1.5 s
+    /// Unit tests only: what remoteSpokeOver told the server was heard (item, ms).
+    private(set) var lastRemoteTruncations: [(String, Int)] = []
+
+    private func keepTurnReply(_ itemID: String, _ pcm: Data) {
+        if let i = turnReplies.indices.last, turnReplies[i].id == itemID {
+            turnReplies[i].pcm.append(pcm)
+        } else {
+            turnReplies.append((itemID, pcm))
+        }
+        var total = turnReplies.reduce(0) { $0 + $1.pcm.count }
+        while total > Self.turnRepliesLimit, turnReplies.count > 1 { total -= turnReplies.removeFirst().pcm.count }
+    }
+
     /// The phone's connection dropped mid-conversation (PhoneClient waits for
-    /// it to come back). Its silence doesn't count meanwhile. A reply that is
-    /// playing is cut: the phone can't hear the rest of it. A reply still
-    /// being thought about (or a tool call) is left alone: it may be ready
-    /// once the phone is back; if its audio comes first, PhoneClient cuts it.
+    /// it to come back). Its silence doesn't count meanwhile. Ilan's reply is
+    /// not cut: it goes on, and is kept for when the phone is back.
     func remoteDropped() {
         guard conversationActive else { return }
         remoteAway = true
-        if speaker.isPlaying || phase == .speaking { interrupt() }
+        remoteHold = true
     }
 
-    /// The phone is back. Whatever was half-said when it dropped is stale by
-    /// now (the rest was never heard), so the next turn starts clean.
-    func remoteReturned() {
+    /// The phone is back. `continuous`: it sends what it recorded while away,
+    /// so its audio carries on where it left off and nothing is reset; then
+    /// PhoneClient calls remoteResume or remoteSpokeOver. A page from before
+    /// that: whatever was half-said is stale, so the next turn starts clean,
+    /// and a reply the phone missed stays missed.
+    func remoteReturned(continuous: Bool = false) {
         guard conversationActive else { return }
         remoteAway = false
         lastConversationAudio = Date()
+        guard !continuous else { return }
         conversationAudio = Data()
         inTurn = false
         turnIsSpeech = false
         if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
+        if remoteHold {
+            remoteHold = false
+            interrupt()
+        }
+    }
+
+    /// The phone is back and nothing was said meanwhile: play it what it
+    /// missed of Ilan's reply, from where it was. If it had gone quiet, a
+    /// little of what it already heard comes again first; if it was still
+    /// playing, the rest follows on seamlessly. Replies that started while it
+    /// was away follow, and the reply carries on live from there.
+    func remoteResume(_ playback: RemotePlayback) {
+        guard remoteHold else { return }
+        remoteHold = false
+        guard conversationActive, !turnReplies.isEmpty else { return }
+        let replies = turnReplies
+        var first = 0, offset = 0
+        if let item = playback.item, let i = replies.firstIndex(where: { $0.id == item }) {
+            let have = min(max(0, playback.bytes), replies[i].pcm.count) & ~1
+            if have < replies[i].pcm.count {
+                first = i
+                offset = playback.queuedMs > 0 ? have : max(0, have - Self.resumeRewindBytes) & ~1
+            } else {
+                first = i + 1
+            }
+        }
+        var replayed = false
+        for k in first..<replies.count {
+            let skip = k == first ? offset : 0
+            speakingItemID = replies[k].id
+            speakingItemStartFrame = speaker.enqueuedFrames - skip / 2
+            let rest = replies[k].pcm.subdata(in: skip..<replies[k].pcm.count)
+            if !rest.isEmpty {
+                speaker.enqueue(rest)
+                replayed = true
+            }
+        }
+        if first >= replies.count, let last = replies.last {
+            // The phone has all of it: more of this reply carries on from its end.
+            speakingItemID = last.id
+            speakingItemStartFrame = speaker.enqueuedFrames - last.pcm.count / 2
+        }
+        if replayed {
+            phase = .speaking
+            if !responseActive { speaker.flush() }
+        }
+    }
+
+    /// The phone is back and the user spoke while it was away: their words
+    /// come first, as if they had interrupted Ilan. The server is told how
+    /// much of the reply was actually heard (of later replies: nothing), so
+    /// Ilan knows what was missed; a reply still on its way is cancelled.
+    func remoteSpokeOver(_ playback: RemotePlayback) {
+        guard remoteHold else { return }
+        remoteHold = false
+        let replies = turnReplies
+        let bytesPerMs = PCM.bytesPerSecond / 1000
+        var cuts: [(String, Int)] = []
+        var reached = -1  // the reply the phone was in
+        if let item = playback.item, let i = replies.firstIndex(where: { $0.id == item }) {
+            reached = i
+            let heardMs = max(0, playback.bytes / bytesPerMs - playback.queuedMs)
+            if let end = Self.truncationPoint(heardMs: heardMs, itemMs: replies[i].pcm.count / bytesPerMs) {
+                cuts.append((item, end))
+            }
+        }
+        for reply in replies[(reached + 1)...] { cuts.append((reply.id, 0)) }
+        for (id, end) in cuts {
+            client?.send(["type": "conversation.item.truncate", "item_id": id, "content_index": 0, "audio_end_ms": end])
+        }
+        lastRemoteTruncations = cuts
+        speakingItemID = nil  // cut above, by what the phone actually heard
+        interrupt()
     }
 
     private func sendTurnDetection() {
@@ -668,6 +785,7 @@ final class VoiceSession: ObservableObject {
     @discardableResult
     func interrupt() -> Bool {
         forgetTap()
+        turnReplies = []  // a reply that was cut off is never played again
         // Asked for a reply that hasn't started yet: cancel it once it starts.
         let replyRequested = phase == .thinking && !responseActive
         if replyRequested { cancelNextResponse = true }
@@ -989,6 +1107,7 @@ final class VoiceSession: ObservableObject {
                     return
                 }
                 if !confirmed { interrupt() }  // only now known to be speech
+                turnReplies = []  // a new turn: earlier replies are done with
                 phase = .thinking
                 client?.send(["type": "response.create"])
                 // Transcribed live like a push-to-talk turn; Luna repairs it once Ilan has answered.
@@ -1057,6 +1176,11 @@ final class VoiceSession: ObservableObject {
             replyAudio[itemID, default: Data()].append(pcm)
             let muted = mutedResponseID != nil && event["response_id"] as? String == mutedResponseID
             if (isRemote || settings.outputMode == .realtime) && !muted {
+                if isRemote && conversationActive { keepTurnReply(itemID, pcm) }
+                if remoteHold {
+                    phase = .speaking  // kept for the phone, played when it is back
+                    return
+                }
                 if speakingItemID != itemID {
                     speakingItemID = itemID
                     speakingItemStartFrame = speaker.enqueuedFrames

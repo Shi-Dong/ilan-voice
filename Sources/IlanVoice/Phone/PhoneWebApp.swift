@@ -309,8 +309,9 @@ enum PhoneWebApp {
     // the microphone and the screen, shows "Reconnecting…", and carries on
     // once the Mac is back. The Mac keeps the conversation for a while on its
     // side too (a little less than AWAY_LIMIT_MS: the Mac decides first) and
-    // says in hello_ok whether it still has it. What was said while the
-    // connection was down is lost, and a reply that was playing is cut.
+    // says in hello_ok whether it still has it. Nothing is lost meanwhile:
+    // what is said is kept and sent once the Mac is back, and Ilan's reply
+    // carries on from where the phone was (see "Nothing lost" below).
     // A dead connection shows as silence, not a close (iOS and Tailscale can
     // take minutes to notice): the Mac pings every 2 s, and a connection with
     // nothing heard for SILENCE_MS is given up on. That is generous on
@@ -333,9 +334,16 @@ enum PhoneWebApp {
         // Why the previous connection ended, for the Mac's connection log.
         const drop = lastDrop && { ...lastDrop, offlineMs: Date.now() - lastDrop.at, tries: attempt };
         if (drop) delete drop.at;
-        socket.send(JSON.stringify({ type: "hello", token, device, conversing: held && !starting, drop }));
+        const conversing = held && !starting;
+        // Mid-conversation: how much was recorded, and where the phone is in Ilan's reply.
+        const resume = conversing ? { micSent, playback: { item: replyItem, bytes: replyBytes, queuedMs: queuedMs() } } : {};
+        socket.send(JSON.stringify({ type: "hello", token, device, conversing, drop, ...resume }));
       };
-      socket.onmessage = e => { lastHeard = Date.now(); if (typeof e.data === "string") onJSON(JSON.parse(e.data)); else playPCM(e.data); };
+      socket.onmessage = e => {
+        lastHeard = Date.now();
+        if (typeof e.data === "string") onJSON(JSON.parse(e.data));
+        else { replyBytes += e.data.byteLength; playPCM(e.data); }
+      };
       socket.onclose = e => dropped(socket, "closed" + (e && e.code ? " (code " + e.code + ")" : ""));
       // iOS can take ages to give up on a connection that isn't going anywhere.
       setTimeout(() => { if (socket === ws && socket.readyState !== 1) abandon(socket, "never opened (" + CONNECT_TIMEOUT_MS + " ms)"); }, CONNECT_TIMEOUT_MS);
@@ -393,9 +401,11 @@ enum PhoneWebApp {
       if (m.type === "hello_ok") {
         online = everOnline = true; attempt = 0; awaySince = 0; replaced = false;
         banner(""); measureViewport(true);
-        // Back mid-conversation: the Mac kept the conversation (carry on), or
-        // let it go meanwhile (too long away, or Ilan ended it): then end here too.
+        // Back mid-conversation: the Mac kept the conversation (carry on, and
+        // send what it missed first), or let it go meanwhile (too long away,
+        // or Ilan ended it): then end here too.
         if (held && !starting && !m.conversing) stopConversation(true);
+        else if (held && !starting && typeof m.micReceived === "number") sendCatchUp(m.micReceived);
         showState();
       }
       else if (m.type === "ping") { send({ type: "pong" }); }
@@ -409,7 +419,8 @@ enum PhoneWebApp {
         showState();
       }
       else if (m.type === "messages") { render(m); }
-      else if (m.type === "audio_stop") { stopAudio(); }
+      else if (m.type === "audio_stop") { stopAudio(); replyItem = null; replyBytes = 0; }
+      else if (m.type === "reply") { replyItem = m.item; replyBytes = m.at || 0; }
       else if (m.type === "conversation_ended") { stopConversation(true); }
     }
 
@@ -457,7 +468,7 @@ enum PhoneWebApp {
       document.body.classList.toggle("away", held && !online);
       if (!online) {
         setStatus(replaced ? "Open in another window" : !paired ? "Not paired" : everOnline ? "Reconnecting…" : "Connecting…", "");
-        if (held) $("hint").textContent = "Reconnecting… · push the button up to end";
+        if (held) $("hint").textContent = "Reconnecting… still listening · push the button up to end";
         return;
       }
       const m = lastState;
@@ -606,6 +617,42 @@ enum PhoneWebApp {
       sources = []; playHead = 0;
     }
 
+    // ---- Nothing lost on a bad network ----
+    // Microphone audio is numbered (micSent, in bytes, from the start of the
+    // conversation) and the last MIC_KEEP_BYTES of it are kept, including
+    // everything recorded while the connection is down. When the page is
+    // back, hello_ok says how much the Mac received (micReceived), and the
+    // page sends the rest first: its catch-up. That also covers audio sent
+    // into a connection that had already died without anyone knowing yet.
+    // And Ilan's reply: the Mac says which reply item each stretch of audio
+    // belongs to and where in it it starts ("reply"); the page counts what
+    // arrives (replyBytes) and says in its hello where it was, so the Mac can
+    // send exactly the rest.
+    const MIC_KEEP_BYTES = 60 * RATE * 2;  // a minute
+    let micSent = 0, micKept = [];  // micKept: [{ at, buf }], oldest first
+    let replyItem = null, replyBytes = 0;
+    function keepMic(buf) {
+      micKept.push({ at: micSent, buf });
+      micSent += buf.byteLength;
+      while (micKept.length && micKept[0].at + micKept[0].buf.byteLength <= micSent - MIC_KEEP_BYTES) micKept.shift();
+    }
+    // Everything from byte `from` on that is still kept; what is older than
+    // that is lost (reported to the Mac, for its log).
+    function sendCatchUp(from) {
+      const kept = micKept.length ? micKept[0].at : micSent;
+      const start = Math.max(from, kept), parts = [];
+      for (const k of micKept) {
+        const end = k.at + k.buf.byteLength;
+        if (end <= start) continue;
+        parts.push(k.at < start ? k.buf.slice(start - k.at) : k.buf);
+      }
+      send({ type: "catchup", bytes: parts.reduce((n, p) => n + p.byteLength, 0), lost: Math.max(0, kept - from) });
+      for (const p of parts) ws.send(p);
+      send({ type: "catchup_end" });
+    }
+    // How much of Ilan's reply is still waiting to play here (ms).
+    function queuedMs() { return ctx && playHead > ctx.currentTime ? Math.round((playHead - ctx.currentTime) * 1000) : 0; }
+
     // ---- Recording ----
     const worklet = `class Tap extends AudioWorkletProcessor {
       process(inputs) { const ch = inputs[0][0]; if (ch) this.port.postMessage(ch.slice(0)); return true; } }
@@ -645,7 +692,9 @@ enum PhoneWebApp {
           out[i] = v * 32767; sum += v * v;
         }
         carry = input.slice(Math.floor(n * ratio));
-        if (sending && online && ws && ws.readyState === 1) ws.send(out.buffer);
+        if (!sending) return;
+        keepMic(out.buffer);  // numbered and kept, in case the Mac misses it
+        if (online && ws && ws.readyState === 1) ws.send(out.buffer);
       };
       micSource.connect(micNode);
       // Live spectrum for the voice halo.
@@ -769,6 +818,8 @@ enum PhoneWebApp {
       playSound(true).then(() => {
         if (conversation !== conversations || !held) return;  // ended meanwhile
         starting = false; sending = true;
+        micSent = 0; micKept = [];  // counted from the start of the conversation (the Mac too)
+        replyItem = null; replyBytes = 0;
         send({ type: "conversation_start" });
         showState();
         startMic().catch(err => { banner("Microphone unavailable: " + err.message); stopConversation(); });
@@ -781,6 +832,7 @@ enum PhoneWebApp {
       if (!held) return;
       const started = !starting;  // ended during the start sound: the Mac never heard of it
       held = false; sending = false; starting = false; awaySince = 0;
+      micKept = [];
       document.body.classList.remove("conversing");
       $("talk").classList.remove("held");
       if (endGesture) resetEndGesture();

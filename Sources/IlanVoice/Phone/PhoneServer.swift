@@ -148,7 +148,7 @@ final class PhoneServer: ObservableObject {
                 self.clients[device] = c
                 return c
             }()
-            client.attach(peer, conversing: obj["conversing"] as? Bool ?? false, pageReport: obj["drop"] as? [String: Any])
+            client.attach(peer, hello: obj)
             // A page this Mac hasn't seen (new phone, or the home-screen app
             // removed and added again) is asked which iPhone it is, so a
             // re-added app can carry on with its old conversation.
