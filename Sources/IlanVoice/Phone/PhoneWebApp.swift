@@ -313,9 +313,14 @@ enum PhoneWebApp {
     // connection was down is lost, and a reply that was playing is cut.
     // A dead connection shows as silence, not a close (iOS and Tailscale can
     // take minutes to notice): the Mac pings every 2 s, and a connection with
-    // nothing heard for SILENCE_MS is given up on. Retries come quickly at
-    // first, then every 2 s, and at once when iOS says the network is back.
-    const RETRY_MS = [250, 500, 1000, 2000], CONNECT_TIMEOUT_MS = 5000, SILENCE_MS = 6000, AWAY_LIMIT_MS = 150000;
+    // nothing heard for SILENCE_MS is given up on. That is generous on
+    // purpose: on a train's Wi-Fi the network often stalls for several
+    // seconds and then delivers everything late, and riding that out beats
+    // reconnecting. When iOS says the network is back (or the page is shown
+    // again), a connection with nothing heard for RECHECK_MS (more than one
+    // ping) is given up on at once instead. Retries come quickly at first,
+    // then every 2 s.
+    const RETRY_MS = [250, 500, 1000, 2000], CONNECT_TIMEOUT_MS = 5000, SILENCE_MS = 15000, RECHECK_MS = 3000, AWAY_LIMIT_MS = 150000;
     let online = false, everOnline = false, attempt = 0, lastHeard = 0, retry = null, awaySince = 0;
     function connect() {
       if (ws) return;
@@ -378,7 +383,7 @@ enum PhoneWebApp {
     function retryNow() {
       if (replaced || !paired) return;
       attempt = 0;
-      if (ws && ws.readyState === 1 && Date.now() - lastHeard <= SILENCE_MS) return;  // still fine
+      if (ws && ws.readyState === 1 && Date.now() - lastHeard <= RECHECK_MS) return;  // still fine
       if (ws) abandon(ws, "retried (network back)"); else connect();
     }
     window.addEventListener("online", retryNow);
