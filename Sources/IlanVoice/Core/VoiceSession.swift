@@ -393,6 +393,15 @@ final class VoiceSession: ObservableObject {
     /// The phone sends tiny pieces (64 samples, under 3 ms), far shorter than a
     /// frame, so frames are counted over the turn's audio, not piece by piece.
     private var turnScanned = 0
+    /// Where the turn starts and ends in `conversationAudio` (the end once OpenAI says).
+    private var turnStart = 0
+    private var turnEnd: Int?
+    /// The turn started well before the latest audio: it is in a burst of
+    /// audio the phone sent on coming back (its catch-up), so its end is
+    /// already here too, and its voice is only counted once OpenAI says
+    /// where it ends (otherwise later turns' voice would count for it).
+    private var turnFromBacklog = false
+    static let backlogBytes = PCM.bytesPerSecond * 2  // 2 s
     /// This turn has enough voice to count. (Read by the tests.)
     private(set) var turnIsSpeech = false
     private var turnStartedAt = Date()
@@ -405,9 +414,10 @@ final class VoiceSession: ObservableObject {
 
     /// Enough voice in this turn: now it interrupts Ilan.
     private func countTurnVoice() {
-        guard inTurn, !turnIsSpeech else { return }
+        guard inTurn, !turnIsSpeech, !turnFromBacklog || turnEnd != nil else { return }
         let frameBytes = 480 * 2
-        while turnScanned + frameBytes <= conversationAudio.count {
+        let end = min(conversationAudio.count, turnEnd ?? conversationAudio.count)
+        while turnScanned + frameBytes <= end {
             let start = conversationAudio.startIndex + turnScanned
             turnVoicedFrames += PCM.voicedFrames(conversationAudio[start..<start + frameBytes])
             turnScanned += frameBytes
@@ -525,6 +535,8 @@ final class VoiceSession: ObservableObject {
         lastConversationAudio = Date()
         watchConversationAudio()
         conversationAudio = Data()
+        turnStart = 0
+        turnEnd = nil
         inTurn = false
         ensureSession()  // a new session is configured for conversation from the start
         if sessionReady {
@@ -553,6 +565,8 @@ final class VoiceSession: ObservableObject {
         mic.stop()
         inputLevel = 0
         conversationAudio = Data()
+        turnStart = 0
+        turnEnd = nil
         if sessionReady {
             client?.send(["type": "input_audio_buffer.clear"])
             sendTurnDetection()
@@ -640,6 +654,8 @@ final class VoiceSession: ObservableObject {
         lastConversationAudio = Date()
         guard !continuous else { return }
         conversationAudio = Data()
+        turnStart = 0
+        turnEnd = nil
         inTurn = false
         turnIsSpeech = false
         if sessionReady { client?.send(["type": "input_audio_buffer.clear"]) }
@@ -725,19 +741,53 @@ final class VoiceSession: ObservableObject {
         ]])
     }
 
-    /// The conversation's audio since the last turn (plus a moment before the
-    /// next one), so each turn is saved as its own recording.
+    /// The conversation's audio since the last turn, so each turn is saved as
+    /// its own recording, and its voice is counted.
+    ///
+    /// OpenAI says where each turn starts and ends (audio_start_ms,
+    /// audio_end_ms), counted from the start of the session's audio, so the
+    /// turn is found in here by how much audio has been sent (`sentBytes`):
+    /// the last byte in here is the last one sent. That matters when the
+    /// phone comes back from a dropped connection: it sends what it recorded
+    /// meanwhile (up to a minute) in one go, and OpenAI finds the turns in it
+    /// only afterwards, so they lie well back in here, not at the end. So
+    /// between turns, `keptBetweenTurnsBytes` is kept, not just a moment.
     private var conversationAudio = Data()
     private var inTurn = false
-    /// Kept from just before OpenAI noticed speech: it hears the start a moment late.
+    /// When OpenAI doesn't say where a turn starts: from just before it noticed speech (it hears the start a moment late).
     static let turnLeadBytes = Int(PCM.sampleRate) * 2 / 2  // 0.5 s
+    /// More than the phone keeps for a catch-up (a minute).
+    static let keptBetweenTurnsBytes = PCM.bytesPerSecond * 75
+    /// Input audio sent to OpenAI in this session (bytes).
+    private var sentBytes = 0
 
-    /// Cuts the finished turn's audio out of the conversation audio.
+    /// Where OpenAI's time `ms` (from the start of the session's audio) is in
+    /// `conversationAudio`, or nil if the event doesn't say.
+    private func audioIndex(_ ms: Any?) -> Int? {
+        guard let ms = ms as? Int else { return nil }
+        let behind = sentBytes - ms * PCM.bytesPerSecond / 1000
+        let index = (conversationAudio.count - behind) & ~1  // whole samples
+        return min(max(0, index), conversationAudio.count)
+    }
+
+    /// The finished turn's audio, cut out of the conversation audio; what
+    /// came after it (maybe the next turn already) stays.
     private func takeTurnAudio() -> Data {
-        let turn = conversationAudio
-        conversationAudio = Data()
+        let end = min(conversationAudio.count, max(turnStart, turnEnd ?? conversationAudio.count))
+        let start = min(turnStart, end)
+        let turn = conversationAudio.subdata(in: conversationAudio.startIndex + start..<conversationAudio.startIndex + end)
+        conversationAudio = conversationAudio.subdata(in: conversationAudio.startIndex + end..<conversationAudio.endIndex)
         inTurn = false
+        turnStart = 0
+        turnEnd = nil
         return turn
+    }
+
+    /// The finished turn's audio, left in place (to count its voice).
+    private var turnAudio: Data {
+        let end = min(conversationAudio.count, max(turnStart, turnEnd ?? conversationAudio.count))
+        let start = min(turnStart, end)
+        return conversationAudio.subdata(in: conversationAudio.startIndex + start..<conversationAudio.startIndex + end)
     }
 
     // MARK: Push to talk
@@ -1042,9 +1092,9 @@ final class VoiceSession: ObservableObject {
             inputLevel = inputLevel * 0.6 + level * 0.4
             conversationAudio.append(data)
             countTurnVoice()
-            // Between turns keep only the last moment, the start of the next turn.
-            if !inTurn, conversationAudio.count > 2 * Self.turnLeadBytes {
-                conversationAudio = conversationAudio.suffix(Self.turnLeadBytes)
+            // Between turns keep enough for turns OpenAI hasn't found yet (trimmed now and then, not every piece).
+            if !inTurn, conversationAudio.count > Self.keptBetweenTurnsBytes + Self.keptBetweenTurnsBytes / 5 {
+                conversationAudio = conversationAudio.suffix(Self.keptBetweenTurnsBytes)
             }
             // While (re)connecting, audio is dropped: stale speech mustn't start a turn later.
             if sessionReady { sendAudio(data) }
@@ -1062,6 +1112,7 @@ final class VoiceSession: ObservableObject {
     }
 
     private func sendAudio(_ data: Data) {
+        sentBytes += data.count
         client?.send(["type": "input_audio_buffer.append", "audio": data.base64EncodedString()])
     }
 
@@ -1146,6 +1197,7 @@ final class VoiceSession: ObservableObject {
         defer { noteOwnMessages() }
         switch type {
         case "session.created":
+            sentBytes = 0  // OpenAI times audio from the start of each session
             client?.send(sessionConfig())
 
         case "session.updated":
@@ -1173,7 +1225,10 @@ final class VoiceSession: ObservableObject {
             // has real voice in it (countTurnVoice).
             inTurn = true
             turnVoicedFrames = 0
-            turnScanned = 0  // counts from the moment just before, kept in conversationAudio
+            turnStart = audioIndex(event["audio_start_ms"]) ?? max(0, conversationAudio.count - Self.turnLeadBytes)
+            turnEnd = nil
+            turnFromBacklog = conversationAudio.count - turnStart > Self.backlogBytes
+            turnScanned = turnStart
             turnOverIlan = speaker.isPlaying || phase == .speaking
             turnIlanIdle = !turnOverIlan && !responseActive && (phase == .recording || ackWait != nil)
             turnIsSpeech = false
@@ -1181,7 +1236,10 @@ final class VoiceSession: ObservableObject {
             countTurnVoice()
 
         case "input_audio_buffer.speech_stopped":
-            guard conversationActive, turnIsSpeech else { return }
+            guard conversationActive else { return }
+            if inTurn, let end = audioIndex(event["audio_end_ms"]) { turnEnd = max(end, turnStart) }
+            countTurnVoice()
+            guard turnIsSpeech else { return }
             phase = .thinking
 
         case "input_audio_buffer.committed":
@@ -1191,13 +1249,17 @@ final class VoiceSession: ObservableObject {
             var msg = Message(id: itemID, role: .user, text: "", pending: true)
             if conversationActive {
                 let confirmed = turnIsSpeech
-                let voiced = PCM.voicedFrames(conversationAudio)
+                let audio = turnAudio
+                let voiced = PCM.voicedFrames(audio)
                 let speech = confirmed || voiced >= turnVoiceNeeded
                 turnIsSpeech = false
-                onTurn?(["outcome": speech ? "kept" : "dropped: too little voice", "item": itemID,
-                         "voicedFrames": voiced, "needed": turnVoiceNeeded, "overIlan": turnOverIlan,
-                         "seconds": Self.tenths(PCM.seconds(conversationAudio)),
-                         "turnSeconds": Self.tenths(Date().timeIntervalSince(turnStartedAt))])
+                var report: [String: Any] = [
+                    "outcome": speech ? "kept" : "dropped: too little voice", "item": itemID,
+                    "voicedFrames": voiced, "needed": turnVoiceNeeded, "overIlan": turnOverIlan,
+                    "seconds": Self.tenths(PCM.seconds(audio)),
+                    "turnSeconds": Self.tenths(Date().timeIntervalSince(turnStartedAt))]
+                if turnFromBacklog { report["fromCatchUp"] = true }
+                onTurn?(report)
                 guard speech else {
                     // Noise: forget the turn here and at OpenAI; Ilan carries on.
                     _ = takeTurnAudio()
