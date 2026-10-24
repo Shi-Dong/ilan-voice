@@ -13,6 +13,8 @@ final class FakeSpeaker: VoiceOutput {
     func enqueue(_ pcm: Data) { enqueued += 1 }
     func flush() {}
     func stop() { isPlaying = false; stops += 1 }
+    var warmUps = 0
+    func warmUp() { warmUps += 1 }
 }
 
 /// A microphone that hands over 20 ms of loud audio every 20 ms while it runs.
