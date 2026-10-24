@@ -14,7 +14,9 @@ final class FakeSpeaker: VoiceOutput {
     func flush() {}
     func stop() { isPlaying = false; stops += 1 }
     var warmUps = 0
-    func warmUp() { warmUps += 1 }
+    /// How long the headphones take to wake up, as warmUp reports it.
+    var wake: TimeInterval = 0
+    func warmUp() -> TimeInterval { warmUps += 1; return wake }
 }
 
 /// A microphone that hands over 20 ms of loud audio every 20 ms while it runs.

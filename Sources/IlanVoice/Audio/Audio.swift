@@ -162,13 +162,18 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
 /// Headphones on a USB dongle (and Bluetooth ones) power down when nothing
 /// plays, and take a moment to sound again once audio starts, often fading
 /// in to avoid a pop: whatever plays in that moment is lost, usually the
-/// reply's first word. So the speakers are switched on as soon as a reply
-/// is on its way (`StreamPlayer.warmUp`), long before its audio arrives, and
-/// stay on for a while after it. If a reply still finds them off, it starts
-/// with the rest of the wake-up time as silence.
+/// reply's first word. Some (headphone dongles especially) also switch their
+/// amplifier off while they get pure digital silence, even with the output
+/// open: tried on such a dongle, a replay was cut even with the speakers on,
+/// and a second replay right after was whole. So while the speakers are on
+/// they play an inaudible hum (`Hum`), never pure silence; they are switched
+/// on as soon as a reply is on its way (`StreamPlayer.warmUp`), long before
+/// its audio arrives, and stay on for a while after it. If a reply still
+/// finds them off, it starts with the rest of the wake-up time (the hum
+/// alone), and a replay waits that long.
 struct OutputWarmth {
     /// How long headphones may take to sound after switching on.
-    static let wakeSeconds = 0.3
+    static let wakeSeconds = 0.5
     /// How long the speakers stay on with nothing playing (so the headphones can sleep again).
     static let idleSeconds: TimeInterval = 60
     private(set) var onSince: Date?
@@ -180,6 +185,43 @@ struct OutputWarmth {
     func leadSilence(at date: Date = Date()) -> TimeInterval {
         guard let onSince else { return Self.wakeSeconds }
         return max(0, Self.wakeSeconds - date.timeIntervalSince(onSince))
+    }
+}
+
+/// The inaudible hum that keeps headphones awake while the speakers are on:
+/// a 40 Hz tone at about -66 dBFS. Far below hearing (the ear is least
+/// sensitive that low), but never digital silence, which some headphone
+/// dongles take as a cue to switch their amplifier off.
+enum Hum {
+    static let amplitude: Float = 0.0005
+    static let hertz = 40.0
+
+    /// Plays the hum into `engine`'s mixer whenever the engine runs.
+    static func attach(to engine: AVAudioEngine, format: AVAudioFormat) {
+        let wave = Wave(step: 2 * .pi * hertz / format.sampleRate)
+        let node = AVAudioSourceNode(format: format) { _, _, frameCount, audioBufferList in
+            let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
+            for frame in 0..<Int(frameCount) {
+                let value = wave.next()
+                for buffer in buffers { buffer.mData?.assumingMemoryBound(to: Float.self)[frame] = value }
+            }
+            return noErr
+        }
+        engine.attach(node)
+        engine.connect(node, to: engine.mainMixerNode, format: format)
+    }
+
+    /// The tone's phase, kept between render calls (only the audio thread touches it).
+    private final class Wave: @unchecked Sendable {
+        private var phase = 0.0
+        private let step: Double
+        init(step: Double) { self.step = step }
+        func next() -> Float {
+            let value = Float(sin(phase)) * Hum.amplitude
+            phase += step
+            if phase >= 2 * .pi { phase -= 2 * .pi }
+            return value
+        }
     }
 }
 
@@ -212,6 +254,7 @@ final class StreamPlayer {
     init() {
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: format)
+        Hum.attach(to: engine, format: format)
         engine.prepare()
         // macOS stops the engine when the output changes (headphones plugged
         // in or out, another output chosen): the speakers are off again.
@@ -223,11 +266,14 @@ final class StreamPlayer {
         }
     }
 
-    /// Switches the speakers on, if they are off, and keeps them on for now.
-    func warmUp() {
+    /// Switches the speakers on (with the hum), if they are off, and keeps
+    /// them on for now. Returns how long until the headphones are awake.
+    @discardableResult func warmUp() -> TimeInterval {
         idleStop = nil
+        if !engine.isRunning { warmth.switchedOff() }
         switchOn(early: true)
         stopWhenIdle()
+        return warmth.leadSilence()
     }
 
     private func switchOn(early: Bool) {

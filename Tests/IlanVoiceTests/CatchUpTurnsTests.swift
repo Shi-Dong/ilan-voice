@@ -31,7 +31,11 @@ func registerCatchUpTurnsTests() {
             mic.deliver(audio.subdata(in: at..<end))
             at = end
         }
-        waitFor(0.1) { false }  // the session takes each piece on the main queue
+        // The session takes each piece on the main queue, in order: once a
+        // marker queued after them has run, all of them have been taken.
+        var drained = false
+        DispatchQueue.main.async { drained = true }
+        expect(waitFor(1) { drained }, "the audio never reached the session")
     }
     /// One turn as OpenAI reports it, with its times from the start of the session's audio.
     func turn(_ session: VoiceSession, _ item: String, from start: Int, to end: Int) {

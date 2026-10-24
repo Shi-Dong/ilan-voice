@@ -23,12 +23,13 @@ protocol VoiceOutput: AnyObject {
     func enqueue(_ pcm: Data)
     func flush()
     func stop()
-    /// A reply is on its way: get the speakers ready, so its first word isn't lost.
-    func warmUp()
+    /// A reply is on its way: get the speakers ready, so its first word isn't
+    /// lost. Returns how long until they are (0 if they already are).
+    @discardableResult func warmUp() -> TimeInterval
 }
 
 extension VoiceOutput {
-    func warmUp() {}
+    @discardableResult func warmUp() -> TimeInterval { 0 }
 }
 
 /// This Mac's microphone, following the microphone chosen in Settings.
