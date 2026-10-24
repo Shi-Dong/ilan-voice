@@ -59,7 +59,7 @@ func registerWarmOutputTests() {
             store.selectedID = conv.id
             let speaker = FakeSpeaker()
             speaker.isPlaying = false
-            speaker.wake = 0.05  // the speakers were off: the headphones need a moment
+            speaker.wake = 0.02  // the speakers were off: the headphones need a moment
             let session = VoiceSession(store: store, mcp: MCPManager(), input: FakeMic(), output: speaker, target: { conv.id })
             session.conversationID = conv.id
             try PCM.wav(Data(count: 4_800)).write(to: store.audioURL(conv.id, "a1.wav"))
@@ -82,7 +82,7 @@ func registerWarmOutputTests() {
             store.selectedID = conv.id
             let speaker = FakeSpeaker()
             speaker.isPlaying = false
-            speaker.wake = 0.05
+            speaker.wake = 0.02
             let session = VoiceSession(store: store, mcp: MCPManager(), input: FakeMic(), output: speaker, target: { conv.id })
             session.conversationID = conv.id
             try PCM.wav(Data(count: 4_800)).write(to: store.audioURL(conv.id, "a1.wav"))
@@ -90,7 +90,7 @@ func registerWarmOutputTests() {
             store.update(conv.id) { $0.messages.append(reply) }
             session.play(reply)
             expect(session.interrupt(), "a waiting replay counts as something to stop")
-            waitFor(0.12) { false }
+            waitFor(0.06) { false }
             expect(session.clips.playingID == nil, "the replay started after the talk key")
         }
         test("every reply OpenAI starts wakes the speakers, also one after a tool call") {

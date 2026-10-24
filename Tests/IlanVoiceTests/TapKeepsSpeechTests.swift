@@ -70,9 +70,9 @@ final class FakeMic: VoiceInput {
 /// stops Ilan. Every corner case here is driven through a real VoiceSession.
 @MainActor
 func registerTapKeepsSpeechTests() {
-    // The sessions here run on 0.4× tap timings (see makeSession), and
-    // every wait is scaled the same way: the same sequences, in 40% of the time.
-    let speed = 0.4
+    // The sessions here run on half-length tap timings (see makeSession), and
+    // every wait is scaled the same way: the same sequences, in half the time.
+    let speed = 0.5
     func s(_ seconds: Double) -> Double { seconds * speed }
     let window = s(VoiceSession.secondTapWindow)
     /// realTimings: the app's own timings, for a test that compares them with the pill's.
