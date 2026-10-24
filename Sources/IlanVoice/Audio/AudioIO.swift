@@ -23,6 +23,12 @@ protocol VoiceOutput: AnyObject {
     func enqueue(_ pcm: Data)
     func flush()
     func stop()
+    /// A reply is on its way: get the speakers ready, so its first word isn't lost.
+    func warmUp()
+}
+
+extension VoiceOutput {
+    func warmUp() {}
 }
 
 /// This Mac's microphone, following the microphone chosen in Settings.

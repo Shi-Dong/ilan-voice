@@ -2,6 +2,7 @@ import AVFoundation
 import CoreMedia
 import CoreAudio
 import Foundation
+import os
 
 /// The Realtime API speaks 24 kHz, mono, 16-bit little-endian PCM both ways.
 enum PCM {
@@ -155,6 +156,33 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
     }
 }
 
+/// When the speakers were switched on, and so how much silence a reply
+/// needs in front of it.
+///
+/// Headphones on a USB dongle (and Bluetooth ones) power down when nothing
+/// plays, and take a moment to sound again once audio starts, often fading
+/// in to avoid a pop: whatever plays in that moment is lost, usually the
+/// reply's first word. So the speakers are switched on as soon as a reply
+/// is on its way (`StreamPlayer.warmUp`), long before its audio arrives, and
+/// stay on for a while after it. If a reply still finds them off, it starts
+/// with the rest of the wake-up time as silence.
+struct OutputWarmth {
+    /// How long headphones may take to sound after switching on.
+    static let wakeSeconds = 0.3
+    /// How long the speakers stay on with nothing playing (so the headphones can sleep again).
+    static let idleSeconds: TimeInterval = 60
+    private(set) var onSince: Date?
+
+    mutating func switchedOn(at date: Date = Date()) { onSince = date }
+    mutating func switchedOff() { onSince = nil }
+
+    /// Silence to play before a reply starting at `date`: what is left of the wake-up time.
+    func leadSilence(at date: Date = Date()) -> TimeInterval {
+        guard let onSince else { return Self.wakeSeconds }
+        return max(0, Self.wakeSeconds - date.timeIntervalSince(onSince))
+    }
+}
+
 /// Plays PCM16 chunks as they stream in (real-time mode).
 ///
 /// Chunks arrive over the network in uneven bursts. Starting playback on the
@@ -177,11 +205,51 @@ final class StreamPlayer {
     private var heldFrames: AVAudioFrameCount = 0
     /// Main-thread callback once every queued chunk has been heard.
     var onDrained: (() -> Void)?
+    private var warmth = OutputWarmth()
+    private var idleStop: DispatchWorkItem? { didSet { oldValue?.cancel() } }
+    private let log = Logger(subsystem: "me.dongshi.ilan-voice", category: "speakers")
 
     init() {
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: format)
         engine.prepare()
+        // macOS stops the engine when the output changes (headphones plugged
+        // in or out, another output chosen): the speakers are off again.
+        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.warmth.switchedOff()
+            self.engine.connect(self.node, to: self.engine.mainMixerNode, format: self.format)
+            self.log.notice("output changed; the speakers switch on again with the next reply")
+        }
+    }
+
+    /// Switches the speakers on, if they are off, and keeps them on for now.
+    func warmUp() {
+        idleStop = nil
+        switchOn(early: true)
+        stopWhenIdle()
+    }
+
+    private func switchOn(early: Bool) {
+        guard !engine.isRunning else { return }
+        do {
+            try engine.start()
+            warmth.switchedOn()
+            log.notice("speakers switched on \(early ? "early, as a reply is on its way" : "cold, as the reply's audio arrived", privacy: .public)")
+        } catch {
+            log.error("speakers failed to switch on: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Switches the speakers off after `OutputWarmth.idleSeconds` with nothing playing.
+    private func stopWhenIdle() {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.isPlaying else { return }
+            self.engine.stop()
+            self.warmth.switchedOff()
+        }
+        idleStop = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + OutputWarmth.idleSeconds, execute: work)
     }
 
     var isPlaying: Bool { queued > 0 || !held.isEmpty }
@@ -202,7 +270,15 @@ final class StreamPlayer {
     /// (a short reply, or the end of one).
     func flush() {
         guard !held.isEmpty else { return }
-        if !engine.isRunning { try? engine.start() }
+        idleStop = nil
+        if !engine.isRunning { warmth.switchedOff() }
+        switchOn(early: false)
+        // Just switched on: the headphones may still be waking up, so silence goes first.
+        let lead = node.isPlaying ? 0 : warmth.leadSilence()
+        if lead > 0, let silence = makeBuffer(Data(count: Int(lead * PCM.sampleRate) * 2)) {
+            node.scheduleBuffer(silence)  // not counted: nothing of the reply was heard yet
+            log.notice("reply starts with \(Int(lead * 1000)) ms of silence while the speakers wake up")
+        }
         held.forEach(schedule)
         held.removeAll()
         heldFrames = 0
@@ -216,7 +292,8 @@ final class StreamPlayer {
         enqueuedFrames = 0
         playedFrames = 0
         node.stop()
-        engine.stop()
+        // The speakers stay on for a while (a reply may follow at once).
+        if engine.isRunning { stopWhenIdle() }
     }
 
     private func makeBuffer(_ pcm: Data) -> AVAudioPCMBuffer? {
@@ -243,6 +320,7 @@ final class StreamPlayer {
                     // Ran dry: stop so the next chunks prebuffer again instead
                     // of trickling out one by one.
                     self.node.stop()
+                    self.stopWhenIdle()
                     if self.held.isEmpty { self.onDrained?() }
                 }
             }

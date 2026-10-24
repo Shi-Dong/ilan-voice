@@ -326,6 +326,7 @@ final class VoiceSession: ObservableObject {
         guard !targetLiveOnPhone else { errorMessage = Self.liveOnPhoneMessage; return false }
         errorMessage = nil
         interrupt()
+        speaker.warmUp()  // the reply comes in a second or so: the headphones are awake by then
         ensureSession()
         guard conversationID == convID else { return false }
         let itemID = Self.newItemID()
@@ -1117,6 +1118,7 @@ final class VoiceSession: ObservableObject {
     }
 
     private func commit() {
+        speaker.warmUp()
         unsentTurn = pendingUserAudio ?? recording
         client?.send(["type": "input_audio_buffer.commit"])
         client?.send(["type": "response.create"])
@@ -1321,6 +1323,7 @@ final class VoiceSession: ObservableObject {
             retitleWhenSettled(convID)
 
         case "response.created":
+            speaker.warmUp()  // every reply, also one after a tool call
             currentResponseID = (event["response"] as? [String: Any])?["id"] as? String
             if cancelNextResponse {
                 cancelNextResponse = false
