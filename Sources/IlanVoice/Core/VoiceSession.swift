@@ -932,7 +932,8 @@ final class VoiceSession: ObservableObject {
         let replyRequested = phase == .thinking && !responseActive && ackWait == nil
         if replyRequested { cancelNextResponse = true }
         let wasSpeaking = speaker.isPlaying || responseActive || replyRequested || phase == .speaking || phase == .working
-        let wasReplaying = clips.playingID != nil
+        let wasReplaying = clips.playingID != nil || pendingClip != nil
+        pendingClip = nil  // a replay still waiting for the headphones doesn't start
         clips.stop()
         guard wasSpeaking else { return wasReplaying }
         if let itemID = speakingItemID, let start = speakingItemStartFrame, client != nil {
@@ -1723,16 +1724,40 @@ final class VoiceSession: ObservableObject {
         forgetTap()  // chosen after a tap: the tap's late stop mustn't cut it
         speaker.stop()
         store.updateMessage(convID, message.id) { $0.listened = true }
-        clips.toggle(id: message.id, url: store.audioURL(convID, file))
+        playClip(id: message.id, url: store.audioURL(convID, file))
     }
+
+    /// A saved clip is played by macOS's own player, not `speaker`, but the
+    /// headphones are woken the same way: the speakers are switched on (with
+    /// their hum) first, and if they were off, the clip waits until the
+    /// headphones are awake, so its first word isn't lost. Pressing play on
+    /// the clip that is playing (or about to) stops it.
+    private func playClip(id: String, url: URL, onFinish: (() -> Void)? = nil) {
+        if clips.playingID == id || pendingClip?.id == id {
+            pendingClip = nil
+            clips.stop()
+            return
+        }
+        clips.stop()
+        pendingClip = nil
+        let wait = speaker.warmUp()
+        guard wait > 0 else { return clips.toggle(id: id, url: url, onFinish: onFinish) }
+        let start = DispatchWorkItem { [weak self] in
+            self?.pendingClip = nil
+            self?.clips.toggle(id: id, url: url, onFinish: onFinish)
+        }
+        pendingClip = (id, start)
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: start)
+    }
+    /// A clip waiting for the headphones to wake up. (Read by the tests.)
+    private(set) var pendingClip: (id: String, start: DispatchWorkItem)? { didSet { oldValue?.start.cancel() } }
 
     /// Plays the assistant reply heard most recently again from the start,
     /// cutting off anything Ilan is saying now. Not while the talk key is down.
     func replayLast() {
         guard !talkKeyHeld, let last = clips.lastPlayed, FileManager.default.fileExists(atPath: last.url.path) else { return }
         interrupt()
-        clips.stop()
-        clips.toggle(id: last.id, url: last.url)
+        playClip(id: last.id, url: last.url)
     }
 
     /// Plays the oldest reply the user has not heard yet, then the next one.
@@ -1746,7 +1771,7 @@ final class VoiceSession: ObservableObject {
               let next = conv.messages.first(where: { $0.role == .assistant && !$0.listened && $0.audioFile != nil }) else { return }
         let convID = conv.id
         store.updateMessage(convID, next.id) { $0.listened = true }
-        clips.toggle(id: next.id, url: store.audioURL(convID, next.audioFile!)) { [weak self] in
+        playClip(id: next.id, url: store.audioURL(convID, next.audioFile!)) { [weak self] in
             self?.playUnheard()
         }
     }

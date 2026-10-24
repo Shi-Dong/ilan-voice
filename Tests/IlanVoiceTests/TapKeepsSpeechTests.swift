@@ -14,7 +14,9 @@ final class FakeSpeaker: VoiceOutput {
     func flush() {}
     func stop() { isPlaying = false; stops += 1 }
     var warmUps = 0
-    func warmUp() { warmUps += 1 }
+    /// How long the headphones take to wake up, as warmUp reports it.
+    var wake: TimeInterval = 0
+    func warmUp() -> TimeInterval { warmUps += 1; return wake }
 }
 
 /// A microphone that hands over 20 ms of loud audio every 20 ms while it runs.
@@ -68,9 +70,9 @@ final class FakeMic: VoiceInput {
 /// stops Ilan. Every corner case here is driven through a real VoiceSession.
 @MainActor
 func registerTapKeepsSpeechTests() {
-    // The sessions here run on half-length tap timings (see makeSession), and
-    // every wait is scaled the same way: the same sequences, in half the time.
-    let speed = 0.5
+    // The sessions here run on 0.4× tap timings (see makeSession), and
+    // every wait is scaled the same way: the same sequences, in 40% of the time.
+    let speed = 0.4
     func s(_ seconds: Double) -> Double { seconds * speed }
     let window = s(VoiceSession.secondTapWindow)
     /// realTimings: the app's own timings, for a test that compares them with the pill's.
